@@ -5241,6 +5241,7 @@ static struct platform_driver icnss_driver = {
 	},
 };
 
+#ifdef CONFIG_IPC
 static int __init icnss_initialize(void)
 {
 	icnss_debug_init();
@@ -5252,7 +5253,17 @@ static void __exit icnss_exit(void)
 	platform_driver_unregister(&icnss_driver);
 	icnss_debug_deinit();
 }
+#else
+static int __init icnss_initialize(void)
+{
+	return platform_driver_register(&icnss_driver);
+}
 
+static void __exit icnss_exit(void)
+{
+	platform_driver_unregister(&icnss_driver);
+}
+#endif
 
 module_init(icnss_initialize);
 module_exit(icnss_exit);

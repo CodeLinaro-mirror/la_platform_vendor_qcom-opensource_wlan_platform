@@ -866,6 +866,7 @@ void icnss_debugfs_destroy(struct icnss_priv *priv)
 	debugfs_remove_recursive(priv->root_dentry);
 }
 
+#ifdef CONFIG_IPC
 void icnss_debug_init(void)
 {
 	icnss_ipc_log_context = ipc_log_context_create(NUM_LOG_PAGES,
@@ -912,3 +913,4 @@ void icnss_debug_deinit(void)
 		icnss_ipc_soc_wake_context = NULL;
 	}
 }
+#endif

@@ -17,7 +17,9 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#ifdef CONFIG_IPC
 #include <linux/ipc_logging.h>
+#endif
 #include <linux/thread_info.h>
 #include <linux/firmware.h>
 #include <linux/soc/qcom/qmi.h>

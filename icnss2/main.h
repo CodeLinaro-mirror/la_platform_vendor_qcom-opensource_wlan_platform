@@ -10,7 +10,9 @@
 #include <linux/irqreturn.h>
 #include <linux/kobject.h>
 #include <linux/platform_device.h>
+#ifdef CONFIG_IPC
 #include <linux/ipc_logging.h>
+#endif
 #include <linux/power_supply.h>
 #if IS_ENABLED(CONFIG_MSM_QMP)
 #include <linux/mailbox/qmp.h>

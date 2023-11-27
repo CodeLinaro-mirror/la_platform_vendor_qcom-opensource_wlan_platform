@@ -6,7 +6,10 @@
 #ifndef _ICNSS_DEBUG_H
 #define _ICNSS_DEBUG_H
 
+#ifdef CONFIG_IPC
 #include <linux/ipc_logging.h>
+#endif
+
 #include <linux/printk.h>
 
 #define NUM_LOG_PAGES			10
@@ -39,6 +42,7 @@ extern void *icnss_ipc_soc_wake_context;
 #define icnss_ipc_soc_wake_string(_x...)
 #endif
 
+#ifdef CONFIG_IPC
 #define icnss_pr_err(_fmt, ...) do {                                    \
 	printk("%s" pr_fmt(_fmt), KERN_ERR, ##__VA_ARGS__);             \
 	icnss_ipc_log_string("%s" pr_fmt(_fmt), "",                     \
@@ -76,6 +80,35 @@ extern void *icnss_ipc_soc_wake_context;
 	pr_debug(_fmt, ##__VA_ARGS__);                                  \
 	icnss_ipc_soc_wake_string(pr_fmt(_fmt), ##__VA_ARGS__);         \
 	} while (0)
+#else
+#define icnss_pr_err(_fmt, ...) do {                                    \
+	printk("%s" pr_fmt(_fmt), KERN_ERR, ##__VA_ARGS__);             \
+	} while (0)
+
+#define icnss_pr_warn(_fmt, ...) do {                                   \
+	printk("%s" pr_fmt(_fmt), KERN_WARNING, ##__VA_ARGS__);         \
+	} while (0)
+
+#define icnss_pr_info(_fmt, ...) do {                                   \
+	printk("%s" pr_fmt(_fmt), KERN_INFO, ##__VA_ARGS__);            \
+	} while (0)
+
+#define icnss_pr_dbg(_fmt, ...) do {                                    \
+	printk("%s" pr_fmt(_fmt), KERN_INFO, ##__VA_ARGS__);            \
+	} while (0)
+
+#define icnss_pr_vdbg(_fmt, ...) do {                                   \
+	printk("%s" pr_fmt(_fmt), KERN_INFO, ##__VA_ARGS__);            \
+	} while (0)
+
+#define icnss_pr_smp2p(_fmt, ...) do {                                  \
+	printk("%s" pr_fmt(_fmt), KERN_INFO, ##__VA_ARGS__);            \
+	} while (0)
+
+#define icnss_pr_soc_wake(_fmt, ...) do {                               \
+	printk("%s" pr_fmt(_fmt), KERN_INFO, ##__VA_ARGS__);            \
+	} while (0)
+#endif
 
 #ifdef CONFIG_ICNSS2_DEBUG
 #define ICNSS_ASSERT(_condition) do {                                   \
