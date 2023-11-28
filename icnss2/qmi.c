@@ -29,7 +29,9 @@
 #else
 #include <soc/qcom/icnss2.h>
 #endif
+#if 0
 #include <soc/qcom/of_common.h>
+#endif
 #include "wlan_firmware_service_v01.h"
 #include "main.h"
 #include "qmi.h"
@@ -3184,6 +3186,7 @@ int wlfw_host_cap_send_sync(struct icnss_priv *priv)
 		req->wlan_enable_delay = priv->wlan_en_delay_ms;
 	}
 
+#if 0
 	/* ddr_type = 7(LPDDR4) and 8(LPDDR5) */
 	ddr_type = of_fdt_get_ddrtype();
 	if (ddr_type > 0) {
@@ -3191,6 +3194,7 @@ int wlfw_host_cap_send_sync(struct icnss_priv *priv)
 		req->ddr_type_valid = 1;
 		req->ddr_type = ddr_type;
 	}
+#endif
 
 	ret = of_property_read_u32(priv->pdev->dev.of_node, "wlan-en-gpio",
 				   &gpio);

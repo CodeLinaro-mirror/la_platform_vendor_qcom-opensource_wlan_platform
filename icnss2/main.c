@@ -34,10 +34,6 @@
 #include <linux/soc/qcom/qmi.h>
 #include <linux/sysfs.h>
 #include <linux/thermal.h>
-#include <soc/qcom/memory_dump.h>
-#include <soc/qcom/secure_buffer.h>
-#include <soc/qcom/socinfo.h>
-#include <soc/qcom/qcom_ramdump.h>
 #include <linux/soc/qcom/smem.h>
 #include <linux/soc/qcom/smem_state.h>
 #include <linux/remoteproc.h>
@@ -2413,6 +2409,7 @@ static int icnss_wpss_early_ssr_register_notifier(struct icnss_priv *priv)
 {
 	int ret = 0;
 
+#if 0
 	priv->wpss_early_ssr_nb.notifier_call = icnss_wpss_early_notifier_nb;
 
 	priv->wpss_early_notify_handler =
@@ -2423,6 +2420,7 @@ static int icnss_wpss_early_ssr_register_notifier(struct icnss_priv *priv)
 		ret = PTR_ERR(priv->wpss_early_notify_handler);
 		icnss_pr_err("WPSS register early notifier failed: %d\n", ret);
 	}
+#endif
 
 	return ret;
 }
@@ -2621,8 +2619,10 @@ static void icnss_wpss_early_ssr_unregister_notifier(struct icnss_priv *priv)
 	if (IS_ERR(priv->wpss_early_notify_handler))
 		return;
 
+#if 0
 	qcom_unregister_early_ssr_notifier(priv->wpss_early_notify_handler,
 					   &priv->wpss_early_ssr_nb);
+#endif
 	priv->wpss_early_notify_handler = NULL;
 }
 
@@ -2631,8 +2631,10 @@ static int icnss_wpss_ssr_unregister_notifier(struct icnss_priv *priv)
 	if (!test_and_clear_bit(ICNSS_SSR_REGISTERED, &priv->state))
 		return 0;
 
+#if 0
 	qcom_unregister_ssr_notifier(priv->wpss_notify_handler,
 				     &priv->wpss_ssr_nb);
+#endif
 	priv->wpss_notify_handler = NULL;
 
 	return 0;
@@ -3910,11 +3912,13 @@ int icnss_smmu_unmap(struct device *dev,
 }
 EXPORT_SYMBOL(icnss_smmu_unmap);
 
+#if 0
 unsigned int icnss_socinfo_get_serial_number(struct device *dev)
 {
 	return socinfo_get_serial_number();
 }
 EXPORT_SYMBOL(icnss_socinfo_get_serial_number);
+#endif
 
 int icnss_trigger_recovery(struct device *dev)
 {

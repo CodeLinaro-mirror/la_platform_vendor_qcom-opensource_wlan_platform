@@ -490,9 +490,7 @@ struct icnss_priv {
 	bool root_pd_shutdown;
 	struct mbox_client mbox_client_data;
 	struct mbox_chan *mbox_chan;
-#if IS_ENABLED(CONFIG_MSM_QMP)
 	struct qmp *qmp;
-#endif
 	bool use_direct_qmp;
 	u32 wlan_en_delay_ms;
 	u32 wlan_en_delay_ms_user;
