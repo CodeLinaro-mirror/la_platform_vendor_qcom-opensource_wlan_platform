@@ -1841,6 +1841,7 @@ static int icnss_qdss_trace_free_hdlr(struct icnss_priv *priv)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 static int icnss_m3_dump_upload_req_hdlr(struct icnss_priv *priv,
 					 void *data)
 {
@@ -1915,6 +1916,13 @@ send_resp:
 
 	return ret;
 }
+#else
+static int icnss_m3_dump_upload_req_hdlr(struct icnss_priv *priv,
+					 void *data)
+{
+	return 0;
+}
+#endif
 
 static int icnss_subsys_restart_level(struct icnss_priv *priv, void *data)
 {
@@ -2122,6 +2130,7 @@ static void icnss_soc_wake_msg_work(struct work_struct *work)
 	icnss_pm_relax(priv);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 static int icnss_msa0_ramdump(struct icnss_priv *priv)
 {
 	int ret = 0;
@@ -2160,6 +2169,12 @@ static int icnss_msa0_ramdump(struct icnss_priv *priv)
 	list_del(&segment.node);
 	return ret;
 }
+#else
+static int icnss_msa0_ramdump(struct icnss_priv *priv)
+{
+	return 0;
+}
+#endif
 
 static void icnss_update_state_send_modem_shutdown(struct icnss_priv *priv,
 							void *data)
