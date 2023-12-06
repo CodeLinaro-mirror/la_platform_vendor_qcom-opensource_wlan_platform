@@ -466,6 +466,7 @@ bool icnss_is_pdr(void)
 }
 EXPORT_SYMBOL(icnss_is_pdr);
 
+#ifdef CONFIG_SMP2P_V2
 static int icnss_send_smp2p(struct icnss_priv *priv,
 			    enum icnss_smp2p_msg_id msg_id,
 			    enum smp2p_out_entry smp2p_entry)
@@ -529,6 +530,46 @@ static int icnss_send_smp2p(struct icnss_priv *priv,
 
 	return ret;
 }
+#else
+static int icnss_send_smp2p(struct icnss_priv *priv,
+			    enum icnss_smp2p_msg_id msg_id,
+			    enum smp2p_out_entry smp2p_entry)
+{
+	unsigned int value = 0;
+	int ret;
+
+	/*
+	 * MSL1.0 does not support ICNSS_RESET_MSG, ICNSS_SOC_WAKE_REQ and
+	 * ICNSS_SOC_WAKE_REL via smp2p, this indication is via QMI.
+	 */
+
+	if (msg_id == ICNSS_RESET_MSG || msg_id == ICNSS_SOC_WAKE_REQ ||
+	    msg_id == ICNSS_SOC_WAKE_REL)
+		return 0;
+
+	if (IS_ERR(priv->smp2p_info[ICNSS_SMP2P_OUT_POWER_SAVE].smem_state))
+		return -EINVAL;
+
+	if (test_bit(ICNSS_FW_DOWN, &priv->state))
+		return -ENODEV;
+
+	value |= priv->smp2p_info[ICNSS_SMP2P_OUT_POWER_SAVE].seq++;
+	value <<= ICNSS_SMEM_SEQ_NO_POS;
+	value |= msg_id;
+
+	icnss_pr_smp2p("Sending SMP2P value: 0x%X\n", value);
+
+	ret = qcom_smem_state_update_bits(
+			priv->smp2p_info[ICNSS_SMP2P_OUT_POWER_SAVE].smem_state,
+			ICNSS_SMEM_VALUE_MASK,
+			value);
+	if (ret)
+		icnss_pr_smp2p("Error in SMP2P send ret: %d\n", ret);
+
+	return ret;
+
+}
+#endif
 
 bool icnss_is_low_power(void)
 {
