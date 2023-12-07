@@ -31,7 +31,7 @@
 #define THERMAL_NAME_LENGTH 20
 #define ICNSS_SMEM_VALUE_MASK 0xFFFFFFFF
 #define ICNSS_SMEM_SEQ_NO_POS 16
-#define QCA6750_PATH_PREFIX    "qca6750/"
+#define QCA6750_PATH_PREFIX    "qcom/qcm6490/"
 #define ADRASTEA_PATH_PREFIX   "adrastea/"
 #define WCN6450_PATH_PREFIX    "wcn6450/"
 #define ICNSS_MAX_FILE_NAME      35
