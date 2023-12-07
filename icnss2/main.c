@@ -795,11 +795,34 @@ qmi_send:
 	return ret;
 }
 
+#ifdef CONFIG_SMP2P_V2
+static bool icnss_smp2p_entry_valid(enum smp2p_out_entry smp2p_entry)
+{
+	if (smp2p_entry == ICNSS_SMP2P_OUT_POWER_SAVE ||
+	    smp2p_entry == ICNSS_SMP2P_OUT_SOC_WAKE ||
+	    smp2p_entry == ICNSS_SMP2P_OUT_EP_POWER_SAVE)
+		return true;
+
+	return false;
+}
+#else
+static bool icnss_smp2p_entry_valid(enum smp2p_out_entry smp2p_entry)
+{
+	if (smp2p_entry == ICNSS_SMP2P_OUT_POWER_SAVE)
+		return true;
+
+	return false;
+}
+#endif
+
 static void icnss_get_smp2p_info(struct icnss_priv *priv,
 				 enum smp2p_out_entry smp2p_entry)
 {
 	int retry = 0;
 	int error;
+
+	if (!icnss_smp2p_entry_valid(smp2p_entry))
+		return;
 
 	if (priv->smp2p_info[smp2p_entry].smem_state)
 		return;
@@ -1468,6 +1491,7 @@ static int icnss_qdss_trace_req_data_hdlr(struct icnss_priv *priv,
 	return ret;
 }
 
+#ifdef CONFIG_SMP2P_V2
 static int icnss_event_soc_wake_request(struct icnss_priv *priv, void *data)
 {
 	int ret = 0;
@@ -1488,7 +1512,29 @@ static int icnss_event_soc_wake_request(struct icnss_priv *priv, void *data)
 
 	return ret;
 }
+#else
+static int icnss_event_soc_wake_request(struct icnss_priv *priv, void *data)
+{
+	int ret = 0;
 
+	if (!priv)
+		return -ENODEV;
+
+	if (atomic_inc_not_zero(&priv->soc_wake_ref_count)) {
+		icnss_pr_soc_wake("SOC awake after posting work, Ref count: %d",
+				  atomic_read(&priv->soc_wake_ref_count));
+		return 0;
+	}
+
+	ret = wlfw_send_soc_wake_msg(priv, QMI_WLFW_WAKE_REQUEST_V01);
+	if (!ret)
+		atomic_inc(&priv->soc_wake_ref_count);
+
+	return ret;
+}
+#endif
+
+#ifdef CONFIG_SMP2P_V2
 static int icnss_event_soc_wake_release(struct icnss_priv *priv, void *data)
 {
 	int ret = 0;
@@ -1506,6 +1552,25 @@ static int icnss_event_soc_wake_release(struct icnss_priv *priv, void *data)
 			       ICNSS_SMP2P_OUT_SOC_WAKE);
 	return ret;
 }
+#else
+static int icnss_event_soc_wake_release(struct icnss_priv *priv, void *data)
+{
+	int ret = 0;
+
+	if (!priv)
+		return -ENODEV;
+
+	if (atomic_dec_if_positive(&priv->soc_wake_ref_count)) {
+		icnss_pr_soc_wake("Wake release not called. Ref count: %d",
+				  priv->soc_wake_ref_count);
+		return 0;
+	}
+
+	ret = wlfw_send_soc_wake_msg(priv, QMI_WLFW_WAKE_RELEASE_V01);
+
+	return ret;
+}
+#endif
 
 static int icnss_driver_event_register_driver(struct icnss_priv *priv,
 							 void *data)
