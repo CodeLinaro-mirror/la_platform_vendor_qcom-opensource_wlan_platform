@@ -23,6 +23,10 @@
 #include "pci_platform.h"
 #include "reg.h"
 
+#ifdef CONFIG_CNSS2_SMMU_DB_SUPPORT
+#include <linux/qcom-iommu-util.h>
+#endif
+
 #define PCI_LINK_UP			1
 #define PCI_LINK_DOWN			0
 
@@ -53,7 +57,6 @@
 #define DEFAULT_FW_FILE_NAME		"amss.bin"
 #define FW_V2_FILE_NAME			"amss20.bin"
 #define FW_V2_FTM_FILE_NAME		"amss20_ftm.bin"
-#define DEVICE_MAJOR_VERSION_MASK	0xF
 
 #define WAKE_MSI_NAME			"WAKE"
 
@@ -780,8 +783,6 @@ static struct cnss_print_optimize print_optimize;
 
 static int cnss_pci_update_fw_name(struct cnss_pci_data *pci_priv);
 static void cnss_pci_suspend_pwroff(struct pci_dev *pci_dev);
-static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev);
-
 
 #if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 static void cnss_mhi_debug_reg_dump(struct cnss_pci_data *pci_priv)
@@ -1525,11 +1526,7 @@ void cnss_pci_handle_linkdown(struct cnss_pci_data *pci_priv)
 	pci_priv->pci_link_down_ind = true;
 	spin_unlock_irqrestore(&pci_link_down_lock, flags);
 
-	if (pci_priv->mhi_ctrl) {
-		/* Notify MHI about link down*/
-		mhi_report_error(pci_priv->mhi_ctrl);
-	}
-
+	cnss_mhi_report_error(pci_priv);
 	if (pci_dev->device == QCA6174_DEVICE_ID)
 		disable_irq_nosync(pci_dev->irq);
 
@@ -6638,48 +6635,6 @@ static void cnss_mhi_write_reg(struct mhi_controller *mhi_ctrl,
 	writel_relaxed(val, addr);
 }
 
-static int cnss_get_mhi_soc_info(struct cnss_plat_data *plat_priv,
-				 struct mhi_controller *mhi_ctrl)
-{
-	int ret = 0;
-
-	ret = mhi_get_soc_info(mhi_ctrl);
-	if (ret)
-		goto exit;
-
-	plat_priv->device_version.family_number = mhi_ctrl->family_number;
-	plat_priv->device_version.device_number = mhi_ctrl->device_number;
-	plat_priv->device_version.major_version = mhi_ctrl->major_version;
-	plat_priv->device_version.minor_version = mhi_ctrl->minor_version;
-
-	cnss_pr_dbg("Get device version info, family number: 0x%x, device number: 0x%x, major version: 0x%x, minor version: 0x%x\n",
-		    plat_priv->device_version.family_number,
-		    plat_priv->device_version.device_number,
-		    plat_priv->device_version.major_version,
-		    plat_priv->device_version.minor_version);
-
-	/* Only keep lower 4 bits as real device major version */
-	plat_priv->device_version.major_version &= DEVICE_MAJOR_VERSION_MASK;
-
-exit:
-	return ret;
-}
-
-static bool cnss_is_tme_supported(struct cnss_pci_data *pci_priv)
-{
-	if (!pci_priv) {
-		cnss_pr_dbg("pci_priv is NULL");
-		return false;
-	}
-
-	switch (pci_priv->device_id) {
-	case PEACH_DEVICE_ID:
-		return true;
-	default:
-		return false;
-	}
-}
-
 static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -6768,8 +6723,7 @@ static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 			cnss_mhi_config = &cnss_mhi_config_no_satellite;
 	}
 
-	mhi_ctrl->tme_supported_image = cnss_is_tme_supported(pci_priv);
-
+	cnss_pci_set_tme_support(mhi_ctrl, pci_priv);
 	ret = mhi_register_controller(mhi_ctrl, cnss_mhi_config);
 	if (ret) {
 		cnss_pr_err("Failed to register to MHI bus, err = %d\n", ret);
@@ -7066,29 +7020,6 @@ static int cnss_pci_get_dev_cfg_node(struct cnss_plat_data *plat_priv)
 
 	return -EINVAL;
 }
-
-#ifdef CONFIG_CNSS2_CONDITIONAL_POWEROFF
-static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev)
-{
-	bool suspend_pwroff;
-
-	switch (pci_dev->device) {
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-		suspend_pwroff = false;
-		break;
-	default:
-		suspend_pwroff = true;
-	}
-
-	return suspend_pwroff;
-}
-#else
-static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev)
-{
-	return true;
-}
-#endif
 
 static int cnss_pci_set_gen2_speed(struct cnss_plat_data *plat_priv, u32 rc_num)
 {
@@ -7491,7 +7422,8 @@ int cnss_pci_init(struct cnss_plat_data *plat_priv)
 				    ret);
 			goto out;
 		}
-		if (!plat_priv->bus_priv) {
+
+		if (cnss_pci_is_sync_probe() && !plat_priv->bus_priv) {
 			cnss_pr_err("Failed to probe PCI driver\n");
 			ret = -ENODEV;
 			goto unreg_pci;

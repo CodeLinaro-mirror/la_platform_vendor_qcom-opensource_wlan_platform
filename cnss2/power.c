@@ -9,7 +9,9 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/pinctrl/consumer.h>
+#ifdef CONFIG_CNSS_PINCTRL_MSM
 #include <linux/pinctrl/qcom-pinctrl.h>
+#endif
 #include <linux/regulator/consumer.h>
 #if IS_ENABLED(CONFIG_QCOM_COMMAND_DB)
 #include <soc/qcom/cmd-db.h>
@@ -781,13 +783,52 @@ static int cnss_clk_off(struct cnss_plat_data *plat_priv,
 	return 0;
 }
 
+#ifdef CONFIG_CNSS_PINCTRL_MSM
+static void cnss_set_wakeup_cap_for_gpios(struct device *dev)
+{
+	int ret;
+	u32 gpio_id, i;
+	int gpio_id_n;
+
+	/* Find out and configure all those GPIOs which need to be setup
+	 * for interrupt wakeup capable
+	 */
+	gpio_id_n = of_property_count_u32_elems(dev->of_node, "mpm_wake_set_gpios");
+	cnss_pr_dbg("Num of GPIOs to be setup for interrupt wakeup capable: %d\n",
+		    gpio_id_n);
+	if (gpio_id_n <= 0)
+		return;
+
+	for (i = 0; i < gpio_id_n; i++) {
+		ret = of_property_read_u32_index(dev->of_node,
+						 "mpm_wake_set_gpios",
+						 i, &gpio_id);
+		if (ret) {
+			cnss_pr_err("Failed to read gpio_id at index: %d\n", i);
+			continue;
+		}
+
+		ret = msm_gpio_mpm_wake_set(gpio_id, 1);
+		if (ret < 0) {
+			cnss_pr_err("Failed to setup gpio_id: %d as interrupt wakeup capable, ret: %d\n",
+				    gpio_id, ret);
+		} else {
+			cnss_pr_dbg("gpio_id: %d successfully setup for interrupt wakeup capable\n",
+				    gpio_id);
+		}
+	}
+}
+#else
+static inline void cnss_set_wakeup_cap_for_gpios(struct device *dev)
+{
+}
+#endif
+
 int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
 	struct device *dev;
 	struct cnss_pinctrl_info *pinctrl_info;
-	u32 gpio_id, i;
-	int gpio_id_n;
 
 	dev = &plat_priv->plat_dev->dev;
 	pinctrl_info = &plat_priv->pinctrl_info;
@@ -884,35 +925,7 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 		pinctrl_info->sw_ctrl_gpio = -EINVAL;
 	}
 
-	/* Find out and configure all those GPIOs which need to be setup
-	 * for interrupt wakeup capable
-	 */
-	gpio_id_n = of_property_count_u32_elems(dev->of_node, "mpm_wake_set_gpios");
-	if (gpio_id_n > 0) {
-		cnss_pr_dbg("Num of GPIOs to be setup for interrupt wakeup capable: %d\n",
-			    gpio_id_n);
-		for (i = 0; i < gpio_id_n; i++) {
-			ret = of_property_read_u32_index(dev->of_node,
-							 "mpm_wake_set_gpios",
-							 i, &gpio_id);
-			if (ret) {
-				cnss_pr_err("Failed to read gpio_id at index: %d\n", i);
-				continue;
-			}
-
-			ret = msm_gpio_mpm_wake_set(gpio_id, 1);
-			if (ret < 0) {
-				cnss_pr_err("Failed to setup gpio_id: %d as interrupt wakeup capable, ret: %d\n",
-					    ret);
-			} else {
-				cnss_pr_dbg("gpio_id: %d successfully setup for interrupt wakeup capable\n",
-					    gpio_id);
-			}
-		}
-	} else {
-		cnss_pr_dbg("No GPIOs to be setup for interrupt wakeup capable\n");
-	}
-
+	cnss_set_wakeup_cap_for_gpios(dev);
 	return 0;
 out:
 	return ret;
@@ -1626,6 +1639,12 @@ end:
 	return ret;
 }
 
+static inline bool
+cnss_is_ready_for_aop_vreg_set(struct cnss_plat_data *plat_priv)
+{
+	return (plat_priv->vreg_ol_cpr &&
+		(plat_priv->mbox_chan || plat_priv->qmp));
+}
 #else
 int cnss_aop_interface_init(struct cnss_plat_data *plat_priv)
 {
@@ -1659,6 +1678,12 @@ int cnss_aop_ol_cpr_cfg_setup(struct cnss_plat_data *plat_priv,
 			      struct wlfw_pmu_cfg_v01 *fw_pmu_cfg)
 {
 	return 0;
+}
+
+static inline bool
+cnss_is_ready_for_aop_vreg_set(struct cnss_plat_data *plat_priv)
+{
+	return (plat_priv->vreg_ol_cpr && plat_priv->mbox_chan);
 }
 #endif
 
@@ -1783,8 +1808,7 @@ int cnss_update_cpr_info(struct cnss_plat_data *plat_priv)
 	if (plat_priv->device_id != QCA6490_DEVICE_ID)
 		return -EINVAL;
 
-	if (!plat_priv->vreg_ol_cpr ||
-	    (!plat_priv->mbox_chan && !plat_priv->qmp)) {
+	if (!cnss_is_ready_for_aop_vreg_set(plat_priv)) {
 		cnss_pr_dbg("Mbox channel / QMP / OL CPR Vreg not configured\n");
 	} else {
 		return cnss_aop_set_vreg_param(plat_priv,
@@ -1864,8 +1888,7 @@ int cnss_enable_int_pow_amp_vreg(struct cnss_plat_data *plat_priv)
 		return 0;
 	}
 
-	if (!plat_priv->vreg_ipa ||
-	    (!plat_priv->mbox_chan && !plat_priv->qmp)) {
+	if (!cnss_is_ready_for_aop_vreg_set(plat_priv)) {
 		cnss_pr_dbg("Mbox channel / QMP / IPA Vreg not configured\n");
 	} else {
 		ret = cnss_aop_set_vreg_param(plat_priv,
