@@ -110,6 +110,7 @@ static struct cnss_pool cnss_pools_wcn6750[] = {
 struct cnss_pool *cnss_pools;
 unsigned int cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
 spinlock_t pool_table_lock;
+bool mempool_initialization_done;
 
 /**
  * cnss_pool_alloc_threshold() - Allocation threshold
@@ -211,6 +212,7 @@ static int cnss_pool_init(void)
 		cnss_stack_track_init(&cnss_pools[i]);
 	}
 
+	mempool_initialization_done = true;
 	spin_lock_init(&pool_table_lock);
 
 	return 0;
@@ -242,6 +244,7 @@ static void cnss_pool_deinit(void)
 
 		cnss_stack_track_deinit(&cnss_pools[i]);
 	}
+	mempool_initialization_done = false;
 }
 
 static void cnss_assign_prealloc_pool(unsigned long device_id)
@@ -534,7 +537,7 @@ void *wcnss_prealloc_get(size_t size)
 	int i;
 	int ret = 0;
 
-	if (!cnss_pools)
+	if (!cnss_pools || !mempool_initialization_done)
 		return mem;
 
 	if (in_interrupt() || !preemptible() || rcu_preempt_depth())
@@ -595,7 +598,7 @@ int wcnss_prealloc_put(void *mem)
 	int ret;
 	unsigned long irq_flags;
 
-	if (!mem || !cnss_pools)
+	if (!mem || !cnss_pools || !mempool_initialization_done)
 		return 0;
 
 	for (i = 0; i < cnss_prealloc_pool_size; i++) {
@@ -665,7 +668,7 @@ int wcnss_prealloc_put(void *mem)
 	int ret;
 	unsigned long irq_flags;
 
-	if (!mem || !cnss_pools)
+	if (!mem || !cnss_pools || !mempool_initialization_done)
 		return 0;
 
 	i = cnss_pool_get_index(mem);
