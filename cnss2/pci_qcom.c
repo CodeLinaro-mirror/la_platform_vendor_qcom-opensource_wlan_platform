@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) 2022-2026 Qualcomm Innovation Center, Inc. All rights reserved. */
 
 #include "pci_platform.h"
 #include "debug.h"
@@ -426,6 +426,93 @@ int cnss_set_pci_pwrctrl(struct cnss_pci_data *pci_priv, bool power_on)
 
 	return __cnss_set_pci_link(pci_priv, power_on);
 }
+
+#ifdef CONFIG_PCIE_SWITCH_SUPPORT
+int cnss_pci_dsp_link_control(struct cnss_pci_data *pci_priv,
+			      bool link_enable)
+{
+	if (!pci_priv)
+		return -ENODEV;
+
+	pci_priv->pci_dsp_link_status = link_enable;
+	return msm_pcie_dsp_link_control(pci_priv->pci_dev, link_enable);
+}
+
+int cnss_pci_set_dsp_link_status(struct cnss_pci_data *pci_priv,
+				 bool link_enable)
+{
+	if (!pci_priv)
+		return -ENODEV;
+
+	pci_priv->pci_dsp_link_status = link_enable;
+
+	return 0;
+}
+
+int cnss_pci_get_dsp_link_status(struct cnss_pci_data *pci_priv)
+{
+	if (!pci_priv)
+		return -ENODEV;
+
+	return pci_priv->pci_dsp_link_status;
+}
+
+int cnss_pci_dsp_link_enable(struct cnss_pci_data *pci_priv)
+{
+	int ret = 0;
+	int retry_count = 0;
+	struct cnss_plat_data *plat_priv;
+
+	if (!pci_priv)
+		return -ENODEV;
+
+	plat_priv = pci_priv->plat_priv;
+	/* For PCIe switch platform, wait for link train of DSP<->WLAN complete
+	 */
+	while (retry_count++ < DSP_LINK_ENABLE_RETRY_COUNT_MAX) {
+		ret = cnss_pci_dsp_link_control(pci_priv, true);
+		if (!ret)
+			break;
+
+		cnss_pci_dsp_link_control(pci_priv, false);
+		cnss_pr_err("DSP<->WLAN link train failed, retry...\n");
+		usleep_range(DSP_LINK_ENABLE_DELAY_TIME_US_MIN,
+			     DSP_LINK_ENABLE_DELAY_TIME_US_MAX);
+		ret = cnss_select_pinctrl_enable(plat_priv);
+		if (ret) {
+			cnss_pr_err("Failed to select pinctrl state, err = %d\n", ret);
+			return ret;
+		}
+		usleep_range(DSP_LINK_ENABLE_DELAY_TIME_US_MIN,
+			     DSP_LINK_ENABLE_DELAY_TIME_US_MAX);
+
+	}
+
+	return ret;
+}
+#else
+int cnss_pci_dsp_link_control(struct cnss_pci_data *pci_priv,
+			      bool link_enable)
+{
+	return -EOPNOTSUPP;
+}
+
+int cnss_pci_set_dsp_link_status(struct cnss_pci_data *pci_priv,
+				 bool link_enable)
+{
+	return -EOPNOTSUPP;
+}
+
+int cnss_pci_get_dsp_link_status(struct cnss_pci_data *pci_priv)
+{
+	return -EOPNOTSUPP;
+}
+
+int cnss_pci_dsp_link_enable(struct cnss_pci_data *pci_priv)
+{
+	return -EOPNOTSUPP;
+}
+#endif
 
 int cnss_pci_prevent_l1(struct device *dev)
 {
