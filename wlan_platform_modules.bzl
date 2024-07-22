@@ -185,6 +185,27 @@ def _define_modules_for_target_variant(target, variant):
                 ],
                     "//build/qcom_build_extensions:qtisocrepo_false": [],
             })
+
+        feature_grep_map = [
+            {
+                "pattern": "msm_pcie_dsp_link_control",
+                "file": "include/linux/msm_pcie.h",
+                "flag": "CONFIG_PCIE_SWITCH_SUPPORT",
+            },
+        ]
+
+        cmd = 'touch "$@"\n'
+        for feature_grep in feature_grep_map:
+            cmd += """
+                if grep -qF "{pattern}" $(location //msm-kernel:{file}); then
+                    echo "#define {flag} (1)" >> "$@"
+                fi
+        """.format(
+            pattern = feature_grep["pattern"],
+            file = feature_grep["file"],
+            flag = feature_grep["flag"],
+        )
+
         ddk_module(
             name = "{}_cnss2".format(tv),
             srcs = native.glob([

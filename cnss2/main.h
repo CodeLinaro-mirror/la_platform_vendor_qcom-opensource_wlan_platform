@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2026 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CNSS_MAIN_H
@@ -1028,4 +1028,6 @@ static inline int cnss_timer_delete_sync(struct timer_list *timer)
 #endif
 
 void cnss_power_ctrl_mode_init(struct cnss_plat_data *plat_priv);
+int cnss_select_pinctrl_enable(struct cnss_plat_data *plat_priv);
+int cnss_select_pinctrl_state(struct cnss_plat_data *plat_priv, bool state);
 #endif /* _CNSS_MAIN_H */

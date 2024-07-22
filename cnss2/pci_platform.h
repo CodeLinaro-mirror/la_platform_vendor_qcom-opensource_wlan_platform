@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) 2022-2024,2026 Qualcomm Innovation Center, Inc. All rights reserved. */
 
 #ifndef _CNSS_PCI_PLATFORM_H
 #define _CNSS_PCI_PLATFORM_H
@@ -125,6 +125,8 @@ int cnss_pci_init_smmu(struct cnss_pci_data *pci_priv);
 void cnss_pci_update_drv_supported(struct cnss_pci_data *pci_priv);
 int cnss_pci_get_link_status(struct cnss_pci_data *pci_priv);
 
+int cnss_pci_dsp_link_control(struct cnss_pci_data *pci_priv,
+			      bool link_enable);
 /**
  * _cnss_pci_get_reg_dump() - Dump PCIe RC registers for debug
  * @pci_priv: driver PCI bus context pointer
@@ -138,9 +140,12 @@ int cnss_pci_get_link_status(struct cnss_pci_data *pci_priv);
  */
 int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 			   u8 *buf, u32 len);
-
 void cnss_pci_init_warm_reset_params(struct cnss_pci_data *pci_priv);
 int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on);
+int cnss_pci_set_dsp_link_status(struct cnss_pci_data *pci_priv,
+				 bool link_enable);
+int cnss_pci_get_dsp_link_status(struct cnss_pci_data *pci_priv);
+int cnss_pci_dsp_link_enable(struct cnss_pci_data *pci_priv);
 #else
 int _cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
 {
@@ -255,6 +260,26 @@ cnss_pci_init_warm_reset_params(struct cnss_pci_data *pci_priv)
 int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on)
 {
 	return 0;
+int cnss_pci_dsp_link_control(struct cnss_pci_data *pci_priv,
+			      bool link_enable)
+{
+	return -EOPNOTSUPP;
+}
+
+int cnss_pci_set_dsp_link_status(struct cnss_pci_data *pci_priv,
+				 bool link_enable)
+{
+	return -EOPNOTSUPP;
+}
+
+int cnss_pci_get_dsp_link_status(struct cnss_pci_data *pci_priv)
+{
+	return -EOPNOTSUPP;
+}
+
+int cnss_pci_dsp_link_enable(struct cnss_pci_data *pci_priv)
+{
+	return -EOPNOTSUPP;
 }
 #endif /* CONFIG_PCI_MSM */
 

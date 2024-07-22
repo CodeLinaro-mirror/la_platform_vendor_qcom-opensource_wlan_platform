@@ -116,6 +116,11 @@ ifeq ($(CONFIG_CNSS_SHUTDOWN_CALLBACK),y)
 KBUILD_CPPFLAGS += -DCONFIG_CNSS_SHUTDOWN_CALLBACK
 endif
 
+found = $(shell if grep -qF "int msm_pcie_dsp_link_control" $(srctree)/include/linux/msm_pcie.h; then echo "yes" ;else echo "no" ;fi;)
+ifeq ($(findstring yes, $(found)), yes)
+KBUILD_CPPFLAGS += -DCONFIG_PCIE_SWITCH_SUPPORT
+endif
+
 obj-$(CONFIG_CNSS2) += cnss2/
 obj-$(CONFIG_ICNSS2) += icnss2/
 obj-$(CONFIG_CNSS_GENL) += cnss_genl/
