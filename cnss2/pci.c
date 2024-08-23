@@ -1959,6 +1959,37 @@ out:
 	return ret;
 }
 
+#ifndef CONFIG_NOT_SET_PCI_DSTATE
+
+#define PCIE_SWITCH_CONFIG_SPACE_ACCESS_TIMEOUT 2000
+#define PCIE_SWITCH_CONFIG_SPACE_ACCESS_DELAY 20
+static int
+cnss_pci_set_power_state(struct pci_dev *pci_dev, pci_power_t state)
+{
+	int timeout = PCIE_SWITCH_CONFIG_SPACE_ACCESS_TIMEOUT;
+	int ret = 0;
+	if (!pci_dev) {
+		cnss_pr_err("pci dev is NULL\n");
+		return -EINVAL;
+	}
+
+	do {
+		ret = pci_set_power_state(pci_dev, state);
+		if (ret == 0)
+			break;
+		msleep(PCIE_SWITCH_CONFIG_SPACE_ACCESS_DELAY);
+		timeout -= PCIE_SWITCH_CONFIG_SPACE_ACCESS_DELAY;
+	} while (timeout > 0);
+	return ret;
+}
+#else
+static int
+cnss_pci_set_power_state(struct pci_dev *pci_dev, pci_power_t state)
+{
+	return 0;
+}
+#endif
+
 int cnss_resume_pci_link(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -2003,7 +2034,7 @@ int cnss_resume_pci_link(struct cnss_pci_data *pci_priv)
 	pci_priv->pci_link_state = PCI_LINK_UP;
 
 	if (pci_priv->pci_dev->device != QCA6174_DEVICE_ID) {
-		ret = pci_set_power_state(pci_priv->pci_dev, PCI_D0);
+		ret = cnss_pci_set_power_state(pci_priv->pci_dev, PCI_D0);
 		if (ret) {
 			cnss_pr_err("Failed to set D0, err = %d\n", ret);
 			goto out;
@@ -4899,34 +4930,6 @@ static int cnss_pci_resume_driver(struct cnss_pci_data *pci_priv)
 
 	return ret;
 }
-
-#ifndef CONFIG_NOT_SET_PCI_DSTATE
-static void
-cnss_pci_set_power_state(struct pci_dev *pci_dev, pci_power_t state)
-{
-	int ret = 0;
-
-	if (!pci_dev) {
-		cnss_pr_err("pci dev is NULL\n");
-		return;
-	}
-
-	ret = pci_set_power_state(pci_dev, state);
-	if (ret) {
-		/* corresponding states and values:
-		 * PCI_D0=0, PCI_D1=1, PCI_D2=2, PCI_D3hot=3, PCI_D3cold=4
-		 * PCI_UNKNOWN=5, PCI_POWER_ERROR=-1
-		 */
-		cnss_pr_err("Failed to set power state %d, err = %d\n",
-			    state, ret);
-	}
-}
-#else
-static void
-cnss_pci_set_power_state(struct pci_dev *pci_dev, pci_power_t state)
-{
-}
-#endif
 
 int cnss_pci_suspend_bus(struct cnss_pci_data *pci_priv)
 {
