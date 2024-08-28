@@ -16,6 +16,8 @@
 #include <linux/suspend.h>
 #include <linux/version.h>
 #include <linux/sched.h>
+#include <linux/nmi.h>
+#include <linux/stacktrace.h>
 #include "main.h"
 #include "bus.h"
 #include "debug.h"
@@ -1929,6 +1931,117 @@ int cnss_get_pci_slot(struct device *dev)
 }
 EXPORT_SYMBOL(cnss_get_pci_slot);
 
+#define SBL_LINE_LEN_MAX 81
+#define SBL_CONSECUTIVE_ZEROS_MAX 4
+
+/**
+ * cnss_dump_line_buf - dump logs in the buffer
+ * @line_buf: buffer which holds the logs
+ * @data_len: length of the data to be dumped
+ * @dumpall: indicates whether to dump all of the data
+ *
+ * Return: size of data which have not been dumped
+ */
+static u32 cnss_dump_line_buf(char *line_buf, u32 data_len, bool dumpall)
+{
+	char *ptr, *res;
+	const char *delim = "\n";
+	u32 cur = 0;
+
+	ptr = line_buf;
+	while ((res = strsep(&ptr, delim)) != NULL) {
+		if (ptr) {
+			if (strlen(res))
+				cnss_pr_dbg("%s\n", res);
+			continue;
+		}
+
+		/* no delimiter was found */
+		cur = strlen(res);
+		if (cur) {
+			/**
+			 * If dumpall or less than 4 bytes have been dumped,
+			 * dump the data directly;
+			 * otherwise, pass the data to the next print
+			 */
+			if (dumpall || (res - line_buf < 4))
+				cnss_pr_dbg("%s\n", res);
+			else
+				memmove(line_buf, res, cur);
+		}
+
+		break;
+	}
+
+	memset(line_buf + cur, 0, data_len - cur);
+	return cur;
+}
+
+/**
+ * cnss_pci_dump_reg - read debug log from register and dump
+ * @pci_priv: driver PCI bus context pointer
+ * @start_addr: start address
+ * @size: size(in bytes) of the log
+ *
+ * Example of the output:
+ * Dumping SBL log data(@0x182d000[4096]) start
+ * Format: Log Type - Time(microsec) - Message - Optional Info
+ * Log Type: B - Since Boot(Power On Reset), D - Delta, S - Statistic
+ * B -	     110740 - SBL, Start
+ * B -	     111032 - err code is0x302e
+ * B -	     111039 - line number is0x5d
+ * B -	     111044 - file name is
+ * B -	     111050 - boot_stack.c
+ * Dumping SBL log data(@0x182d000[4096]) has been completed
+ *
+ * Return: 0 on success, negative value otherwise.
+ */
+static int cnss_pci_dump_sbl_log(struct cnss_pci_data *pci_priv,
+				 u32 start_addr, u32 size)
+{
+	char line_buf[SBL_LINE_LEN_MAX] = {0};
+	int i, ret = 0;
+	u32 offset, *val, count, consecutive_zeros = 0, cur = 0;
+
+	cnss_pr_dbg("Dumping SBL log data(@0x%x[%u]) start\n",
+		    start_addr, size);
+
+	count = size / sizeof(u32);
+	for (i = 0; i < count; i++) {
+		offset = start_addr + i * sizeof(u32);
+		val = (u32 *)(&line_buf[cur]);
+		ret = cnss_pci_reg_read(pci_priv, offset, val);
+		if (ret) {
+			cnss_pr_err("Failed to read reg 0x%x, ret: %d\n",
+				    offset, ret);
+			break;
+		}
+
+		if (!(*val)) {
+			/* no more data */
+			if (consecutive_zeros++ >= SBL_CONSECUTIVE_ZEROS_MAX)
+				break;
+
+			continue;
+		} else {
+			consecutive_zeros = 0;
+		}
+
+		cur += sizeof(u32);
+
+		/* no more space to read a new u32 */
+		if (cur > SBL_LINE_LEN_MAX - 5)
+			cur = cnss_dump_line_buf(line_buf, cur, false);
+	}
+
+	if (cur)
+		cnss_dump_line_buf(line_buf, cur, true);
+
+	cnss_pr_dbg("Dumping SBL log data(@0x%x[%u]) ret: %d\n",
+		    start_addr, size, ret);
+	return ret;
+}
+
 /**
  * cnss_pci_dump_bl_sram_mem - Dump WLAN device bootloader debug log
  * @pci_priv: driver PCI bus context pointer
@@ -1980,6 +2093,7 @@ static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 		pbl_log_sram_start = PEACH_DEBUG_PBL_LOG_SRAM_START;
 		pbl_log_max_size = PEACH_DEBUG_PBL_LOG_SRAM_MAX_SIZE;
 		sbl_log_max_size = PEACH_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
+		sbl_log_def_end = PEACH_SRAM_END;
 		break;
 	case COLOGNE_DEVICE_ID:
 		pbl_bootstrap_status_reg = COLOGNE_PBL_BOOTSTRAP_STATUS;
@@ -2034,13 +2148,7 @@ static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 		return;
 	}
 
-	cnss_pr_dbg("Dumping SBL log data\n");
-	for (i = 0; i < sbl_log_size; i += sizeof(val)) {
-		mem_addr = sbl_log_start + i;
-		if (cnss_pci_reg_read(pci_priv, mem_addr, &val))
-			break;
-		cnss_pr_dbg("SRAM[0x%x] = 0x%x\n", mem_addr, val);
-	}
+	cnss_pci_dump_sbl_log(pci_priv, sbl_log_start, sbl_log_size);
 }
 
 #ifdef CONFIG_DISABLE_CNSS_SRAM_DUMP
@@ -2053,12 +2161,18 @@ static void cnss_pci_dump_sram(struct cnss_pci_data *pci_priv)
 	struct cnss_plat_data *plat_priv;
 	u32 i, mem_addr;
 	u32 *dump_ptr;
+	int ret;
 
 	plat_priv = pci_priv->plat_priv;
-
-	if (plat_priv->device_id != QCA6490_DEVICE_ID ||
-	    cnss_get_host_build_type() != QMI_HOST_BUILD_TYPE_PRIMARY_V01)
+	cnss_pr_dbg("SRAM dump: start addr 0x%x, size 0x%x\n",
+		    plat_priv->sram_dump_start_addr, plat_priv->sram_dump_size);
+	if (!plat_priv->sram_dump_size)
 		return;
+
+	if (plat_priv->sram_dump)
+		memset(plat_priv->sram_dump, 0x00, plat_priv->sram_dump_size);
+	else
+		plat_priv->sram_dump = vzalloc(plat_priv->sram_dump_size);
 
 	if (!plat_priv->sram_dump) {
 		cnss_pr_err("SRAM dump memory is not allocated\n");
@@ -2070,11 +2184,13 @@ static void cnss_pci_dump_sram(struct cnss_pci_data *pci_priv)
 
 	cnss_pr_dbg("Dumping SRAM at 0x%lx\n", plat_priv->sram_dump);
 
-	for (i = 0; i < SRAM_DUMP_SIZE; i += sizeof(u32)) {
-		mem_addr = SRAM_START + i;
+	for (i = 0; i < plat_priv->sram_dump_size; i += sizeof(u32)) {
+		mem_addr = plat_priv->sram_dump_start_addr + i;
 		dump_ptr = (u32 *)(plat_priv->sram_dump + i);
-		if (cnss_pci_reg_read(pci_priv, mem_addr, dump_ptr)) {
-			cnss_pr_err("SRAM Dump failed at 0x%x\n", mem_addr);
+		ret = cnss_pci_reg_read(pci_priv, mem_addr, dump_ptr);
+		if (ret) {
+			cnss_pr_err("SRAM Dump failed at 0x%x, %d\n",
+				    mem_addr, ret);
 			break;
 		}
 		/* Relinquish CPU after dumping 256KB chunks*/
@@ -3174,6 +3290,19 @@ int cnss_pci_call_driver_modem_status(struct cnss_pci_data *pci_priv,
 	return 0;
 }
 
+int cnss_pci_fmd_status(struct cnss_pci_data *pci_priv,
+			int fmd_status)
+{
+	int ret;
+
+	if (fmd_status) {
+		ret = cnss_pci_fmd_enable(pci_priv);
+		cnss_pr_dbg("Update FMD status to PCI: %d\n",
+			    fmd_status, ret);
+	}
+
+	return 0;
+}
 int cnss_pci_update_status(struct cnss_pci_data *pci_priv,
 			   enum cnss_driver_status status)
 {
@@ -3528,7 +3657,7 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 	     test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state)) &&
 	    test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state)) {
 		del_timer(&pci_priv->dev_rddm_timer);
-		cnss_pci_collect_dump_info(pci_priv, false);
+		ret = cnss_pci_collect_dump_info(pci_priv, false);
 
 		if (!plat_priv->recovery_enabled)
 			CNSS_ASSERT(0);
@@ -3577,13 +3706,14 @@ out:
 
 static void cnss_qca6290_crash_shutdown(struct cnss_pci_data *pci_priv)
 {
+	int ret = 0;
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 
 	set_bit(CNSS_IN_PANIC, &plat_priv->driver_state);
 	cnss_pr_dbg("Crash shutdown with driver_state 0x%lx\n",
 		    plat_priv->driver_state);
 
-	cnss_pci_collect_dump_info(pci_priv, true);
+	ret = cnss_pci_collect_dump_info(pci_priv, true);
 	clear_bit(CNSS_IN_PANIC, &plat_priv->driver_state);
 }
 
@@ -3831,6 +3961,11 @@ int cnss_wlan_register_driver(struct cnss_wlan_driver *driver_ops)
 				if (plat_priv->device_id == KIWI_DEVICE_ID &&
 				    driver_ops->chip_version != 2) {
 					cnss_pr_err("WLAN HW disabled. kiwi_v2 only supported\n");
+					return -ENODEV;
+				}
+				if (plat_priv->device_id == PEACH_DEVICE_ID &&
+				    driver_ops->chip_version != 2) {
+					cnss_pr_err("WLAN HW disabled. peach_v2 only supported\n");
 					return -ENODEV;
 				}
 				cnss_pr_info("WLAN register driver deferred for device ID: 0x%x due to HW disable\n",
@@ -4396,9 +4531,12 @@ int cnss_wlan_pm_control(struct device *dev, bool vote)
 	if (!pci_priv)
 		return -ENODEV;
 
-	ret = cnss_pci_disable_pc(pci_priv, vote);
-	if (ret)
-		return ret;
+	if (cnss_pci_get_drv_supported(pci_priv)) {
+
+		ret = cnss_pci_disable_pc(pci_priv, vote);
+		if (ret)
+			return ret;
+	}
 
 	pci_priv->disable_pc = vote;
 	cnss_pr_dbg("%s PCIe power collapse\n", vote ? "disable" : "enable");
@@ -5072,6 +5210,7 @@ int cnss_pci_load_sku_license(struct cnss_pci_data *pci_priv)
 	if (!sku_license_mem->va && !sku_license_mem->size) {
 		scnprintf(filename, MAX_FIRMWARE_NAME_LEN, "%s", soft_sku_filename);
 
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 		ret = firmware_request_nowarn(&fw_entry, filename,
 					      &pci_priv->pci_dev->dev);
 		if (ret) {
@@ -5129,6 +5268,7 @@ int cnss_pci_load_tme_patch(struct cnss_pci_data *pci_priv)
 	if (!tme_lite_mem->va && !tme_lite_mem->size) {
 		scnprintf(filename, MAX_FIRMWARE_NAME_LEN, "%s", tme_patch_filename);
 
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 		ret = firmware_request_nowarn(&fw_entry, filename,
 					      &pci_priv->pci_dev->dev);
 		if (ret) {
@@ -5214,6 +5354,7 @@ int cnss_pci_load_tme_opt_file(struct cnss_pci_data *pci_priv,
 		cnss_pci_add_fw_prefix_name(pci_priv, filename,
 					    tme_opt_filename);
 
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 		ret = firmware_request_nowarn(&fw_entry, filename,
 					      &pci_priv->pci_dev->dev);
 		if (ret) {
@@ -5302,6 +5443,7 @@ int cnss_pci_load_m3(struct cnss_pci_data *pci_priv)
 		cnss_pci_add_fw_prefix_name(pci_priv, filename,
 					    phy_filename);
 
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 		ret = firmware_request_nowarn(&fw_entry, filename,
 					      &pci_priv->pci_dev->dev);
 		if (ret) {
@@ -5372,6 +5514,7 @@ int cnss_pci_load_aux(struct cnss_pci_data *pci_priv)
 						    DEFAULT_AUX_FILE_NAME);
 		}
 
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 		ret = firmware_request_nowarn(&fw_entry, filename,
 					      &pci_priv->pci_dev->dev);
 		if (ret) {
@@ -5414,6 +5557,61 @@ static void cnss_pci_free_aux_mem(struct cnss_pci_data *pci_priv)
 	aux_mem->size = 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0) || \
+	defined(BACKPORTED_EXPORT_SAVE_STACK_TRACE_TSK_ARM)) && \
+	defined(CONFIG_STACKTRACE)
+#define CNSS_PRINT_TRACE_COUNT 32
+#define CNSS_PRINT_TRACE_SPACES 4
+
+#ifdef CONFIG_ARCH_STACKWALK
+void cnss_print_thread_trace(struct task_struct *task)
+{
+	const int spaces = CNSS_PRINT_TRACE_SPACES;
+	unsigned long entries[CNSS_PRINT_TRACE_COUNT] = {0};
+	unsigned int nr_entries = 0;
+	unsigned int max_entries = CNSS_PRINT_TRACE_COUNT;
+	int skip = 0;
+
+	nr_entries = stack_trace_save_tsk(task, entries, max_entries, skip);
+	stack_trace_print(entries, nr_entries, spaces);
+}
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0))
+void cnss_print_thread_trace(struct task_struct *task)
+{
+	const int spaces = CNSS_PRINT_TRACE_SPACES;
+	unsigned long entries[CNSS_PRINT_TRACE_COUNT] = {0};
+	struct stack_trace trace = {
+		.nr_entries = 0,
+		.skip = 0,
+		.entries = &entries[0],
+		.max_entries = CNSS_PRINT_TRACE_COUNT,
+	};
+
+	save_stack_trace_tsk(task, &trace);
+	stack_trace_print(entries, trace.nr_entries, spaces);
+}
+
+void cnss_print_thread_trace(struct task_struct *task)
+{
+	const int spaces = CNSS_PRINT_TRACE_SPACES;
+	unsigned long entries[CNSS_PRINT_TRACE_COUNT] = {0};
+	struct stack_trace trace = {
+		.nr_entries = 0,
+		.skip = 0,
+		.entries = &entries[0],
+		.max_entries = CNSS_PRINT_TRACE_COUNT,
+	};
+
+	save_stack_trace_tsk(task, &trace);
+	print_stack_trace(&trace, spaces);
+}
+#endif
+
+#else
+void cnss_print_thread_trace(struct task_struct *task) { }
+#endif /* KERNEL_VERSION(4, 14, 0) */
+
+
 void cnss_pci_fw_boot_timeout_hdlr(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv;
@@ -5426,6 +5624,8 @@ void cnss_pci_fw_boot_timeout_hdlr(struct cnss_pci_data *pci_priv)
 	plat_priv = pci_priv->plat_priv;
 	if (!plat_priv)
 		return;
+
+	cnss_print_thread_trace(plat_priv->cnss_event_work_task);
 
 	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Ignore FW ready timeout for calibration mode\n");
@@ -5616,7 +5816,7 @@ int cnss_get_soc_info(struct device *dev, struct cnss_soc_info *info)
 	info->board_id = plat_priv->board_info.board_id;
 	info->soc_id = plat_priv->soc_info.soc_id;
 	info->fw_version = plat_priv->fw_version_info.fw_version;
-	strlcpy(info->fw_build_timestamp,
+	strscpy(info->fw_build_timestamp,
 		plat_priv->fw_version_info.fw_build_timestamp,
 		sizeof(info->fw_build_timestamp));
 	memcpy(&info->device_version, &plat_priv->device_version,
@@ -6476,7 +6676,7 @@ void cnss_pci_collect_host_dump_info(struct cnss_pci_data *pci_priv)
 }
 #endif
 
-void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
+int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	struct cnss_dump_data *dump_data =
@@ -6485,7 +6685,7 @@ void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 		plat_priv->ramdump_info_v2.dump_data_vaddr;
 	struct image_info *fw_image, *rddm_image;
 	struct cnss_fw_mem *fw_mem = plat_priv->fw_mem;
-	int ret, i, j;
+	int ret = 0, i, j;
 
 	if (test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state) &&
 	    !test_bit(CNSS_IN_PANIC, &plat_priv->driver_state))
@@ -6493,12 +6693,12 @@ void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 
 	if (test_bit(CNSS_MHI_RDDM_DONE, &pci_priv->mhi_state)) {
 		cnss_pr_dbg("RAM dump is already collected, skip\n");
-		return;
+		goto out;
 	}
 
 	if (!cnss_is_device_powered_on(plat_priv)) {
 		cnss_pr_dbg("Device is already powered off, skip\n");
-		return;
+		goto out;
 	}
 
 	if (!in_panic) {
@@ -6507,17 +6707,17 @@ void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 		if (ret) {
 			if (ret != -EACCES) {
 				mutex_unlock(&pci_priv->bus_lock);
-				return;
+				goto out;
 			}
 			if (cnss_pci_resume_bus(pci_priv)) {
 				mutex_unlock(&pci_priv->bus_lock);
-				return;
+				goto out;
 			}
 		}
 		mutex_unlock(&pci_priv->bus_lock);
 	} else {
 		if (cnss_pci_check_link_status(pci_priv))
-			return;
+			goto out;
 		/* Inside panic handler, reduce timeout for RDDM to avoid
 		 * unnecessary hypervisor watchdog bite.
 		 */
@@ -6533,11 +6733,16 @@ void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 	if (ret) {
 		cnss_fatal_err("Failed to download RDDM image, err = %d\n",
 			       ret);
-		if (!cnss_pci_assert_host_sol(pci_priv))
-			return;
+		cnss_pr_dbg("Sending Host Reset Req\n");
+		cnss_mhi_force_reset(pci_priv);
+		clear_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state);
+		mod_timer(&pci_priv->dev_rddm_timer,
+			jiffies + msecs_to_jiffies(DEV_RDDM_TIMEOUT));
+
 		cnss_rddm_trigger_check(pci_priv);
 		cnss_pci_dump_debug_reg(pci_priv);
-		return;
+		ret =  -EAGAIN;
+		goto out;
 	}
 	cnss_rddm_trigger_check(pci_priv);
 	fw_image = pci_priv->mhi_ctrl->fbc_image;
@@ -6614,6 +6819,8 @@ void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 
 skip_dump:
 	complete(&plat_priv->rddm_complete);
+out:
+	return ret;
 }
 
 void cnss_pci_clear_dump_info(struct cnss_pci_data *pci_priv)
