@@ -53,6 +53,7 @@
 #define PHY_UCODE_V2_FILE_NAME		"phy_ucode20.elf"
 #define DEFAULT_FW_FILE_NAME		"amss.bin"
 #define FW_V2_FILE_NAME			"amss20.bin"
+#define DEFAULT_GENOA_FW_FTM_NAME	"genoaftm.bin"
 #define DEVICE_MAJOR_VERSION_MASK	0xF
 
 #define WAKE_MSI_NAME			"WAKE"
@@ -2546,6 +2547,103 @@ static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 }
 #endif
 
+#ifdef CONFIG_ONE_MSI_VECTOR
+/**
+ * All the user share the same vector and msi data
+ * For MHI user, we need pass IRQ array information to MHI component
+ * MHI_IRQ_NUMBER is defined to specify this MHI IRQ array size
+ */
+#define MHI_IRQ_NUMBER 3
+static struct cnss_msi_config msi_config_one_msi = {
+	.total_vectors = 1,
+	.total_users = 4,
+	.users = (struct cnss_msi_user[]) {
+		{ .name = "MHI", .num_vectors = 1, .base_vector = 0 },
+		{ .name = "CE", .num_vectors = 1, .base_vector = 0 },
+		{ .name = "WAKE", .num_vectors = 1, .base_vector = 0 },
+		{ .name = "DP", .num_vectors = 1, .base_vector = 0 },
+	},
+};
+
+static int cnss_pci_get_one_msi_assignment(struct cnss_pci_data *pci_priv)
+{
+	pci_priv->msi_config = &msi_config_one_msi;
+
+	return 0;
+}
+
+static bool cnss_pci_fallback_one_msi(struct cnss_pci_data *pci_priv,
+				      int *num_vectors)
+{
+	struct pci_dev *pci_dev = pci_priv->pci_dev;
+	struct cnss_msi_config *msi_config;
+
+	cnss_pci_get_one_msi_assignment(pci_priv);
+	msi_config = pci_priv->msi_config;
+	if (!msi_config) {
+		cnss_pr_err("one msi_config is NULL!\n");
+		return false;
+	}
+	*num_vectors = pci_alloc_irq_vectors(pci_dev,
+					     msi_config->total_vectors,
+					     msi_config->total_vectors,
+					     PCI_IRQ_MSI);
+	if (*num_vectors < 0) {
+		cnss_pr_err("Failed to get one MSI vector!\n");
+		return false;
+	}
+	cnss_pr_dbg("request MSI one vector\n");
+
+	return true;
+}
+
+static bool cnss_pci_is_one_msi(struct cnss_pci_data *pci_priv)
+{
+	return pci_priv && pci_priv->msi_config &&
+	       (pci_priv->msi_config->total_vectors == 1);
+}
+
+static int cnss_pci_get_one_msi_mhi_irq_array_size(
+		struct cnss_pci_data *pci_priv)
+{
+	return MHI_IRQ_NUMBER;
+}
+
+static bool cnss_pci_is_force_one_msi(struct cnss_pci_data *pci_priv)
+{
+	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+
+	return test_bit(FORCE_ONE_MSI, &plat_priv->ctrl_params.quirks);
+}
+#else
+static int cnss_pci_get_one_msi_assignment(struct cnss_pci_data *pci_priv)
+{
+	return 0;
+}
+
+static bool cnss_pci_fallback_one_msi(struct cnss_pci_data *pci_priv,
+			       int *num_vectors)
+{
+	return false;
+}
+
+static bool cnss_pci_is_one_msi(struct cnss_pci_data *pci_priv)
+{
+	return false;
+}
+
+static int cnss_pci_get_one_msi_mhi_irq_array_size(
+		struct cnss_pci_data *pci_priv)
+{
+	return 0;
+}
+
+static bool cnss_pci_is_force_one_msi(struct cnss_pci_data *pci_priv)
+{
+	return false;
+}
+#endif
+
 int cnss_pci_start_mhi(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -3819,6 +3917,12 @@ int cnss_wlan_register_driver(struct cnss_wlan_driver *driver_ops)
 		return -ENODEV;
 	}
 	set_bit(CNSS_DRIVER_REGISTER, &plat_priv->driver_state);
+
+	if (plat_priv->device_id == QCN7605_DEVICE_ID &&
+	    driver_ops->get_driver_mode) {
+		plat_priv->driver_mode = driver_ops->get_driver_mode();
+		cnss_pci_update_fw_name(pci_priv);
+	}
 
 	if (!plat_priv->cbc_enabled ||
 	    test_bit(CNSS_COLD_BOOT_CAL_DONE, &plat_priv->driver_state))
@@ -6662,6 +6766,23 @@ static int cnss_pci_update_fw_name(struct cnss_pci_data *pci_priv)
 			break;
 		}
 		break;
+	case QCN7605_DEVICE_ID:
+		if (plat_priv->driver_mode == CNSS_FTM) {
+			cnss_pci_add_fw_prefix_name(pci_priv,
+						    plat_priv->firmware_name,
+						    DEFAULT_GENOA_FW_FTM_NAME);
+			snprintf(plat_priv->fw_fallback_name,
+				 MAX_FIRMWARE_NAME_LEN,
+				 DEFAULT_GENOA_FW_FTM_NAME);
+		} else {
+			cnss_pci_add_fw_prefix_name(pci_priv,
+						    plat_priv->firmware_name,
+						    DEFAULT_FW_FILE_NAME);
+			snprintf(plat_priv->fw_fallback_name,
+				 MAX_FIRMWARE_NAME_LEN,
+				 DEFAULT_FW_FILE_NAME);
+		}
+		break;
 	default:
 		cnss_pci_add_fw_prefix_name(pci_priv, plat_priv->firmware_name,
 					    DEFAULT_FW_FILE_NAME);
@@ -6880,6 +7001,12 @@ static int cnss_mhi_bw_scale(struct mhi_controller *mhi_ctrl,
 	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	int ret = 0;
+
+	if (plat_priv->pcie_switch_type == PCIE_SWITCH_NTN3) {
+		ret = cnss_pci_dsp_link_retrain(pci_priv,
+						link_info->target_link_speed);
+		return ret;
+	}
 
 	cnss_pr_dbg("Setting link speed:0x%x, width:0x%x\n",
 		    link_info->target_link_speed,
@@ -7352,6 +7479,23 @@ static int cnss_try_suspend(struct cnss_plat_data *plat_priv)
 	return 0;
 }
 #endif
+
+void cnss_pci_of_switch_type_init(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+	int ret;
+
+	if (dev && dev->of_node) {
+		ret = of_property_read_u32(dev->of_node,
+					   "qcom,pcie-switch-type",
+					   &plat_priv->pcie_switch_type);
+		if (ret)
+			plat_priv->pcie_switch_type = 0;
+	} else {
+		cnss_pr_err("device or node is not available.");
+	}
+	cnss_pr_dbg("pcie_switch_type is %d", plat_priv->pcie_switch_type);
+}
 
 /* Setting to use this cnss_pm_domain ops will let PM framework override the
  * ops from dev->bus->pm which is pci_dev_pm_ops from pci-driver.c. This ops
