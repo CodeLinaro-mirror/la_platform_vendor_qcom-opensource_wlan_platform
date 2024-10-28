@@ -48,7 +48,16 @@
 
 #define DEFAULT_PHY_UCODE_FILE_NAME	"phy_ucode.elf"
 #define DEFAULT_AUX_FILE_NAME		"aux_ucode.elf"
-#define QDSS_TRACE_CONFIG_FILE		"qdss_trace_config.cfg"
+
+#define MAX_FIRMWARE_NAME_LEN		50
+#define HW_V1_NUMBER			"v1"
+#ifdef CONFIG_ICNSS2_DEBUG
+#define QDSS_FILE_BUILD_STR		"debug_"
+#else
+#define QDSS_FILE_BUILD_STR		"perf_"
+#endif
+
+#define QDSS_TRACE_CONFIG_FILE		"qdss_trace_config"
 
 #define WLAN_BOARD_ID_INDEX		0x100
 #define DEVICE_BAR_SIZE			0x200000
@@ -570,6 +579,9 @@ int wlfw_ind_register_send_sync_msg(struct icnss_priv *priv)
 		req->m3_dump_upload_segments_req_enable_valid = 1;
 		req->m3_dump_upload_segments_req_enable = 1;
 	}
+
+	req->async_data_enable_valid = 1;
+	req->async_data_enable = 1;
 
 	priv->stats.ind_register_req++;
 
@@ -1365,6 +1377,26 @@ end:
 	return ret;
 }
 
+static void icnss_get_qdss_cfg_filename(struct icnss_priv *priv,
+					char *filename, u32 filename_len,
+					bool fallback_file)
+{
+	char filename_tmp[MAX_FIRMWARE_NAME_LEN];
+	char *build_str = QDSS_FILE_BUILD_STR;
+
+	if (fallback_file)
+		build_str = "";
+
+	if (priv->device_id == WCN7750_DEVICE_ID)
+		snprintf(filename_tmp, filename_len, QDSS_TRACE_CONFIG_FILE
+			"_%s%s.cfg", build_str, HW_V1_NUMBER);
+	else
+		snprintf(filename_tmp, filename_len, QDSS_TRACE_CONFIG_FILE
+			".cfg");
+
+	icnss_add_fw_prefix_name(priv, filename, filename_tmp);
+}
+
 int icnss_wlfw_qdss_dnld_send_sync(struct icnss_priv *priv)
 {
 	struct wlfw_qdss_trace_config_download_req_msg_v01 *req;
@@ -1389,13 +1421,21 @@ int icnss_wlfw_qdss_dnld_send_sync(struct icnss_priv *priv)
 		return -ENOMEM;
 	}
 
-	icnss_add_fw_prefix_name(priv, filename, QDSS_TRACE_CONFIG_FILE);
+	icnss_get_qdss_cfg_filename(priv, filename, sizeof(filename), false);
 	ret = firmware_request_nowarn(&fw_entry, filename,
 				      &priv->pdev->dev);
 	if (ret) {
-		icnss_pr_err("Failed to load QDSS: %s ret:%d\n",
+		icnss_pr_err("Failed to load QDSS: %s ret:%d, try default file\n",
 			     filename, ret);
-		goto err_req_fw;
+		icnss_get_qdss_cfg_filename(priv, filename, sizeof(filename),
+					    true);
+		ret = firmware_request_nowarn(&fw_entry, filename,
+					      &priv->pdev->dev);
+		if (ret) {
+			icnss_pr_err("Failed to load QDSS: %s ret:%d\n",
+				     filename, ret);
+			goto err_req_fw;
+		}
 	}
 
 	temp = fw_entry->data;
@@ -2734,6 +2774,32 @@ static void icnss_wlfw_respond_get_info_ind_cb(struct qmi_handle *qmi,
 				       ind_msg->data_len);
 }
 
+static void icnss_wlfw_driver_async_data_ind_cb(struct qmi_handle *qmi,
+						struct sockaddr_qrtr *sq,
+						struct qmi_txn *txn,
+						const void *data)
+{
+	struct icnss_priv *plat_priv =
+			container_of(qmi, struct icnss_priv, qmi);
+	const struct wlfw_driver_async_data_ind_msg_v01 *ind_msg = data;
+
+	icnss_pr_vdbg("Received QMI WLFW driver async data indication\n");
+
+	if (!txn) {
+		icnss_pr_err("Spurious indication\n");
+		return;
+	}
+
+	icnss_pr_vdbg("Extract message with event length: %d, type: %d\n",
+		      ind_msg->data_len, ind_msg->type);
+
+	if (plat_priv->get_driver_async_data_ctx &&
+	    plat_priv->get_driver_async_data_cb)
+		plat_priv->get_driver_async_data_cb(
+			plat_priv->get_driver_async_data_ctx, ind_msg->type,
+			(void *)ind_msg->data, ind_msg->data_len);
+}
+
 static void icnss_wlfw_m3_dump_upload_segs_req_ind_cb(struct qmi_handle *qmi,
 						      struct sockaddr_qrtr *sq,
 						      struct qmi_txn *txn,
@@ -2776,7 +2842,7 @@ static void icnss_wlfw_m3_dump_upload_segs_req_ind_cb(struct qmi_handle *qmi,
 		    segment_addr < priv->msa_pa ||
 		    ind_msg->m3_segment[i].size +
 		    segment_addr > max_mapped_addr) {
-			icnss_pr_dbg("Received out of range Segment %d Addr: 0x%llx Size: 0x%x, Name: %s, type: %d\n",
+			icnss_pr_dbg("Received out of range Segment %d Addr: 0x%llx Size: 0x%llx, Name: %s, type: %d\n",
 				     (i + 1), segment_addr,
 				     ind_msg->m3_segment[i].size,
 				     ind_msg->m3_segment[i].name,
@@ -2791,7 +2857,7 @@ static void icnss_wlfw_m3_dump_upload_segs_req_ind_cb(struct qmi_handle *qmi,
 			ind_msg->m3_segment[i].name,
 			WLFW_MAX_STR_LEN + 1);
 
-		icnss_pr_dbg("Received Segment %d Addr: 0x%llx Size: 0x%x, Name: %s, type: %d\n",
+		icnss_pr_dbg("Received Segment %d Addr: 0x%llx Size: 0x%llx, Name: %s, type: %d\n",
 			     (i + 1), segment_addr,
 			     ind_msg->m3_segment[i].size,
 			     ind_msg->m3_segment[i].name,
@@ -3115,6 +3181,14 @@ static struct qmi_msg_handler wlfw_msg_handlers[] = {
 		.decoded_size =
 		sizeof(struct wlfw_wfc_call_twt_config_ind_msg_v01),
 		.fn = icnss_wlfw_process_twt_cfg_ind
+	},
+	{
+		.type = QMI_INDICATION,
+		.msg_id = QMI_WLFW_DRIVER_ASYNC_DATA_IND_V01,
+		.ei = wlfw_driver_async_data_ind_msg_v01_ei,
+		.decoded_size =
+		sizeof(struct wlfw_driver_async_data_ind_msg_v01),
+		.fn = icnss_wlfw_driver_async_data_ind_cb
 	},
 	{}
 };

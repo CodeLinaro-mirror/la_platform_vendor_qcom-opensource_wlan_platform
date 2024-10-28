@@ -116,7 +116,6 @@ uint64_t dynamic_feature_mask = ICNSS_DEFAULT_FEATURE_MASK;
 #define WLAN_EN_TEMP_THRESHOLD		5000
 #define WLAN_EN_DELAY			500
 
-#define ICNSS_RPROC_LEN			100
 #define CPUMASK_ARRAY_SIZE		2
 static DEFINE_IDA(rd_minor_id);
 
@@ -726,7 +725,8 @@ static int icnss_send_smp2p(struct icnss_priv *priv,
 	value <<= ICNSS_SMEM_SEQ_NO_POS;
 	value |= msg_id;
 
-	icnss_pr_smp2p("Sending SMP2P value: 0x%X\n", value);
+	icnss_pr_smp2p("Sending SMP2P value: 0x%X, Ref count: %d\n", value,
+			atomic_read(&priv->soc_wake_ref_count));
 
 	if (msg_id == ICNSS_SOC_WAKE_REQ || msg_id == ICNSS_SOC_WAKE_REL)
 		reinit_completion(&penv->smp2p_soc_wake_wait);
@@ -744,8 +744,9 @@ static int icnss_send_smp2p(struct icnss_priv *priv,
 			if (!wait_for_completion_timeout(
 					&priv->smp2p_soc_wake_wait,
 					msecs_to_jiffies(SMP2P_SOC_WAKE_TIMEOUT))) {
-				icnss_pr_err("SMP2P Soc Wake timeout msg %d, %s\n", msg_id,
-					     icnss_smp2p_str[smp2p_entry]);
+				icnss_pr_err("SMP2P Soc Wake timeout msg %d, %s, Ref count: %d\n",
+					     msg_id, icnss_smp2p_str[smp2p_entry],
+					     atomic_read(&priv->soc_wake_ref_count));
 				if (!test_bit(ICNSS_FW_DOWN, &priv->state))
 					ICNSS_ASSERT(0);
 			}
@@ -899,7 +900,7 @@ static int icnss_get_temperature(struct icnss_priv *priv, int *temp)
 	icnss_pr_dbg("Thermal Sensor is %s\n", tsens);
 	thermal_dev = thermal_zone_get_zone_by_name(tsens);
 	if (IS_ERR_OR_NULL(thermal_dev)) {
-		icnss_pr_err("Fail to get thermal zone. ret: %d",
+		icnss_pr_err("Fail to get thermal zone. ret: %ld",
 			     PTR_ERR(thermal_dev));
 		return PTR_ERR(thermal_dev);
 	}
@@ -1401,6 +1402,276 @@ out:
 	return ret;
 }
 
+#ifdef CONFIG_CNSS2_SSR_DRIVER_DUMP
+/**
+ * Icnss_host_ramdump_dev_release() - callback function for device release
+ * @dev: device to be released
+ *
+ * Return: None
+ */
+static void icnss_host_ramdump_dev_release(struct device *dev)
+{
+	icnss_pr_dbg("free host ramdump device\n");
+	kfree(dev);
+}
+
+int icnss_do_host_ramdump(struct icnss_priv *priv,
+			  struct cnss_ssr_driver_dump_entry *ssr_entry,
+			  size_t num_entries_loaded)
+{
+	struct qcom_dump_segment *seg;
+	struct cnss_host_dump_meta_info meta_info = {0};
+	struct list_head head;
+	int dev_ret = 0;
+	struct device *new_device;
+	static const char * const wlan_str[] = {
+		[CNSS_HOST_WLAN_LOGS] = "wlan_logs",
+		[CNSS_HOST_HTC_CREDIT] = "htc_credit",
+		[CNSS_HOST_WMI_TX_CMP] = "wmi_tx_cmp",
+		[CNSS_HOST_WMI_COMMAND_LOG] = "wmi_command_log",
+		[CNSS_HOST_WMI_EVENT_LOG] = "wmi_event_log",
+		[CNSS_HOST_WMI_RX_EVENT] = "wmi_rx_event",
+		[CNSS_HOST_HAL_SOC] = "hal_soc",
+		[CNSS_HOST_GWLAN_LOGGING] = "gwlan_logging",
+		[CNSS_HOST_WMI_DEBUG_LOG_INFO] = "wmi_debug_log_info",
+		[CNSS_HOST_HTC_CREDIT_IDX] = "htc_credit_history_idx",
+		[CNSS_HOST_HTC_CREDIT_LEN] = "htc_credit_history_length",
+		[CNSS_HOST_WMI_TX_CMP_IDX] = "wmi_tx_cmp_idx",
+		[CNSS_HOST_WMI_COMMAND_LOG_IDX] = "wmi_command_log_idx",
+		[CNSS_HOST_WMI_EVENT_LOG_IDX] = "wmi_event_log_idx",
+		[CNSS_HOST_WMI_RX_EVENT_IDX] = "wmi_rx_event_idx",
+		[CNSS_HOST_HIF_CE_DESC_HISTORY_BUFF] = "hif_ce_desc_history_buff",
+		[CNSS_HOST_HANG_EVENT_DATA] = "hang_event_data",
+		[CNSS_HOST_CE_DESC_HIST] = "hif_ce_desc_hist",
+		[CNSS_HOST_CE_COUNT_MAX] = "hif_ce_count_max",
+		[CNSS_HOST_CE_HISTORY_MAX] = "hif_ce_history_max",
+		[CNSS_HOST_ONLY_FOR_CRIT_CE] = "hif_ce_only_for_crit",
+		[CNSS_HOST_HIF_EVENT_HISTORY] = "hif_event_history",
+		[CNSS_HOST_HIF_EVENT_HIST_MAX] = "hif_event_hist_max",
+		[CNSS_HOST_DP_WBM_DESC_REL] = "wbm_desc_rel_ring",
+		[CNSS_HOST_DP_WBM_DESC_REL_HANDLE] = "wbm_desc_rel_ring_handle",
+		[CNSS_HOST_DP_TCL_CMD] = "tcl_cmd_ring",
+		[CNSS_HOST_DP_TCL_CMD_HANDLE] = "tcl_cmd_ring_handle",
+		[CNSS_HOST_DP_TCL_STATUS] = "tcl_status_ring",
+		[CNSS_HOST_DP_TCL_STATUS_HANDLE] = "tcl_status_ring_handle",
+		[CNSS_HOST_DP_REO_REINJ] = "reo_reinject_ring",
+		[CNSS_HOST_DP_REO_REINJ_HANDLE] = "reo_reinject_ring_handle",
+		[CNSS_HOST_DP_RX_REL] = "rx_rel_ring",
+		[CNSS_HOST_DP_RX_REL_HANDLE] = "rx_rel_ring_handle",
+		[CNSS_HOST_DP_REO_EXP] = "reo_exception_ring",
+		[CNSS_HOST_DP_REO_EXP_HANDLE] = "reo_exception_ring_handle",
+		[CNSS_HOST_DP_REO_CMD] = "reo_cmd_ring",
+		[CNSS_HOST_DP_REO_CMD_HANDLE] = "reo_cmd_ring_handle",
+		[CNSS_HOST_DP_REO_STATUS] = "reo_status_ring",
+		[CNSS_HOST_DP_REO_STATUS_HANDLE] = "reo_status_ring_handle",
+		[CNSS_HOST_DP_TCL_DATA_0] = "tcl_data_ring_0",
+		[CNSS_HOST_DP_TCL_DATA_0_HANDLE] = "tcl_data_ring_0_handle",
+		[CNSS_HOST_DP_TX_COMP_0] = "tx_comp_ring_0",
+		[CNSS_HOST_DP_TX_COMP_0_HANDLE] = "tx_comp_ring_0_handle",
+		[CNSS_HOST_DP_TCL_DATA_1] = "tcl_data_ring_1",
+		[CNSS_HOST_DP_TCL_DATA_1_HANDLE] = "tcl_data_ring_1_handle",
+		[CNSS_HOST_DP_TX_COMP_1] = "tx_comp_ring_1",
+		[CNSS_HOST_DP_TX_COMP_1_HANDLE] = "tx_comp_ring_1_handle",
+		[CNSS_HOST_DP_TCL_DATA_2] = "tcl_data_ring_2",
+		[CNSS_HOST_DP_TCL_DATA_2_HANDLE] = "tcl_data_ring_2_handle",
+		[CNSS_HOST_DP_TX_COMP_2] = "tx_comp_ring_2",
+		[CNSS_HOST_DP_TX_COMP_2_HANDLE] = "tx_comp_ring_2_handle",
+		[CNSS_HOST_DP_REO_DST_0] = "reo_dest_ring_0",
+		[CNSS_HOST_DP_REO_DST_0_HANDLE] = "reo_dest_ring_0_handle",
+		[CNSS_HOST_DP_REO_DST_1] = "reo_dest_ring_1",
+		[CNSS_HOST_DP_REO_DST_1_HANDLE] = "reo_dest_ring_1_handle",
+		[CNSS_HOST_DP_REO_DST_2] = "reo_dest_ring_2",
+		[CNSS_HOST_DP_REO_DST_2_HANDLE] = "reo_dest_ring_2_handle",
+		[CNSS_HOST_DP_REO_DST_3] = "reo_dest_ring_3",
+		[CNSS_HOST_DP_REO_DST_3_HANDLE] = "reo_dest_ring_3_handle",
+		[CNSS_HOST_DP_REO_DST_4] = "reo_dest_ring_4",
+		[CNSS_HOST_DP_REO_DST_4_HANDLE] = "reo_dest_ring_4_handle",
+		[CNSS_HOST_DP_REO_DST_5] = "reo_dest_ring_5",
+		[CNSS_HOST_DP_REO_DST_5_HANDLE] = "reo_dest_ring_5_handle",
+		[CNSS_HOST_DP_REO_DST_6] = "reo_dest_ring_6",
+		[CNSS_HOST_DP_REO_DST_6_HANDLE] = "reo_dest_ring_6_handle",
+		[CNSS_HOST_DP_REO_DST_7] = "reo_dest_ring_7",
+		[CNSS_HOST_DP_REO_DST_7_HANDLE] = "reo_dest_ring_7_handle",
+		[CNSS_HOST_DP_PDEV_0] = "dp_pdev_0",
+		[CNSS_HOST_DP_WLAN_CFG_CTX] = "wlan_cfg_ctx",
+		[CNSS_HOST_DP_SOC] = "dp_soc",
+		[CNSS_HOST_HAL_RX_FST] = "hal_rx_fst",
+		[CNSS_HOST_DP_FISA] = "dp_fisa",
+		[CNSS_HOST_DP_FISA_HW_FSE_TABLE] = "dp_fisa_hw_fse_table",
+		[CNSS_HOST_DP_FISA_SW_FSE_TABLE] = "dp_fisa_sw_fse_table",
+		[CNSS_HOST_HIF] = "hif",
+		[CNSS_HOST_QDF_NBUF_HIST] = "qdf_nbuf_history",
+		[CNSS_HOST_TCL_WBM_MAP] = "tcl_wbm_map_array",
+		[CNSS_HOST_RX_MAC_BUF_RING_0] = "rx_mac_buf_ring_0",
+		[CNSS_HOST_RX_MAC_BUF_RING_0_HANDLE] = "rx_mac_buf_ring_0_handle",
+		[CNSS_HOST_RX_MAC_BUF_RING_1] = "rx_mac_buf_ring_1",
+		[CNSS_HOST_RX_MAC_BUF_RING_1_HANDLE] = "rx_mac_buf_ring_1_handle",
+		[CNSS_HOST_RX_REFILL_0] = "rx_refill_buf_ring_0",
+		[CNSS_HOST_RX_REFILL_0_HANDLE] = "rx_refill_buf_ring_0_handle",
+		[CNSS_HOST_CE_0] = "ce_0",
+		[CNSS_HOST_CE_0_SRC_RING] = "ce_0_src_ring",
+		[CNSS_HOST_CE_0_SRC_RING_CTX] = "ce_0_src_ring_ctx",
+		[CNSS_HOST_CE_1] = "ce_1",
+		[CNSS_HOST_CE_1_STATUS_RING] = "ce_1_status_ring",
+		[CNSS_HOST_CE_1_STATUS_RING_CTX] = "ce_1_status_ring_ctx",
+		[CNSS_HOST_CE_1_DEST_RING] = "ce_1_dest_ring",
+		[CNSS_HOST_CE_1_DEST_RING_CTX] = "ce_1_dest_ring_ctx",
+		[CNSS_HOST_CE_2] = "ce_2",
+		[CNSS_HOST_CE_2_STATUS_RING] = "ce_2_status_ring",
+		[CNSS_HOST_CE_2_STATUS_RING_CTX] = "ce_2_status_ring_ctx",
+		[CNSS_HOST_CE_2_DEST_RING] = "ce_2_dest_ring",
+		[CNSS_HOST_CE_2_DEST_RING_CTX] = "ce_2_dest_ring_ctx",
+		[CNSS_HOST_CE_3] = "ce_3",
+		[CNSS_HOST_CE_3_SRC_RING] = "ce_3_src_ring",
+		[CNSS_HOST_CE_3_SRC_RING_CTX] = "ce_3_src_ring_ctx",
+		[CNSS_HOST_CE_4] = "ce_4",
+		[CNSS_HOST_CE_4_SRC_RING] = "ce_4_src_ring",
+		[CNSS_HOST_CE_4_SRC_RING_CTX] = "ce_4_src_ring_ctx",
+		[CNSS_HOST_CE_5] = "ce_5",
+		[CNSS_HOST_CE_6] = "ce_6",
+		[CNSS_HOST_CE_7] = "ce_7",
+		[CNSS_HOST_CE_7_STATUS_RING] = "ce_7_status_ring",
+		[CNSS_HOST_CE_7_STATUS_RING_CTX] = "ce_7_status_ring_ctx",
+		[CNSS_HOST_CE_7_DEST_RING] = "ce_7_dest_ring",
+		[CNSS_HOST_CE_7_DEST_RING_CTX] = "ce_7_dest_ring_ctx",
+		[CNSS_HOST_CE_8] = "ce_8",
+		[CNSS_HOST_DP_TCL_DATA_3] = "tcl_data_ring_3",
+		[CNSS_HOST_DP_TCL_DATA_3_HANDLE] = "tcl_data_ring_3_handle",
+		[CNSS_HOST_DP_TX_COMP_3] = "tx_comp_ring_3",
+		[CNSS_HOST_DP_TX_COMP_3_HANDLE] = "tx_comp_ring_3_handle"
+	};
+	int i;
+	int ret = 0;
+	enum cnss_host_dump_type j;
+
+	if (!dump_enabled()) {
+		icnss_pr_info("Dump collection is not enabled\n");
+		return ret;
+	}
+
+	new_device = kcalloc(1, sizeof(*new_device), GFP_KERNEL);
+	if (!new_device) {
+		icnss_pr_err("Failed to alloc device mem\n");
+		return -ENOMEM;
+	}
+
+	new_device->release = icnss_host_ramdump_dev_release;
+	device_initialize(new_device);
+	dev_set_name(new_device, "wlan_driver");
+
+	dev_ret = device_add(new_device);
+	if (dev_ret) {
+		icnss_pr_err("Failed to add new device\n");
+		goto put_device;
+	}
+
+	INIT_LIST_HEAD(&head);
+	for (i = 0; i < num_entries_loaded; i++) {
+		/* If region name registered by driver is not present in
+		 * wlan_str. type for that entry will not be set, but entry will
+		 * be added. Which will result in entry type being 0. Currently
+		 * entry type 0 is for wlan_logs, which will result in parsing
+		 * issue for wlan_logs as parsing is done based upon type field.
+		 * So initialize type with -1(Invalid) to avoid such issues.
+		 */
+		meta_info.entry[i].type = -1;
+		seg = kcalloc(1, sizeof(*seg), GFP_KERNEL);
+		if (!seg) {
+			icnss_pr_err("Failed to alloc seg entry %d\n", i);
+			continue;
+		}
+
+		seg->va = ssr_entry[i].buffer_pointer;
+		seg->da = (dma_addr_t)ssr_entry[i].buffer_pointer;
+		seg->size = ssr_entry[i].buffer_size;
+
+		for (j = 0; j < CNSS_HOST_DUMP_TYPE_MAX; j++) {
+			if (strcmp(ssr_entry[i].region_name, wlan_str[j]) == 0)
+				meta_info.entry[i].type = j;
+		}
+		meta_info.entry[i].entry_start = i + 1;
+		meta_info.entry[i].entry_num++;
+
+		list_add_tail(&seg->node, &head);
+	}
+
+	seg = kcalloc(1, sizeof(*seg), GFP_KERNEL);
+
+	if (!seg) {
+		icnss_pr_err("%s: Failed to allocate mem for host dump seg\n",
+			     __func__);
+		goto skip_host_dump;
+	}
+
+	meta_info.magic = ICNSS_RAMDUMP_MAGIC;
+	meta_info.version = ICNSS_RAMDUMP_VERSION;
+	meta_info.chipset = priv->device_id;
+	meta_info.total_entries = num_entries_loaded;
+
+	seg->va = &meta_info;
+	seg->da = (dma_addr_t)&meta_info;
+	seg->size = sizeof(meta_info);
+
+	list_add(&seg->node, &head);
+
+	ret = qcom_elf_dump(&head, new_device, ELF_CLASS);
+
+skip_host_dump:
+	while (!list_empty(&head)) {
+		seg = list_first_entry(&head, struct qcom_dump_segment, node);
+		list_del(&seg->node);
+		kfree(seg);
+	}
+	device_del(new_device);
+put_device:
+	put_device(new_device);
+	icnss_pr_dbg("host ramdump result %d\n", ret);
+	return ret;
+}
+
+void icnss_collect_host_dump_info(struct icnss_priv *priv)
+{
+	struct cnss_ssr_driver_dump_entry *ssr_entry;
+	size_t num_entries_loaded = 0;
+	struct device *dev = &priv->pdev->dev;
+	int x = 0;
+	int ret = -1;
+
+	ssr_entry = kmalloc(sizeof(*ssr_entry) * CNSS_HOST_DUMP_TYPE_MAX, GFP_KERNEL);
+	if (!ssr_entry) {
+		icnss_pr_err("ssr_entry malloc failed");
+		return;
+	}
+
+	if (priv->ops && priv->ops->collect_driver_dump) {
+
+		ret = priv->ops->collect_driver_dump(dev, ssr_entry,
+						    &num_entries_loaded);
+		if (ret) {
+			kfree(ssr_entry);
+			goto out;
+		}
+
+		for (x = 0; x < num_entries_loaded; x++) {
+			icnss_pr_info("Idx:%d, ptr: %p, name: %s, size: %zu\n",
+				      x, ssr_entry[x].buffer_pointer,
+				      ssr_entry[x].region_name,
+				      ssr_entry[x].buffer_size);
+		}
+
+		icnss_do_host_ramdump(priv, ssr_entry, num_entries_loaded);
+		kfree(ssr_entry);
+		return;
+	}
+out:
+	icnss_pr_info("Host SSR elf dump collection feature disabled\n");
+}
+#else
+static inline void icnss_collect_host_dump_info(struct icnss_priv *priv)
+{
+}
+#endif
+
 static int icnss_call_driver_shutdown(struct icnss_priv *priv)
 {
 	if (!test_bit(ICNSS_DRIVER_PROBED, &priv->state))
@@ -1427,6 +1698,7 @@ static int icnss_pd_restart_complete(struct icnss_priv *priv)
 
 	icnss_pm_relax(priv);
 
+	icnss_collect_host_dump_info(priv);
 	icnss_call_driver_shutdown(priv);
 
 	clear_bit(ICNSS_PDR, &priv->state);
@@ -1766,7 +2038,7 @@ static int icnss_event_soc_wake_release(struct icnss_priv *priv, void *data)
 
 	if (atomic_dec_if_positive(&priv->soc_wake_ref_count)) {
 		icnss_pr_soc_wake("Wake release not called. Ref count: %d",
-				  priv->soc_wake_ref_count);
+				  atomic_read(&priv->soc_wake_ref_count));
 		return 0;
 	}
 
@@ -2125,16 +2397,18 @@ static int icnss_subsys_restart_level(struct icnss_priv *priv, void *data)
 	int ret = 0;
 	struct icnss_subsys_restart_level_data *event_data = data;
 
-	if (!priv)
-		return -ENODEV;
-
 	if (!data)
 		return -EINVAL;
 
+	if (!priv) {
+		ret = -ENODEV;
+		goto out;
+	}
+
 	ret = wlfw_subsys_restart_level_msg(priv, event_data->restart_level);
 
+out:
 	kfree(data);
-
 	return ret;
 }
 
@@ -2865,7 +3139,7 @@ static void icnss_pdr_notifier_cb(int state, char *service_path, void *priv_cb)
 	if (!priv)
 		return;
 
-	icnss_pr_dbg("PD service notification: 0x%lx state: 0x%lx\n",
+	icnss_pr_dbg("PD service notification: 0x%x state: 0x%lx\n",
 		     state, priv->state);
 
 	switch (state) {
@@ -3340,6 +3614,25 @@ int icnss_qmi_send(struct device *dev, int type, void *cmd,
 }
 EXPORT_SYMBOL(icnss_qmi_send);
 
+int icnss_register_driver_async_data_cb(struct device *dev, void *cb_ctx,
+					int (*cb)(void *ctx, uint16_t type,
+						  void *event, int event_len))
+{
+	struct icnss_priv *plat_priv = dev_get_drvdata(dev);
+
+	if (!plat_priv)
+		return -ENODEV;
+
+	if (!test_bit(ICNSS_WLFW_CONNECTED, &plat_priv->state))
+		return -EINVAL;
+
+	plat_priv->get_driver_async_data_cb = cb;
+	plat_priv->get_driver_async_data_ctx = cb_ctx;
+
+	return 0;
+}
+EXPORT_SYMBOL(icnss_register_driver_async_data_cb);
+
 int __icnss_register_driver(struct icnss_driver_ops *ops,
 			    struct module *owner, const char *mod_name)
 {
@@ -3756,7 +4049,8 @@ int icnss_force_wake_request(struct device *dev)
 		return 0;
 	}
 
-	icnss_pr_soc_wake("Calling SOC Wake request");
+	icnss_pr_soc_wake("Calling SOC Wake request, Ref_count: %d",
+			  atomic_read(&priv->soc_wake_ref_count));
 
 	icnss_soc_wake_event_post(priv, ICNSS_SOC_WAKE_REQUEST_EVENT,
 				  0, NULL);
@@ -3786,7 +4080,8 @@ int icnss_force_wake_release(struct device *dev)
 		return -EINVAL;
 	}
 
-	icnss_pr_soc_wake("Calling SOC Wake response");
+	icnss_pr_soc_wake("Calling SOC Wake response, Ref_count: %d",
+			  atomic_read(&priv->soc_wake_ref_count));
 
 	if (atomic_read(&priv->soc_wake_ref_count) &&
 	    icnss_atomic_dec_if_greater_one(&priv->soc_wake_ref_count)) {
@@ -3810,6 +4105,8 @@ int icnss_is_device_awake(struct device *dev)
 		icnss_pr_err("Platform driver not initialized\n");
 		return -EINVAL;
 	}
+	icnss_pr_smp2p("SOC wake ref_count: %d\n",
+		       atomic_read(&priv->soc_wake_ref_count));
 
 	return atomic_read(&priv->soc_wake_ref_count);
 }
@@ -4082,7 +4379,7 @@ int icnss_smmu_map(struct device *dev,
 	priv->smmu_iova_ipa_current = iova + len;
 	*iova_addr = (uint32_t)(iova + paddr - rounddown(paddr, PAGE_SIZE));
 
-	icnss_pr_dbg("IOVA addr mapped to physical addr %lx\n", *iova_addr);
+	icnss_pr_dbg("IOVA addr mapped to physical addr %x\n", *iova_addr);
 	return 0;
 }
 EXPORT_SYMBOL(icnss_smmu_map);
@@ -4440,12 +4737,23 @@ static ssize_t wlan_en_delay_store(struct device *dev,
 	return count;
 }
 
+static ssize_t wcn_name_show(struct device *dev,
+			     struct device_attribute *attr,
+			     char *buf)
+{
+	struct icnss_priv *priv = dev_get_drvdata(dev);
+	u32 buf_size = PAGE_SIZE;
+
+	return scnprintf(buf, buf_size, "%s\n", priv->wcn_hw_version);
+}
+
 static DEVICE_ATTR_WO(qdss_tr_start);
 static DEVICE_ATTR_WO(qdss_tr_stop);
 static DEVICE_ATTR_WO(qdss_conf_download);
 static DEVICE_ATTR_WO(hw_trc_override);
 static DEVICE_ATTR_WO(wpss_boot);
 static DEVICE_ATTR_WO(wlan_en_delay);
+static DEVICE_ATTR_RO(wcn_name);
 
 static struct attribute *icnss_attrs[] = {
 	&dev_attr_qdss_tr_start.attr,
@@ -4454,6 +4762,7 @@ static struct attribute *icnss_attrs[] = {
 	&dev_attr_hw_trc_override.attr,
 	&dev_attr_wpss_boot.attr,
 	&dev_attr_wlan_en_delay.attr,
+	&dev_attr_wcn_name.attr,
 	NULL,
 };
 
@@ -4646,7 +4955,7 @@ static int icnss_resource_parse(struct icnss_priv *priv)
 			ret = -ENOMEM;
 			goto put_clk;
 		}
-		icnss_pr_dbg("MSI Addr pa: %pa, iova: 0x%pK\n",
+		icnss_pr_dbg("MSI Addr pa: %pa, iova: %lluK\n",
 			     &priv->msi_addr_pa,
 			     priv->msi_addr_iova);
 
@@ -4783,7 +5092,8 @@ static int icnss_smmu_fault_handler(struct iommu_domain *domain,
 	return -ENOSYS;
 }
 
-#ifdef CONFIG_CNSS2_SMMU_DB_SUPPORT
+#if defined(CONFIG_CNSS2_SMMU_DB_SUPPORT) && \
+    (LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0))
 #define PCIE_LOCAL_REG_APPS_TO_Q6	0x3224
 #define PCIE_LOCAL_REG_WCSS_IE_IRQ	0x3228
 
@@ -4793,7 +5103,7 @@ static void icnss_record_smmu_fault_timestamp(struct icnss_priv *priv,
 	if (id >= SMMU_CB_MAX)
 		return;
 
-	priv->smmu_fault_timestamp[id] = sched_clock();
+	priv->smmu_fault_timestamp[id] = __arch_counter_get_cntvct();
 }
 
 static inline void icnss_pci_set_suspended(struct icnss_priv *priv, int val)
@@ -4824,6 +5134,9 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 	int ret = 0;
 	struct icnss_uevent_fw_down_data fw_down_data = {0};
 
+	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_DOORBELL_RING);
+	ret = icnss_ring_doorbell(priv, DB_MSG_SMMU_FAULT);
+
 	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_ENTRY);
 	if (test_bit(ICNSS_FW_READY, &priv->state)) {
 		fw_down_data.crashed = true;
@@ -4833,8 +5146,6 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 					 &fw_down_data);
 	}
 
-	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_DOORBELL_RING);
-	ret = icnss_ring_doorbell(priv, DB_MSG_SMMU_FAULT);
 	if (!ret)
 		icnss_pr_dbg("Sent SNOC trace stop indication");
 	else
@@ -4853,7 +5164,26 @@ void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 				dev, icnss_pci_smmu_fault_handler_irq,
 				priv);
 }
+#else
+void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
+{
+	qcom_iommu_set_fault_handler_irq(priv->iommu_domain,
+					 icnss_pci_smmu_fault_handler_irq,
+					 priv);
+}
+#endif
+#else
+void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
+{
+}
 
+static inline void icnss_pci_set_suspended(struct icnss_priv *priv, int val)
+{
+}
+#endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)) && \
+    (LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0))
 void icnss_unregister_iommu_fault_handler(struct icnss_priv *priv)
 {
 	struct platform_device *pdev = priv->pdev;
@@ -4862,30 +5192,7 @@ void icnss_unregister_iommu_fault_handler(struct icnss_priv *priv)
 	iommu_unregister_device_fault_handler(dev);
 }
 #else
-void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
-{
-	qcom_iommu_set_fault_handler_irq(priv->iommu_domain,
-					 icnss_pci_smmu_fault_handler_irq,
-					 priv);
-}
-
-static inline
 void icnss_unregister_iommu_fault_handler(struct icnss_priv *priv)
-{
-}
-#endif
-#else
-static inline
-void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
-{
-}
-
-static inline
-void icnss_unregister_iommu_fault_handler(struct icnss_priv *priv)
-{
-}
-
-static inline void icnss_pci_set_suspended(struct icnss_priv *priv, int val)
 {
 }
 #endif
@@ -4922,7 +5229,6 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 			icnss_pr_dbg("SMMU S1 stage enabled\n");
 			priv->smmu_s1_enable = true;
 			if (priv->device_id == WCN6750_DEVICE_ID ||
-			    priv->device_id == WCN7750_DEVICE_ID ||
 			    priv->device_id == WCN6450_DEVICE_ID)
 				iommu_set_fault_handler(priv->iommu_domain,
 						icnss_smmu_fault_handler,
@@ -5072,6 +5378,10 @@ static void icnss_init_control_params(struct icnss_priv *priv)
 
 	if (priv->device_id == WCN7750_DEVICE_ID)
 		icnss_set_feature_list(priv, CNSS_AUX_UC_SUPPORT_V01);
+
+	if (of_property_read_bool(priv->pdev->dev.of_node,
+				"qcom,rc-ep-short-channel"))
+		icnss_set_feature_list(priv, CNSS_RC_EP_ULTRASHORT_CHANNEL_V01);
 }
 
 static void icnss_read_device_configs(struct icnss_priv *priv)
@@ -5111,14 +5421,15 @@ static void rproc_restart_level_notifier(void *data, struct rproc *rproc)
 {
 	struct icnss_subsys_restart_level_data *restart_level_data;
 
-	icnss_pr_info("rproc name: %s recovery disable: %d",
-		      rproc->name, rproc->recovery_disabled);
+	icnss_pr_info("rproc name: %s(%zu) recovery disable: %d",
+		      rproc->name, strlen(rproc->name),
+		      rproc->recovery_disabled);
+	if (strnstr(rproc->name, "wpss", strlen(rproc->name))) {
+		restart_level_data = kzalloc(sizeof(*restart_level_data),
+					     GFP_ATOMIC);
+		if (!restart_level_data)
+			return;
 
-	restart_level_data = kzalloc(sizeof(*restart_level_data), GFP_ATOMIC);
-	if (!restart_level_data)
-		return;
-
-	if (strnstr(rproc->name, "wpss", ICNSS_RPROC_LEN)) {
 		if (rproc->recovery_disabled)
 			restart_level_data->restart_level = ICNSS_DISABLE_M3_SSR;
 		else
