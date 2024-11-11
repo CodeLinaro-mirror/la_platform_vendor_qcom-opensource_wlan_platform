@@ -1202,6 +1202,7 @@ out:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_PCI_MSM)
 void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 {
 	if (!plat_priv->powered_on) {
@@ -1215,6 +1216,12 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 	cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
 	plat_priv->powered_on = false;
 }
+#else
+void cnss_power_off_device(struct cnss_plat_data *plat_priv)
+{
+	return;
+}
+#endif
 
 bool cnss_is_device_powered_on(struct cnss_plat_data *plat_priv)
 {

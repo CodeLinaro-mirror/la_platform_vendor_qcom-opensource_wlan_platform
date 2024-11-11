@@ -145,4 +145,6 @@ int cnss_get_mhi_soc_info(struct cnss_plat_data *plat_priv,
 			  struct mhi_controller *mhi_ctrl);
 bool cnss_pci_is_sync_probe(void);
 bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev);
+void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv);
+void cnss_pci_sw_reset(struct cnss_pci_data *pci_priv, bool power_on);
 #endif /* _CNSS_PCI_PLATFORM_H*/
