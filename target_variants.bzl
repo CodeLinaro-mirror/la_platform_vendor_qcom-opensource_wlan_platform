@@ -21,8 +21,19 @@ le_targets = [
     "sun-allyes",
 ]
 
+le_32_targets = [
+    # keep sorted
+    "sa510m",
+]
+
 le_variants = [
     # keep sorted
+    "perf-defconfig",
+]
+
+le_32_variants = [
+    # keep sorted
+    "debug-defconfig",
     "perf-defconfig",
 ]
 
@@ -56,5 +67,8 @@ def get_all_vm_variants():
 def get_all_non_la_variants():
     return get_all_le_variants() + get_all_vm_variants()
 
+def get_all_le_32_variants():
+    return [(t, v) for t in le_32_targets for v in le_32_variants]
+
 def get_all_variants():
-    return get_all_la_variants() + get_all_le_variants() + get_all_vm_variants()
+    return get_all_la_variants() + get_all_le_variants() + get_all_vm_variants() + get_all_le_32_variants()
