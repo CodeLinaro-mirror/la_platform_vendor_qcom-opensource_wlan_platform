@@ -730,8 +730,10 @@ static int icnss_send_smp2p(struct icnss_priv *priv,
 	icnss_pr_smp2p("Sending SMP2P value: 0x%X, Ref count: %d\n", value,
 			atomic_read(&priv->soc_wake_ref_count));
 
-	if (msg_id == ICNSS_SOC_WAKE_REQ || msg_id == ICNSS_SOC_WAKE_REL)
+	if (msg_id == ICNSS_SOC_WAKE_REQ || msg_id == ICNSS_SOC_WAKE_REL) {
+		clear_bit(ICNSS_SOC_WAKE_DONE, &priv->state);
 		reinit_completion(&penv->smp2p_soc_wake_wait);
+	}
 
 	ret = qcom_smem_state_update_bits(
 			priv->smp2p_info[smp2p_entry].smem_state,
@@ -752,6 +754,18 @@ static int icnss_send_smp2p(struct icnss_priv *priv,
 				if (!test_bit(ICNSS_FW_DOWN, &priv->state))
 					ICNSS_ASSERT(0);
 			}
+
+		/* If fw crash happens and boots up before soc wake timeout, we
+		 * do fake completion to avoid assert from fw crash handler and
+		 * return timeout error based on ICNSS_SOC_WAKE_DONE state
+		 */
+			if (!test_bit(ICNSS_SOC_WAKE_DONE, &priv->state)) {
+				icnss_pr_err("SMP2P Soc Wake timeout msg %d, %s, Ref count: %d, state: 0x%lx\n",
+					     msg_id, icnss_smp2p_str[smp2p_entry],
+					     atomic_read(&priv->soc_wake_ref_count), priv->state);
+				ret = -ETIMEDOUT;
+			}
+
 		}
 	}
 
@@ -793,6 +807,8 @@ static irqreturn_t fw_crash_indication_handler(int irq, void *ctx)
 
 		set_bit(ICNSS_FW_DOWN, &priv->state);
 		icnss_ignore_fw_timeout(true);
+		clear_bit(ICNSS_SOC_WAKE_DONE, &priv->state);
+		complete(&priv->smp2p_soc_wake_wait);
 
 		if (test_bit(ICNSS_FW_READY, &priv->state)) {
 			clear_bit(ICNSS_FW_READY, &priv->state);
@@ -918,8 +934,10 @@ static irqreturn_t fw_soc_wake_ack_handler(int irq, void *ctx)
 {
 	struct icnss_priv *priv = ctx;
 
-	if (priv)
+	if (priv) {
+		set_bit(ICNSS_SOC_WAKE_DONE, &priv->state);
 		complete(&priv->smp2p_soc_wake_wait);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1145,7 +1163,8 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 
 	set_bit(ICNSS_WLFW_CONNECTED, &priv->state);
 
-	if (priv->device_id == ADRASTEA_DEVICE_ID) {
+	if (priv->device_id == ADRASTEA_DEVICE_ID ||
+	    priv->device_id == WCN7750_DEVICE_ID) {
 		ret = icnss_hw_power_on(priv);
 		if (ret)
 			goto fail;
@@ -1226,11 +1245,15 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 	}
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
-	    priv->device_id == WCN7750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) {
 		ret = icnss_hw_power_on(priv);
 		if (ret)
 			goto fail;
+	}
+
+	if (priv->device_id == WCN6750_DEVICE_ID ||
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN6450_DEVICE_ID) {
 
 		ret = wlfw_device_info_send_msg(priv);
 		if (ret < 0) {
@@ -1877,7 +1900,8 @@ out:
 }
 
 
-static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data)
+static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data,
+					   bool cold_boot)
 {
 	int ret = 0;
 
@@ -1893,8 +1917,14 @@ static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data)
 		icnss_free_qdss_mem(priv);
 
 	icnss_pr_info("WLAN FW is ready: 0x%lx\n", priv->state);
-
-	icnss_hw_power_off(priv);
+	/* In case of SSR, FW will not do deinit hence do not perform regulator power off.
+	 * If we turn off 1.8 AON power rail which is supplying power, it will result into pci
+	 * enumeration failure. So, avoid doing power off in this case.
+	 */
+	if (!(priv->device_id == WCN7750_DEVICE_ID))
+		icnss_hw_power_off(priv);
+	else if (cold_boot)
+		icnss_hw_power_off(priv);
 
 	if (!priv->pdev) {
 		icnss_pr_err("Device is not ready\n");
@@ -1941,7 +1971,7 @@ static int icnss_driver_event_fw_init_done(struct icnss_priv *priv, void *data)
 		ret = wlfw_wlan_mode_send_sync_msg(priv,
 			(enum wlfw_driver_mode_enum_v01)ICNSS_CALIBRATION);
 	} else {
-		icnss_driver_event_fw_ready_ind(priv, NULL);
+		icnss_driver_event_fw_ready_ind(priv, NULL, false);
 	}
 
 	return ret;
@@ -2015,28 +2045,27 @@ static int icnss_qdss_trace_req_mem_hdlr(struct icnss_priv *priv)
 	return wlfw_qdss_trace_mem_info_send_sync(priv);
 }
 
-static void *icnss_qdss_trace_pa_to_va(struct icnss_priv *priv,
+static void *icnss_qdss_trace_pa_to_va(struct icnss_fw_mem  *fw_mem, u32 mem_seg_len,
 				       u64 pa, u32 size, int *seg_id)
 {
 	int i = 0;
-	struct icnss_fw_mem *qdss_mem = priv->qdss_mem;
 	u64 offset = 0;
 	void *va = NULL;
 	u64 local_pa;
 	u32 local_size;
 
-	for (i = 0; i < priv->qdss_mem_seg_len; i++) {
-		local_pa = (u64)qdss_mem[i].pa;
-		local_size = (u32)qdss_mem[i].size;
+	for (i = 0; i < mem_seg_len; i++) {
+		local_pa = (u64)fw_mem[i].pa;
+		local_size = (u32)fw_mem[i].size;
 		if (pa == local_pa && size <= local_size) {
-			va = qdss_mem[i].va;
+			va = fw_mem[i].va;
 			break;
 		}
 		if (pa > local_pa &&
 		    pa < local_pa + local_size &&
 		    pa + size <= local_pa + local_size) {
 			offset = pa - local_pa;
-			va = qdss_mem[i].va + offset;
+			va = fw_mem[i].va + offset;
 			break;
 		}
 	}
@@ -2054,12 +2083,29 @@ static int icnss_qdss_trace_save_hdlr(struct icnss_priv *priv,
 	int i;
 	void *va = NULL;
 	u64 pa;
-	u32 size;
+	u32 size, fw_mem_seg_len;
 	int seg_id = 0;
+	struct icnss_fw_mem fw_mem_seg_data;
+	struct icnss_fw_mem *fw_mem_seg;
+	fw_mem_seg = &fw_mem_seg_data;
 
-	if (!priv->qdss_mem_seg_len) {
-		icnss_pr_err("Memory for QDSS trace is not available\n");
-		return -ENOMEM;
+	switch (event_data->mem_type) {
+	case QMI_WLFW_MEM_TYPE_DDR_V01:
+
+		fw_mem_seg[0].pa = priv->msa_pa;
+		fw_mem_seg[0].va = priv->msa_va;
+		fw_mem_seg[0].size = priv->msa_mem_size;
+		fw_mem_seg_len = 1;
+		break;
+	case QMI_WLFW_MEM_QDSS_V01:
+		if (!priv->qdss_mem_seg_len)
+			goto invalid_mem_save;
+
+		fw_mem_seg = priv->qdss_mem;
+		fw_mem_seg_len = priv->qdss_mem_seg_len;
+		break;
+	default:
+		goto invalid_mem_save;
 	}
 
 	if (event_data->mem_seg_len == 0) {
@@ -2078,7 +2124,7 @@ static int icnss_qdss_trace_save_hdlr(struct icnss_priv *priv,
 		for (i = 0; i < event_data->mem_seg_len; i++) {
 			pa = event_data->mem_seg[i].addr;
 			size = event_data->mem_seg[i].size;
-			va = icnss_qdss_trace_pa_to_va(priv, pa,
+			va = icnss_qdss_trace_pa_to_va(fw_mem_seg, fw_mem_seg_len, pa,
 						       size, &seg_id);
 			if (!va) {
 				icnss_pr_err("Fail to find matching va for pa %pa\n",
@@ -2098,6 +2144,12 @@ static int icnss_qdss_trace_save_hdlr(struct icnss_priv *priv,
 
 	kfree(data);
 	return ret;
+
+invalid_mem_save:
+	icnss_pr_err("FW Mem type %d not allocated. Invalid save request\n",
+		    event_data->mem_type);
+	kfree(data);
+	return -EINVAL;
 }
 
 static inline int icnss_atomic_dec_if_greater_one(atomic_t *v)
@@ -2584,7 +2636,7 @@ static void icnss_driver_event_work(struct work_struct *work)
 			break;
 		case ICNSS_DRIVER_EVENT_FW_READY_IND:
 			ret = icnss_driver_event_fw_ready_ind(priv,
-								 event->data);
+								 event->data, true);
 			break;
 		case ICNSS_DRIVER_EVENT_REGISTER_DRIVER:
 			ret = icnss_driver_event_register_driver(priv,
@@ -4462,28 +4514,29 @@ static int icnss_get_audio_iommu_domain(struct icnss_priv *priv)
 bool icnss_get_audio_shared_iommu_group_cap(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
-	struct device_node *audio_ion_node;
+	struct device_node *direct_link_node;
 	struct device_node *icnss_iommu_group_node;
-	struct device_node *audio_iommu_group_node;
+	struct device_node *direct_link_iommu_group_node;
 
 	if (!priv)
 		return false;
 
-	audio_ion_node = of_find_compatible_node(NULL, NULL,
-						 "qcom,msm-audio-ion");
-	if (!audio_ion_node) {
-		icnss_pr_err("Unable to get Audio ion node");
+	direct_link_node = of_find_compatible_node(NULL, NULL,
+						 "qcom,icnss-direct-link");
+	if (!direct_link_node) {
+		icnss_pr_err("Unable to get direct link node");
 		return false;
 	}
 
-	audio_iommu_group_node = of_parse_phandle(audio_ion_node,
-						  "qcom,iommu-group", 0);
-	of_node_put(audio_ion_node);
-	if (!audio_iommu_group_node) {
-		icnss_pr_err("Unable to get audio iommu group phandle");
+	direct_link_iommu_group_node = of_parse_phandle(direct_link_node,
+							"qcom,iommu-group", 0);
+	of_node_put(direct_link_node);
+
+	if (!direct_link_iommu_group_node) {
+		icnss_pr_err("Unable to get direct link iommu group phandle");
 		return false;
 	}
-	of_node_put(audio_iommu_group_node);
+	of_node_put(direct_link_iommu_group_node);
 
 	icnss_iommu_group_node = of_parse_phandle(dev->of_node,
 						 "qcom,iommu-group", 0);
@@ -4493,17 +4546,47 @@ bool icnss_get_audio_shared_iommu_group_cap(struct device *dev)
 	}
 	of_node_put(icnss_iommu_group_node);
 
-	if (icnss_iommu_group_node == audio_iommu_group_node) {
+	if (icnss_iommu_group_node == direct_link_iommu_group_node) {
 		priv->is_audio_shared_iommu_group = true;
-		icnss_pr_info("CNSS and Audio share IOMMU group");
+		icnss_pr_info("CNSS and direct link share IOMMU group");
 	} else {
-		icnss_pr_info("CNSS and Audio do not share IOMMU group");
+		icnss_pr_info("CNSS and direct link do not share IOMMU group");
 	}
 
 	return priv->is_audio_shared_iommu_group;
 }
 EXPORT_SYMBOL(icnss_get_audio_shared_iommu_group_cap);
 
+int icnss_get_direct_link_sid(struct device *dev, uint16_t *sid)
+{
+	struct icnss_priv *priv = dev_get_drvdata(dev);
+	struct device_node *direct_link_node;
+	struct of_phandle_args iommu_spec = { .args_count = 1 };
+
+	if (!priv)
+		return false;
+
+	direct_link_node = of_find_compatible_node(NULL, NULL,
+						   "qcom,icnss-direct-link");
+	if (!direct_link_node) {
+		icnss_pr_err("Unable to get direct link node");
+		return -ENODEV;
+	}
+
+	if (of_parse_phandle_with_args(direct_link_node, "iommus", "#iommu-cells",
+				       0, &iommu_spec)) {
+		of_node_put(direct_link_node);
+		icnss_pr_err("Unable to parse iommus property");
+		return -ENODEV;
+	}
+	of_node_put(direct_link_node);
+
+	of_node_put(iommu_spec.np);
+	*sid = (iommu_spec.args[0] & 0x1f);
+	icnss_pr_info("Direct link SID value:%u", *sid);
+	return 0;
+}
+EXPORT_SYMBOL(icnss_get_direct_link_sid);
 
 /**
  * icnss_get_fw_cap - Check whether FW supports specific capability or not
@@ -4557,6 +4640,25 @@ struct iommu_domain *icnss_smmu_get_domain(struct device *dev)
 	return priv->iommu_domain;
 }
 EXPORT_SYMBOL(icnss_smmu_get_domain);
+
+/**
+ * icnss_get_wifi_kobject -return wifi kobject
+ * Return: Null, to maintain driver comnpatibilty
+ */
+struct kobject *icnss_get_wifi_kobj(struct device *dev)
+{
+	struct icnss_priv *priv = icnss_get_plat_priv();
+
+	if (!priv) {
+		icnss_pr_err("Platform priv is NULL\n");
+		return NULL;
+	}
+
+	icnss_pr_dbg("Successfully returned wifi kobj\n");
+
+	return priv->wifi_kobj;
+}
+EXPORT_SYMBOL(icnss_get_wifi_kobj);
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 static int icnss_iommu_map(struct iommu_domain *domain,
@@ -5529,6 +5631,9 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		priv->iommu_domain =
 			iommu_get_domain_for_dev(&pdev->dev);
 
+		if (!priv->iommu_domain)
+			return -EPROBE_DEFER;
+
 		ret = of_property_read_string(of_node, "qcom,iommu-dma",
 					      &iommu_dma_type);
 		if (!ret && !strcmp("fastmap", iommu_dma_type)) {
@@ -5649,6 +5754,21 @@ static const struct of_device_id icnss_dt_match[] = {
 };
 
 MODULE_DEVICE_TABLE(of, icnss_dt_match);
+
+static const struct platform_device_id icnss_direct_link_platform_id_table[] = {
+	{ .name = "direct-link", .driver_data = DIRECT_LINK_DEVICE_ID, },
+	{ },
+};
+
+static const struct of_device_id icnss_direct_link_dt_match[] = {
+	{
+		.compatible = "qcom,icnss-direct-link",
+		.data = (void *)&icnss_direct_link_platform_id_table[0]},
+
+	{ },
+};
+
+MODULE_DEVICE_TABLE(of, icnss_direct_link_dt_match);
 
 static void icnss_init_control_params(struct icnss_priv *priv)
 {
@@ -5833,6 +5953,24 @@ static const char *icnss_get_device_name(const struct platform_device_id *device
 	return "UNKNOWN";
 }
 
+static int icnss_direct_link_probe(struct platform_device *pdev)
+{
+	icnss_pr_info("icnss direct link device probed!\n");
+	return 0;
+}
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
+static int icnss_direct_link_remove(struct platform_device *pdev)
+#else
+static void icnss_direct_link_remove(struct platform_device *pdev)
+#endif
+{
+	icnss_pr_info("icnss direct link device removed!\n");
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
+	return 0;
+#endif
+}
+
 static int icnss_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -5843,11 +5981,6 @@ static int icnss_probe(struct platform_device *pdev)
 	const struct platform_device_id *device_id;
 	static bool prealloc_initialized;
 
-	if (dev_get_drvdata(dev)) {
-		icnss_pr_err("Driver is already initialized\n");
-		return -EEXIST;
-	}
-
 	of_id = of_match_device(icnss_dt_match, &pdev->dev);
 	if (!of_id || !of_id->data) {
 		icnss_pr_err("Failed to find of match device!\n");
@@ -5856,6 +5989,11 @@ static int icnss_probe(struct platform_device *pdev)
 	}
 
 	device_id = of_id->data;
+	if (dev_get_drvdata(dev)) {
+		icnss_pr_err("Driver is already initialized\n");
+		return -EEXIST;
+	}
+
 	device_name = icnss_get_device_name(device_id);
 	icnss_pr_dbg("Platform driver probe for %s!\n", device_name);
 
@@ -6144,6 +6282,11 @@ static int icnss_pm_suspend(struct device *dev)
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	if (!priv) {
+		icnss_pr_err("icnss priv is NULL\n");
+		return -ENOMEM;
+	}
+
 	if (priv->magic != ICNSS_MAGIC) {
 		icnss_pr_err("Invalid drvdata for pm suspend: dev %pK, data %pK, magic 0x%x\n",
 			     dev, priv, priv->magic);
@@ -6184,6 +6327,11 @@ static int icnss_pm_resume(struct device *dev)
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	if (!priv) {
+		icnss_pr_err("icnss priv is NULL\n");
+		return -ENOMEM;
+	}
+
 	if (priv->magic != ICNSS_MAGIC) {
 		icnss_pr_err("Invalid drvdata for pm resume: dev %pK, data %pK, magic 0x%x\n",
 			     dev, priv, priv->magic);
@@ -6214,6 +6362,11 @@ static int icnss_pm_suspend_noirq(struct device *dev)
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	if (!priv) {
+		icnss_pr_err("icnss priv is NULL\n");
+		return -ENOMEM;
+	}
+
 	if (priv->magic != ICNSS_MAGIC) {
 		icnss_pr_err("Invalid drvdata for pm suspend_noirq: dev %pK, data %pK, magic 0x%x\n",
 			     dev, priv, priv->magic);
@@ -6243,6 +6396,11 @@ static int icnss_pm_resume_noirq(struct device *dev)
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	if (!priv) {
+		icnss_pr_err("icnss priv is NULL\n");
+		return -ENOMEM;
+	}
+
 	if (priv->magic != ICNSS_MAGIC) {
 		icnss_pr_err("Invalid drvdata for pm resume_noirq: dev %pK, data %pK, magic 0x%x\n",
 			     dev, priv, priv->magic);
@@ -6271,6 +6429,11 @@ static int icnss_pm_runtime_suspend(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 	int ret = 0;
+
+	if (!priv) {
+		icnss_pr_err("icnss priv is NULL\n");
+		return -ENOMEM;
+	}
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID) {
 		icnss_pr_err("Ignore runtime suspend:\n");
@@ -6307,6 +6470,11 @@ static int icnss_pm_runtime_resume(struct device *dev)
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	if (!priv) {
+		icnss_pr_err("icnss priv is NULL\n");
+		return -ENOMEM;
+	}
+
 	if (priv->device_id == ADRASTEA_DEVICE_ID) {
 		icnss_pr_err("Ignore runtime resume\n");
 		goto out;
@@ -6333,6 +6501,11 @@ out:
 static int icnss_pm_runtime_idle(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
+
+	if (!priv) {
+		icnss_pr_err("icnss priv is NULL\n");
+		return -ENOMEM;
+	}
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID) {
 		icnss_pr_err("Ignore runtime idle\n");
@@ -6367,6 +6540,15 @@ static struct platform_driver icnss_driver = {
 	},
 };
 
+static struct platform_driver icnss_direct_link_driver = {
+	.probe  = icnss_direct_link_probe,
+	.remove = icnss_direct_link_remove,
+	.driver = {
+		.name = "icnss2_direct_link",
+		.of_match_table = icnss_direct_link_dt_match,
+	},
+};
+
 /**
  * icnss_has_valid_dt_node() - Check if valid device tree node present
  *
@@ -6388,18 +6570,45 @@ static bool icnss_has_valid_dt_node(void)
 	return false;
 }
 
+static bool icnss_direct_link_has_valid_dt_node(void)
+{
+	struct device_node *dn = NULL;
+
+	for_each_matching_node(dn, icnss_direct_link_dt_match) {
+		if (of_device_is_available(dn))
+			return true;
+	}
+
+	icnss_pr_dbg("No valid icnss2 direct link dtsi entry\n");
+	return false;
+}
+
 static int __init icnss_initialize(void)
 {
+	int ret;
+
 	if (!icnss_has_valid_dt_node())
 		return -ENODEV;
 
 	icnss_debug_init();
-	return platform_driver_register(&icnss_driver);
+
+	ret = platform_driver_register(&icnss_driver);
+	if (!ret && icnss_direct_link_has_valid_dt_node()) {
+		ret = platform_driver_register(&icnss_direct_link_driver);
+		icnss_pr_info("Direct link driver register status:%d", ret);
+		if (ret) {
+			platform_driver_unregister(&icnss_driver);
+			icnss_debug_deinit();
+		}
+	}
+
+	return ret;
 }
 
 static void __exit icnss_exit(void)
 {
 	platform_driver_unregister(&icnss_driver);
+	platform_driver_unregister(&icnss_direct_link_driver);
 	icnss_debug_deinit();
 }
 

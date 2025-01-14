@@ -195,6 +195,7 @@ enum icnss_driver_state {
 	ICNSS_SLATE_UP,
 	ICNSS_SLATE_READY,
 	ICNSS_LOW_POWER,
+	ICNSS_SOC_WAKE_DONE,
 };
 
 struct ce_irq_list {
@@ -640,6 +641,7 @@ struct icnss_priv {
 	bool is_audio_shared_iommu_group;
 	phys_addr_t fw_lpass_shared_mem_pa;
 	struct iommu_domain *audio_iommu_domain;
+	struct kobject *wifi_kobj;
 };
 
 struct icnss_reg_info {
