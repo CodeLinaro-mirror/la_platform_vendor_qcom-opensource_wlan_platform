@@ -530,7 +530,7 @@ static const struct mhi_controller_config cnss_mhi_config_no_diag = {
 #endif
 	.timeout_ms = 10000,
 	.use_bounce_buf = false,
-	.buf_len = 0x8000,
+	.buf_len = CONFIG_MHI_BUF_LEN,
 	.num_channels = ARRAY_SIZE(cnss_mhi_channels_no_diag),
 	.ch_cfg = cnss_mhi_channels_no_diag,
 	.num_events = ARRAY_SIZE(cnss_mhi_events),
@@ -546,7 +546,7 @@ static const struct mhi_controller_config cnss_mhi_config_default = {
 #endif
 	.timeout_ms = 10000,
 	.use_bounce_buf = false,
-	.buf_len = 0x8000,
+	.buf_len = CONFIG_MHI_BUF_LEN,
 	.num_channels = ARRAY_SIZE(cnss_mhi_channels),
 	.ch_cfg = cnss_mhi_channels,
 	.num_events = ARRAY_SIZE(cnss_mhi_events),
@@ -558,7 +558,7 @@ static const struct mhi_controller_config cnss_mhi_config_genoa = {
 	.max_channels = 32,
 	.timeout_ms = 10000,
 	.use_bounce_buf = false,
-	.buf_len = 0x8000,
+	.buf_len = CONFIG_MHI_BUF_LEN,
 	.num_channels = ARRAY_SIZE(cnss_mhi_channels_genoa),
 	.ch_cfg = cnss_mhi_channels_genoa,
 	.num_events = ARRAY_SIZE(cnss_mhi_events) -
@@ -574,7 +574,7 @@ static const struct mhi_controller_config cnss_mhi_config_no_satellite = {
 	.max_channels = 32,
 	.timeout_ms = 10000,
 	.use_bounce_buf = false,
-	.buf_len = 0x8000,
+	.buf_len = CONFIG_MHI_BUF_LEN,
 	.num_channels = ARRAY_SIZE(cnss_mhi_channels) -
 			CNSS_MHI_SATELLITE_CH_CFG_COUNT,
 	.ch_cfg = cnss_mhi_channels,
@@ -2733,7 +2733,8 @@ retry:
 	return ret;
 }
 
-static void cnss_pci_power_off_mhi(struct cnss_pci_data *pci_priv)
+static void
+cnss_pci_power_off_mhi(struct cnss_pci_data *pci_priv, bool mhi_force_power_off)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 
@@ -2748,7 +2749,7 @@ static void cnss_pci_power_off_mhi(struct cnss_pci_data *pci_priv)
 	cnss_pci_set_mhi_state_bit(pci_priv, CNSS_MHI_RESUME);
 	cnss_pci_set_mhi_state_bit(pci_priv, CNSS_MHI_POWERING_OFF);
 
-	if (!pci_priv->pci_link_down_ind)
+	if (!pci_priv->pci_link_down_ind && !mhi_force_power_off)
 		cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_POWER_OFF);
 	else
 		cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_FORCE_POWER_OFF);
@@ -3457,12 +3458,18 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 	int ret = 0;
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	unsigned int timeout;
+	bool mhi_force_power_off = false;
 	int retry = 0, bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
 	int sw_ctrl_gpio = plat_priv->pinctrl_info.sw_ctrl_gpio;
 
+	if (!pci_priv->mhi_ctrl) {
+		cnss_pr_err("mhi not initiated, exit\n", ret);
+		goto out;
+	}
+
 	if (plat_priv->ramdump_info_v2.dump_data_valid) {
 		cnss_pci_clear_dump_info(pci_priv);
-		cnss_pci_power_off_mhi(pci_priv);
+		cnss_pci_power_off_mhi(pci_priv, false);
 		cnss_suspend_pci_link(pci_priv);
 		cnss_pci_deinit_mhi(pci_priv);
 		cnss_power_off_device(plat_priv);
@@ -3521,11 +3528,17 @@ retry:
 		cnss_fatal_err("Failed to start MHI, err = %d\n", ret);
 		if (!test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state) &&
 		    !pci_priv->pci_link_down_ind && timeout) {
-			/* Start recovery directly for MHI start failures */
-			cnss_schedule_recovery(&pci_priv->pci_dev->dev,
-					       CNSS_REASON_DEFAULT);
+			if (test_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state)) {
+				CNSS_ASSERT(0);
+				mhi_force_power_off = true;
+			} else {
+				/* Start recovery directly for MHI start failures */
+				cnss_schedule_recovery(&pci_priv->pci_dev->dev,
+						       CNSS_REASON_DEFAULT);
+				return 0;
+			}
 		}
-		return 0;
+		goto stop_mhi;
 	}
 
 	if (test_bit(USE_CORE_ONLY_FW, &plat_priv->ctrl_params.quirks)) {
@@ -3553,7 +3566,7 @@ retry:
 
 stop_mhi:
 	cnss_pci_set_wlaon_pwr_ctrl(pci_priv, false, true, true);
-	cnss_pci_power_off_mhi(pci_priv);
+	cnss_pci_power_off_mhi(pci_priv, mhi_force_power_off);
 	cnss_suspend_pci_link(pci_priv);
 	cnss_pci_deinit_mhi(pci_priv);
 power_off:
@@ -3607,7 +3620,7 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 	if (plat_priv->ramdump_info_v2.dump_data_valid)
 		goto skip_power_off;
 
-	cnss_pci_power_off_mhi(pci_priv);
+	cnss_pci_power_off_mhi(pci_priv, false);
 	ret = cnss_suspend_pci_link(pci_priv);
 	if (ret)
 		cnss_pr_err("Failed to suspend PCI link, err = %d\n", ret);
@@ -3659,7 +3672,7 @@ static int cnss_qca6290_ramdump(struct cnss_pci_data *pci_priv)
 	ret = cnss_do_elf_ramdump(plat_priv);
 
 	cnss_pci_clear_dump_info(pci_priv);
-	cnss_pci_power_off_mhi(pci_priv);
+	cnss_pci_power_off_mhi(pci_priv, false);
 	cnss_suspend_pci_link(pci_priv);
 	cnss_pci_deinit_mhi(pci_priv);
 	cnss_power_off_device(plat_priv);
