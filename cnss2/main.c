@@ -2262,6 +2262,8 @@ static const char *cnss_recovery_reason_to_str(enum cnss_recovery_reason reason)
 		return "RDDM";
 	case CNSS_REASON_TIMEOUT:
 		return "TIMEOUT";
+	case CNSS_REASON_FW_ASSERTION_FAIL:
+		return "FW_ASSERTION_FAIL";
 	}
 
 	return "UNKNOWN";
@@ -5068,7 +5070,7 @@ static void cnss_deinitialize_mem_pool(void)
 }
 #endif
 
-void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
+static void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
 {
 	struct cnss_plat_data *plat_priv = (struct cnss_plat_data *)cb_ctx;
 
