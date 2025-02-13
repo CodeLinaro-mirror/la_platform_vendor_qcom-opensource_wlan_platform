@@ -1464,8 +1464,7 @@ static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data)
 	clear_bit(ICNSS_MODE_ON, &priv->state);
 	atomic_set(&priv->soc_wake_ref_count, 0);
 
-	if (priv->device_id == WCN6750_DEVICE_ID ||
-	    priv->device_id == WCN6450_DEVICE_ID)
+	if (priv->device_id == WCN6750_DEVICE_ID)
 		icnss_free_qdss_mem(priv);
 
 	icnss_pr_info("WLAN FW is ready: 0x%lx\n", priv->state);
@@ -1523,6 +1522,29 @@ static int icnss_driver_event_fw_init_done(struct icnss_priv *priv, void *data)
 	return ret;
 }
 
+void icnss_free_qdss_mem(struct icnss_priv *priv)
+{
+	struct platform_device *pdev = priv->pdev;
+	struct icnss_fw_mem *qdss_mem = priv->qdss_mem;
+	int i;
+
+	for (i = 0; i < priv->qdss_mem_seg_len; i++) {
+		if (qdss_mem[i].va && qdss_mem[i].size) {
+			icnss_pr_dbg("Freeing memory for QDSS: pa: %pa, size: 0x%zx, type: %u\n",
+				     &qdss_mem[i].pa, qdss_mem[i].size,
+				     qdss_mem[i].type);
+			dma_free_coherent(&pdev->dev,
+					  qdss_mem[i].size, qdss_mem[i].va,
+					  qdss_mem[i].pa);
+			qdss_mem[i].va = NULL;
+			qdss_mem[i].pa = 0;
+			qdss_mem[i].size = 0;
+			qdss_mem[i].type = 0;
+		}
+	}
+	priv->qdss_mem_seg_len = 0;
+}
+
 static int icnss_alloc_qdss_mem(struct icnss_priv *priv)
 {
 	struct platform_device *pdev = priv->pdev;
@@ -1557,29 +1579,6 @@ static int icnss_alloc_qdss_mem(struct icnss_priv *priv)
 	return 0;
 }
 
-void icnss_free_qdss_mem(struct icnss_priv *priv)
-{
-	struct platform_device *pdev = priv->pdev;
-	struct icnss_fw_mem *qdss_mem = priv->qdss_mem;
-	int i;
-
-	for (i = 0; i < priv->qdss_mem_seg_len; i++) {
-		if (qdss_mem[i].va && qdss_mem[i].size) {
-			icnss_pr_dbg("Freeing memory for QDSS: pa: %pa, size: 0x%zx, type: %u\n",
-				     &qdss_mem[i].pa, qdss_mem[i].size,
-				     qdss_mem[i].type);
-			dma_free_coherent(&pdev->dev,
-					  qdss_mem[i].size, qdss_mem[i].va,
-					  qdss_mem[i].pa);
-			qdss_mem[i].va = NULL;
-			qdss_mem[i].pa = 0;
-			qdss_mem[i].size = 0;
-			qdss_mem[i].type = 0;
-		}
-	}
-	priv->qdss_mem_seg_len = 0;
-}
-
 static int icnss_qdss_trace_req_mem_hdlr(struct icnss_priv *priv)
 {
 	int ret = 0;
@@ -1591,28 +1590,27 @@ static int icnss_qdss_trace_req_mem_hdlr(struct icnss_priv *priv)
 	return wlfw_qdss_trace_mem_info_send_sync(priv);
 }
 
-static void *icnss_qdss_trace_pa_to_va(struct icnss_priv *priv,
+static void *icnss_qdss_trace_pa_to_va(struct icnss_fw_mem  *fw_mem, u32 mem_seg_len,
 				       u64 pa, u32 size, int *seg_id)
 {
 	int i = 0;
-	struct icnss_fw_mem *qdss_mem = priv->qdss_mem;
 	u64 offset = 0;
 	void *va = NULL;
 	u64 local_pa;
 	u32 local_size;
 
-	for (i = 0; i < priv->qdss_mem_seg_len; i++) {
-		local_pa = (u64)qdss_mem[i].pa;
-		local_size = (u32)qdss_mem[i].size;
+	for (i = 0; i < mem_seg_len; i++) {
+		local_pa = (u64)fw_mem[i].pa;
+		local_size = (u32)fw_mem[i].size;
 		if (pa == local_pa && size <= local_size) {
-			va = qdss_mem[i].va;
+			va = fw_mem[i].va;
 			break;
 		}
 		if (pa > local_pa &&
 		    pa < local_pa + local_size &&
 		    pa + size <= local_pa + local_size) {
 			offset = pa - local_pa;
-			va = qdss_mem[i].va + offset;
+			va = fw_mem[i].va + offset;
 			break;
 		}
 	}
@@ -1630,12 +1628,30 @@ static int icnss_qdss_trace_save_hdlr(struct icnss_priv *priv,
 	int i;
 	void *va = NULL;
 	u64 pa;
-	u32 size;
+	u32 size, fw_mem_seg_len;
 	int seg_id = 0;
+	struct icnss_fw_mem fw_mem_seg_data;
+	struct icnss_fw_mem *fw_mem_seg;
 
-	if (!priv->qdss_mem_seg_len) {
-		icnss_pr_err("Memory for QDSS trace is not available\n");
-		return -ENOMEM;
+	fw_mem_seg = &fw_mem_seg_data;
+
+	switch (event_data->mem_type) {
+	case QMI_WLFW_MEM_TYPE_DDR_V01:
+
+		fw_mem_seg[0].pa = priv->msa_pa;
+		fw_mem_seg[0].va = priv->msa_va;
+		fw_mem_seg[0].size = priv->msa_mem_size;
+		fw_mem_seg_len = 1;
+		break;
+	case QMI_WLFW_MEM_QDSS_V01:
+		if (!priv->qdss_mem_seg_len)
+			goto invalid_mem_save;
+
+		fw_mem_seg = priv->qdss_mem;
+		fw_mem_seg_len = priv->qdss_mem_seg_len;
+		break;
+	default:
+		goto invalid_mem_save;
 	}
 
 	if (event_data->mem_seg_len == 0) {
@@ -1654,7 +1670,7 @@ static int icnss_qdss_trace_save_hdlr(struct icnss_priv *priv,
 		for (i = 0; i < event_data->mem_seg_len; i++) {
 			pa = event_data->mem_seg[i].addr;
 			size = event_data->mem_seg[i].size;
-			va = icnss_qdss_trace_pa_to_va(priv, pa,
+			va = icnss_qdss_trace_pa_to_va(fw_mem_seg, fw_mem_seg_len, pa,
 						       size, &seg_id);
 			if (!va) {
 				icnss_pr_err("Fail to find matching va for pa %pa\n",
@@ -1674,6 +1690,12 @@ static int icnss_qdss_trace_save_hdlr(struct icnss_priv *priv,
 
 	kfree(data);
 	return ret;
+
+invalid_mem_save:
+	icnss_pr_err("FW Mem type %d not allocated. Invalid save request\n",
+		     event_data->mem_type);
+	kfree(data);
+	return -EINVAL;
 }
 
 static inline int icnss_atomic_dec_if_greater_one(atomic_t *v)
@@ -4792,6 +4814,9 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 
 		priv->iommu_domain =
 			iommu_get_domain_for_dev(&pdev->dev);
+
+		if (!priv->iommu_domain)
+			return -EPROBE_DEFER;
 
 		ret = of_property_read_string(dev->of_node, "qcom,iommu-dma",
 					      &iommu_dma_type);
