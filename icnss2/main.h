@@ -195,6 +195,7 @@ enum icnss_driver_state {
 	ICNSS_SLATE_UP,
 	ICNSS_SLATE_READY,
 	ICNSS_LOW_POWER,
+	ICNSS_SOC_WAKE_DONE,
 };
 
 struct ce_irq_list {
@@ -244,6 +245,12 @@ struct icnss_clk_info {
 	struct clk *clk;
 	struct icnss_clk_cfg cfg;
 	u32 enabled;
+};
+
+struct icnss_pinctrl_info {
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *sw_ctrl;
+	int sw_ctrl_gpio;
 };
 
 struct icnss_fw_mem {
@@ -470,6 +477,7 @@ struct icnss_priv {
 	struct ce_irq_list ce_irq_list[ICNSS_MAX_IRQ_REGISTRATIONS];
 	struct list_head vreg_list;
 	struct list_head clk_list;
+	struct icnss_pinctrl_info pinctrl_info;
 	struct icnss_cpr_info cpr_info;
 	unsigned long device_id;
 	struct icnss_msi_config *msi_config;
@@ -640,6 +648,7 @@ struct icnss_priv {
 	bool is_audio_shared_iommu_group;
 	phys_addr_t fw_lpass_shared_mem_pa;
 	struct iommu_domain *audio_iommu_domain;
+	struct kobject *wifi_kobj;
 };
 
 struct icnss_reg_info {

@@ -449,28 +449,31 @@ static int cnss_get_audio_iommu_domain(struct cnss_plat_data *plat_priv)
 bool cnss_get_audio_shared_iommu_group_cap(struct device *dev)
 {
 	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
-	struct device_node *audio_ion_node;
+	struct device_node *direct_link_node;
 	struct device_node *cnss_iommu_group_node;
-	struct device_node *audio_iommu_group_node;
+	struct device_node *direct_link_iommu_group_node;
 
-	if (!plat_priv)
-		return false;
-
-	audio_ion_node = of_find_compatible_node(NULL, NULL,
-						 "qcom,msm-audio-ion");
-	if (!audio_ion_node) {
-		cnss_pr_err("Unable to get Audio ion node");
+	if (!plat_priv) {
+		cnss_pr_err("plat priv is not available");
 		return false;
 	}
 
-	audio_iommu_group_node = of_parse_phandle(audio_ion_node,
-						  "qcom,iommu-group", 0);
-	of_node_put(audio_ion_node);
-	if (!audio_iommu_group_node) {
-		cnss_pr_err("Unable to get audio iommu group phandle");
+	direct_link_node = of_find_compatible_node(NULL, NULL,
+						 "qcom,cnss-direct-link");
+	if (!direct_link_node) {
+		cnss_pr_err("Unable to get direct link node");
 		return false;
 	}
-	of_node_put(audio_iommu_group_node);
+
+	direct_link_iommu_group_node = of_parse_phandle(direct_link_node,
+							"qcom,iommu-group", 0);
+
+	of_node_put(direct_link_node);
+	if (!direct_link_iommu_group_node) {
+		cnss_pr_err("Unable to get direct link iommu group phandle");
+		return false;
+	}
+	of_node_put(direct_link_iommu_group_node);
 
 	cnss_iommu_group_node = of_parse_phandle(dev->of_node,
 						 "qcom,iommu-group", 0);
@@ -480,16 +483,49 @@ bool cnss_get_audio_shared_iommu_group_cap(struct device *dev)
 	}
 	of_node_put(cnss_iommu_group_node);
 
-	if (cnss_iommu_group_node == audio_iommu_group_node) {
+	if (cnss_iommu_group_node == direct_link_iommu_group_node) {
 		plat_priv->is_audio_shared_iommu_group = true;
-		cnss_pr_info("CNSS and Audio share IOMMU group");
+		cnss_pr_info("CNSS and direct link share IOMMU group");
 	} else {
-		cnss_pr_info("CNSS and Audio do not share IOMMU group");
+		cnss_pr_info("CNSS and direct link do not share IOMMU group");
 	}
 
 	return plat_priv->is_audio_shared_iommu_group;
 }
 EXPORT_SYMBOL(cnss_get_audio_shared_iommu_group_cap);
+
+int cnss_get_direct_link_sid(struct device *dev, uint16_t *sid)
+{
+	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
+	struct device_node *direct_link_node;
+	struct of_phandle_args iommu_spec = { .args_count = 1 };
+
+	if (!plat_priv) {
+		cnss_pr_err("plat priv is not available");
+		return -ENODEV;
+	}
+
+	direct_link_node = of_find_compatible_node(NULL, NULL,
+						   "qcom,cnss-direct-link");
+	if (!direct_link_node) {
+		cnss_pr_err("Unable to get direct link node");
+		return -ENODEV;
+	}
+
+	if (of_parse_phandle_with_args(direct_link_node, "iommus", "#iommu-cells",
+				       0, &iommu_spec)) {
+		of_node_put(direct_link_node);
+		cnss_pr_err("Unable to parse iommus property");
+		return -ENODEV;
+	}
+	of_node_put(direct_link_node);
+
+	of_node_put(iommu_spec.np);
+	*sid = (iommu_spec.args[0] & 0x1f);
+	cnss_pr_dbg("Direct link SID value:%u", *sid);
+	return 0;
+}
+EXPORT_SYMBOL(cnss_get_direct_link_sid);
 
 int cnss_set_feature_list(struct cnss_plat_data *plat_priv,
 			  enum cnss_feature_v01 feature)
@@ -1022,6 +1058,7 @@ static bool cnss_is_aux_support_enabled(struct cnss_plat_data *plat_priv)
 	switch (plat_priv->device_id) {
 	case PEACH_DEVICE_ID:
 	case COLOGNE_DEVICE_ID:
+	case FIG_DEVICE_ID:
 		if (!plat_priv->fw_aux_uc_support) {
 			cnss_pr_dbg("FW does not support aux uc capability\n");
 			return false;
@@ -1053,6 +1090,12 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 	cnss_wlfw_tme_patch_dnld_send_sync(plat_priv,
 					   WLFW_TME_LITE_PATCH_FILE_V01);
 
+	if (test_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state)) {
+		cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+		cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+
+		clear_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state);
+	}
 	ret = cnss_bus_load_sku_license(plat_priv);
 	if (!ret)
 		cnss_wlfw_soft_sku_dnld_send_sync(plat_priv);
@@ -2015,7 +2058,7 @@ static void cnss_deinit_host_sol_gpio(struct cnss_plat_data *plat_priv)
 	gpio_free(sol_gpio->host_sol_gpio);
 }
 
-static int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
+int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
 {
 	int ret;
 
@@ -2226,6 +2269,8 @@ static const char *cnss_recovery_reason_to_str(enum cnss_recovery_reason reason)
 		return "RDDM";
 	case CNSS_REASON_TIMEOUT:
 		return "TIMEOUT";
+	case CNSS_REASON_FW_ASSERTION_FAIL:
+		return "FW_ASSERTION_FAIL";
 	}
 
 	return "UNKNOWN";
@@ -2626,6 +2671,7 @@ static int cnss_cold_boot_cal_start_hdlr(struct cnss_plat_data *plat_priv)
 	case MANGO_DEVICE_ID:
 	case PEACH_DEVICE_ID:
 	case COLOGNE_DEVICE_ID:
+	case FIG_DEVICE_ID:
 		break;
 	default:
 		cnss_pr_err("Not supported for device ID 0x%lx\n",
@@ -3906,6 +3952,7 @@ int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 	case MANGO_DEVICE_ID:
 	case PEACH_DEVICE_ID:
 	case COLOGNE_DEVICE_ID:
+	case FIG_DEVICE_ID:
 		ret = cnss_register_ramdump_v2(plat_priv);
 		break;
 	default:
@@ -3930,6 +3977,7 @@ void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 	case MANGO_DEVICE_ID:
 	case PEACH_DEVICE_ID:
 	case COLOGNE_DEVICE_ID:
+	case FIG_DEVICE_ID:
 		cnss_unregister_ramdump_v2(plat_priv);
 		break;
 	default:
@@ -4645,13 +4693,13 @@ static ssize_t tme_opt_file_download_store(struct device *dev,
 		return count;
 	}
 
-	if (plat_priv->device_id == PEACH_DEVICE_ID &&
+	if ((plat_priv->device_id == PEACH_DEVICE_ID ||
+	     plat_priv->device_id == FIG_DEVICE_ID) &&
 	    cnss_bus_runtime_pm_get_sync(plat_priv) < 0)
 		goto runtime_pm_put;
 
 	if (strcmp(cmd, "sec") == 0) {
-		cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
-		cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+		set_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state);
 	} else if (strcmp(cmd, "rpr") == 0) {
 		cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_RPR_FILE_V01);
 		cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_RPR_FILE_V01);
@@ -4663,7 +4711,8 @@ static ssize_t tme_opt_file_download_store(struct device *dev,
 	cnss_pr_dbg("Received tme_opt_file_download indication cmd: %s\n", cmd);
 
 runtime_pm_put:
-	if (plat_priv->device_id == PEACH_DEVICE_ID)
+	if (plat_priv->device_id == PEACH_DEVICE_ID ||
+	    plat_priv->device_id == FIG_DEVICE_ID)
 		cnss_bus_runtime_pm_put(plat_priv);
 	return count;
 }
@@ -5004,6 +5053,9 @@ static void cnss_sram_dump_init(struct cnss_plat_data *plat_priv)
 	} else if (plat_priv->device_id == PEACH_DEVICE_ID) {
 		plat_priv->sram_dump_start_addr = SRAM_START;
 		plat_priv->sram_dump_size = PEACH_SRAM_SIZE;
+	} else if (plat_priv->device_id == FIG_DEVICE_ID) {
+		plat_priv->sram_dump_start_addr = SRAM_START;
+		plat_priv->sram_dump_size = FIG_SRAM_SIZE;
 	}
 
 	/* Postpone sram_dump allocation to when it is required.
@@ -5032,7 +5084,7 @@ static void cnss_deinitialize_mem_pool(void)
 }
 #endif
 
-void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
+static void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
 {
 	struct cnss_plat_data *plat_priv = (struct cnss_plat_data *)cb_ctx;
 
@@ -5047,10 +5099,6 @@ void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
 static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 {
 	int ret;
-
-	ret = cnss_init_sol_gpio(plat_priv);
-	if (ret)
-		return ret;
 
 	timer_setup(&plat_priv->fw_boot_timer,
 		    cnss_bus_fw_boot_timeout_hdlr, 0);
@@ -5097,7 +5145,8 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 				  "qcom,rc-ep-short-channel"))
 		cnss_set_feature_list(plat_priv, CNSS_RC_EP_ULTRASHORT_CHANNEL_V01);
 	if (plat_priv->device_id == PEACH_DEVICE_ID ||
-	    plat_priv->device_id == COLOGNE_DEVICE_ID)
+	    plat_priv->device_id == COLOGNE_DEVICE_ID ||
+	    plat_priv->device_id == FIG_DEVICE_ID)
 		cnss_set_feature_list(plat_priv, CNSS_AUX_UC_SUPPORT_V01);
 
 	return 0;
@@ -5205,6 +5254,8 @@ static const struct platform_device_id cnss_platform_id_table[] = {
 	{ .name = "peach", .driver_data = PEACH_DEVICE_ID, },
 	{ .name = "cologne", .driver_data = COLOGNE_DEVICE_ID, },
 	{ .name = "qcaconv", .driver_data = 0, },
+	{ .name = "direct-link", .driver_data = DIRECT_LINK_DEVICE_ID, },
+	{ .name = "fig", .driver_data = FIG_DEVICE_ID, },
 	{ },
 };
 
@@ -5236,6 +5287,12 @@ static const struct of_device_id cnss_of_match_table[] = {
 	{
 		.compatible = "qcom,cnss-qca-converged",
 		.data = (void *)&cnss_platform_id_table[8]},
+	{
+		.compatible = "qcom,cnss-direct-link",
+		.data = (void *)&cnss_platform_id_table[9]},
+	{
+		.compatible = "qcom,cnss-fig",
+		.data = (void *)&cnss_platform_id_table[10]},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, cnss_of_match_table);
@@ -5652,6 +5709,19 @@ static int cnss_probe(struct platform_device *plat_dev)
 	const struct platform_device_id *device_id;
 	static bool prealloc_initialized;
 
+	of_id = of_match_device(cnss_of_match_table, &plat_dev->dev);
+	if (!of_id || !of_id->data) {
+		cnss_pr_err("Failed to find of match device!\n");
+		ret = -ENODEV;
+		goto out;
+	}
+
+	device_id = of_id->data;
+	if (device_id->driver_data == DIRECT_LINK_DEVICE_ID) {
+		cnss_pr_info("cnss direct link device probed!\n");
+		return 0;
+	}
+
 	if (cnss_get_plat_priv(plat_dev)) {
 		cnss_pr_err("Driver is already initialized!\n");
 		ret = -EEXIST;
@@ -5661,15 +5731,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 	ret = cnss_plat_env_available();
 	if (ret)
 		goto out;
-
-	of_id = of_match_device(cnss_of_match_table, &plat_dev->dev);
-	if (!of_id || !of_id->data) {
-		cnss_pr_err("Failed to find of match device!\n");
-		ret = -ENODEV;
-		goto out;
-	}
-
-	device_id = of_id->data;
 
 	plat_priv = devm_kzalloc(&plat_dev->dev, sizeof(*plat_priv),
 				 GFP_KERNEL);
@@ -5817,6 +5878,22 @@ static void cnss_remove(struct platform_device *plat_dev)
 #endif
 {
 	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
+	const struct of_device_id *of_id;
+	const struct platform_device_id *device_id;
+	int ret = 0;
+
+	of_id = of_match_device(cnss_of_match_table, &plat_dev->dev);
+	if (!of_id || !of_id->data) {
+		cnss_pr_err("cnss remove failed to find of match device!\n");
+		ret = -ENODEV;
+		goto out;
+	}
+
+	device_id = of_id->data;
+	if (device_id->driver_data == DIRECT_LINK_DEVICE_ID) {
+		cnss_pr_info("cnss direct link device removed!\n");
+		goto out;
+	}
 
 	plat_priv->audio_iommu_domain = NULL;
 	cnss_genl_exit();
@@ -5838,8 +5915,11 @@ static void cnss_remove(struct platform_device *plat_dev)
 	platform_set_drvdata(plat_dev, NULL);
 	cnss_clear_plat_priv(plat_priv);
 
+out:
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
-	return 0;
+	return ret;
+#else
+	return;
 #endif
 }
 

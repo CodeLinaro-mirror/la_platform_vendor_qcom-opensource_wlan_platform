@@ -155,7 +155,7 @@ static int cnss_pool_init(void)
 		}
 
 		cnss_pools[i].table_capacity = cnss_pools[i].min;
-		cnss_pools[i].pool_ptrs = kmalloc(cnss_pools[i].min * sizeof(void *),
+		cnss_pools[i].pool_ptrs = kzalloc(cnss_pools[i].min * sizeof(void *),
 						  GFP_KERNEL);
 
 		if (!cnss_pools[i].pool_ptrs) {
@@ -225,6 +225,7 @@ static void cnss_assign_prealloc_pool(unsigned long device_id)
 	case MANGO_DEVICE_ID:
 	case PEACH_DEVICE_ID:
 	case KIWI_DEVICE_ID:
+	case FIG_DEVICE_ID:
 	default:
 		cnss_pools = cnss_pools_default;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
