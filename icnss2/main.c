@@ -204,6 +204,37 @@ static void icnss_pm_relax(struct icnss_priv *priv)
 	priv->stats.pm_relax++;
 }
 
+/**
+ * icnss_get_fw_cap - Check whether FW supports specific capability or not
+ * @dev: Device
+ * @fw_cap: FW Capability which needs to be checked
+ *
+ * Return: TRUE if supported, FALSE on failure or if not supported
+ */
+bool icnss_get_fw_cap(struct device *dev, enum icnss_fw_caps fw_cap)
+{
+	struct icnss_priv *priv = dev_get_drvdata(dev);
+	bool is_supported = false;
+
+	if (!priv || !priv->fw_caps)
+		return is_supported;
+
+	switch (fw_cap) {
+	case ICNSS_FW_CAP_CE_CMN_CFG_SUPPORT:
+		is_supported = !!(priv->fw_caps &
+				  QMI_WLFW_CE_CMN_CFG_SUPPORT_V01);
+		break;
+	default:
+		icnss_pr_err("Invalid FW Capability: 0x%x\n", fw_cap);
+	}
+
+	icnss_pr_dbg("FW Capability 0x%x is %s\n", fw_cap,
+		     is_supported ? "supported" : "not supported");
+
+	return is_supported;
+}
+EXPORT_SYMBOL(icnss_get_fw_cap);
+
 char *icnss_driver_event_to_str(enum icnss_driver_event_type type)
 {
 	switch (type) {
@@ -1261,6 +1292,22 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 			goto  device_info_failure;
 		}
 
+		if (priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].size)
+			priv->fw_lpass_shared_mem_size = priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].size;
+
+		if (priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].pa_addr) {
+			priv->fw_lpass_shared_mem = dma_map_resource(&priv->pdev->dev, (phys_addr_t)priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].pa_addr,
+								     priv->fw_lpass_shared_mem_size,
+								     DMA_BIDIRECTIONAL, 0);
+
+			if (dma_mapping_error(&priv->pdev->dev, priv->fw_lpass_shared_mem)) {
+				icnss_pr_err("DMA map failed for lpass shared mem address:0x%llx\n",
+						priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].pa_addr);
+
+				goto device_info_failure;
+			}
+		}
+
 		priv->mem_base_va = devm_ioremap(&priv->pdev->dev,
 						 priv->mem_base_pa,
 						 priv->mem_base_size);
@@ -1800,7 +1847,7 @@ void icnss_collect_host_dump_info(struct icnss_priv *priv)
 		}
 
 		for (x = 0; x < num_entries_loaded; x++) {
-			icnss_pr_info("Idx:%d, ptr: %p, name: %s, size: %zu\n",
+			icnss_pr_vdbg("Idx:%d, ptr: %p, name: %s, size: %zu\n",
 				      x, ssr_entry[x].buffer_pointer,
 				      ssr_entry[x].region_name,
 				      ssr_entry[x].buffer_size);
@@ -4727,11 +4774,11 @@ int icnss_get_fw_lpass_shared_mem(struct device *dev, dma_addr_t *iova,
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 
-	if (!priv || !priv->fw_lpass_shared_mem_pa)
+	if (!priv || !priv->fw_lpass_shared_mem)
 		return -EINVAL;
 
-	*iova = priv->fw_lpass_shared_mem_pa;
-	*size = ICNSS_FW_LPASS_SHARED_MEM_SIZE;
+	*iova = priv->fw_lpass_shared_mem;
+	*size = priv->fw_lpass_shared_mem_size;
 
 	return 0;
 }
