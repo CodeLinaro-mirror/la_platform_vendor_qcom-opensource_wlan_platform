@@ -591,6 +591,7 @@ struct icnss_priv {
 	enum icnss_phy_qam_cap phy_qam_cap;
 	bool rproc_fw_download;
 	struct wlchip_serial_id_v01 serial_id;
+	u64 fw_caps;
 };
 
 struct icnss_reg_info {
