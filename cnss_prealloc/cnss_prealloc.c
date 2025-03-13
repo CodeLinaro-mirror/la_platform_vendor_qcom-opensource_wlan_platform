@@ -26,7 +26,11 @@
  * of a page boundary. We also have precedence of minidump_memory.c which
  * includes mm/slab.h using this style.
  */
+#ifdef CONFIG_CNSS_OUT_OF_TREE
+#include "slab.h"
+#else
 #include "../mm/slab.h"
+#endif
 #endif
 
 MODULE_LICENSE("GPL v2");

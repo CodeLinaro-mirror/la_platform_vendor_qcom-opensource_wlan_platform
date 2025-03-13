@@ -9,7 +9,7 @@ _default_module_enablement_list = [
     "wlan_firmware_service",
 ]
 
-_cnss2_enabled_target = ["anorak", "niobe", "pineapple", "sun"]
+_cnss2_enabled_target = ["anorak", "niobe", "pineapple", "sun", "sa510m"]
 _icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano"]
 
 def _get_module_list(target, variant):
@@ -57,6 +57,14 @@ def _define_platform_config_rule(module, target, variant):
         ],
         cmd = "cat $(SRCS) > $@",
     )
+    native.genrule(
+        name = "{}/{}_defconfig_generate_debug-defconfig".format(module, tv),
+        outs = ["{}/{}_defconfig.generated_debug-defconfig".format(module, tv)],
+        srcs = [
+        "{}/{}_consolidate_defconfig".format(module, target),
+    ],
+    cmd = "cat $(SRCS) > $@",
+    )
 
 def _define_modules_for_target_variant(target, variant):
     tv = "{}_{}".format(target, variant)
@@ -72,20 +80,26 @@ def _define_modules_for_target_variant(target, variant):
     if target in _icnss2_enabled_target:
         icnss2_enabled = 1
 
+    if target != "sa510m":
+        kernel_header = "//msm-kernel:all_headers"
+    else:
+        kernel_header = "//msm-kernel:all_headers_arm"
+
     print("tv=", tv)
     if cnss2_enabled:
         module = "cnss2"
         _define_platform_config_rule(module, target, variant)
         defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
+
         deps = [
             ":{}_cnss_utils".format(tv),
             ":{}_cnss_prealloc".format(tv),
             ":{}_wlan_firmware_service".format(tv),
             ":{}_cnss_plat_ipc_qmi_svc".format(tv),
-            "//msm-kernel:all_headers",
+            kernel_header,
             ":wlan-platform-headers",
         ]
-        if target != "anorak":
+        if target != "anorak" and target != "sa510m":
             deps.append("//vendor/qcom/opensource/securemsm-kernel:{}_smcinvoke_dlkm".format(tv))
 
         ddk_module(
@@ -153,7 +167,7 @@ def _define_modules_for_target_variant(target, variant):
                 ":{}_cnss_utils".format(tv),
                 ":{}_cnss_prealloc".format(tv),
                 ":{}_wlan_firmware_service".format(tv),
-                "//msm-kernel:all_headers",
+                kernel_header,
                 ":wlan-platform-headers",
             ],
         )
@@ -170,7 +184,7 @@ def _define_modules_for_target_variant(target, variant):
         out = "cnss_nl.ko",
         kernel_build = "//msm-kernel:{}".format(tv),
         deps = [
-            "//msm-kernel:all_headers",
+            kernel_header,
             ":wlan-platform-headers",
         ],
     )
@@ -190,7 +204,7 @@ def _define_modules_for_target_variant(target, variant):
         out = "cnss_prealloc.ko",
         kernel_build = "//msm-kernel:{}".format(tv),
         deps = [
-            "//msm-kernel:all_headers",
+            kernel_header,
             ":wlan-platform-headers",
         ],
     )
@@ -209,7 +223,7 @@ def _define_modules_for_target_variant(target, variant):
         out = "cnss_utils.ko",
         kernel_build = "//msm-kernel:{}".format(tv),
         deps = [
-            "//msm-kernel:all_headers",
+            kernel_header,
             ":wlan-platform-headers",
         ],
     )
@@ -228,7 +242,7 @@ def _define_modules_for_target_variant(target, variant):
         defconfig = defconfig,
         out = "wlan_firmware_service.ko",
         kernel_build = "//msm-kernel:{}".format(tv),
-        deps = ["//msm-kernel:all_headers"],
+        deps = [kernel_header],
     )
 
     module = "cnss_utils"
@@ -245,7 +259,7 @@ def _define_modules_for_target_variant(target, variant):
             defconfig = defconfig,
             out = "cnss_plat_ipc_qmi_svc.ko",
             kernel_build = "//msm-kernel:{}".format(tv),
-            deps = ["//msm-kernel:all_headers"],
+            deps = [kernel_header],
         )
     tv = "{}_{}".format(target, variant)
     copy_to_dist_dir(
@@ -261,5 +275,4 @@ def _define_modules_for_target_variant(target, variant):
 
 def define_modules():
     for (t, v) in get_all_variants():
-        print("v=", v)
         _define_modules_for_target_variant(t, v)
