@@ -1551,7 +1551,7 @@ int wlfw_wlan_mode_send_sync_msg(struct icnss_priv *priv,
 	    mode == QMI_WLFW_OFF_V01)
 		return 0;
 
-	icnss_pr_dbg("Sending Mode request, state: 0x%lx, mode: %d\n",
+	icnss_pr_info("Sending Mode request, state: 0x%lx, mode: %d\n",
 		     priv->state, mode);
 
 	req = kzalloc(sizeof(*req), GFP_KERNEL);
@@ -1780,7 +1780,7 @@ out:
 	return ret;
 }
 
-int wlfw_send_modem_shutdown_msg(struct icnss_priv *priv)
+int wlfw_send_fw_shutdown_msg(struct icnss_priv *priv)
 {
 	int ret;
 	struct wlfw_shutdown_req_msg_v01 *req;
@@ -1793,7 +1793,7 @@ int wlfw_send_modem_shutdown_msg(struct icnss_priv *priv)
 	if (test_bit(ICNSS_FW_DOWN, &priv->state))
 		return -EINVAL;
 
-	icnss_pr_dbg("Sending modem shutdown request, state: 0x%lx\n",
+	icnss_pr_info("Sending FW shutdown request, state: 0x%lx\n",
 		     priv->state);
 
 	req = kzalloc(sizeof(*req), GFP_KERNEL);
@@ -1834,7 +1834,7 @@ int wlfw_send_modem_shutdown_msg(struct icnss_priv *priv)
 			     ret);
 		goto out;
 	} else if (resp->resp.result != QMI_RESULT_SUCCESS_V01) {
-		icnss_pr_err("QMI modem shutdown request rejected result:%d error:%d\n",
+		icnss_pr_err("QMI FW shutdown request rejected result:%d error:%d\n",
 			     resp->resp.result, resp->resp.error);
 		ret = -resp->resp.result;
 		goto out;
@@ -3582,7 +3582,7 @@ int wlfw_host_cap_send_sync(struct icnss_priv *priv)
 	}
 
 	/* ddr_type = 7(LPDDR4) and 8(LPDDR5) */
-	ddr_type = of_fdt_get_ddrtype();
+	ddr_type = priv->ddr_type;
 	if (ddr_type > 0) {
 		icnss_pr_dbg("DDR Type: %d\n", ddr_type);
 		req->ddr_type_valid = 1;
@@ -3964,7 +3964,7 @@ out:
 }
 
 /* IMS Service */
-int ims_subscribe_for_indication_send_async(struct icnss_priv *priv)
+static int ims_subscribe_for_indication_send_async(struct icnss_priv *priv)
 {
 	int ret;
 	struct ims_private_service_subscribe_for_indications_req_msg_v01 *req;
