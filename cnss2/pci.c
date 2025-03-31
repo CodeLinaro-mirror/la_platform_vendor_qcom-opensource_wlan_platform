@@ -3230,9 +3230,15 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 	 * suspend/resume, wlan should be powered
 	 * during resume in SCMI solution
 	 * */
-	if (cnss_is_device_powered_on(plat_priv) &&
-	    pci_priv->pci_link_state == PCI_LINK_UP)
-		goto power_on_done;
+	if (plat_priv->is_fw_managed_pwr &&
+	    cnss_is_device_powered_on(plat_priv) &&
+	    pci_priv->pci_link_state == PCI_LINK_UP) {
+		ret = cnss_enable_pcie_device(pci_priv);
+		if (ret)
+			goto out;
+		else
+			goto power_on_done;
+	}
 retry:
 	ret = cnss_power_on_device(plat_priv, false);
 	if (ret) {
@@ -3276,11 +3282,7 @@ retry:
 
 power_on_done:
 	cnss_pci_set_wlaon_pwr_ctrl(pci_priv, false, false, false);
-	if (plat_priv->is_fw_managed_pwr) {
-		ret = cnss_enable_pcie_device(pci_priv);
-		if (ret)
-			goto out;
-	}
+
 	timeout = cnss_get_timeout(plat_priv, CNSS_TIMEOUT_QMI);
 
 	ret = cnss_pci_start_mhi(pci_priv);
@@ -7503,7 +7505,8 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 		goto out;
 	if (cnss_is_dual_wlan_enabled() && !plat_priv->enumerate_done)
 		goto probe_done;
-	cnss_pci_suspend_pwroff(pci_dev);
+	if (!plat_priv->is_fw_managed_pwr)
+		cnss_pci_suspend_pwroff(pci_dev);
 
 probe_done:
 	set_bit(CNSS_PCI_PROBE_DONE, &plat_priv->driver_state);
