@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved. */
 
 #ifndef _CNSS_PCI_PLATFORM_H
 #define _CNSS_PCI_PLATFORM_H
@@ -211,11 +211,25 @@ static inline bool cnss_pci_get_drv_supported(struct cnss_pci_data *pci_priv)
 	return pci_priv->drv_supported;
 }
 
+/**
+ * cnss_pci_is_sync_probe(): check whether PCIe device
+ * need to be present before registering cnss_pci_driver
+ *
+ * Currently SCMI power/PCIe enumeration is controlled
+ * by low level GearVM system, and upstream PCIe driver
+ * doesn't export enumeration API, like msm_pci_enumerate.
+ * So we have to power wlan power before PCIe, otherwise
+ * there doesn't have chances to do link training for wlan.
+ * It means PCIe wlan device isn't ready when register
+ * cnss_pci_driver. On the contrary, PCIe device should
+ * be present in downstream MSM PCIe driver when register
+ * cnss_pci_driver. This API is used to distinguish
+ * downstream/upstream PCIe driver case.
+ *
+ * Return: true for sync mode, false for unsync mode
+ */
 bool cnss_pci_is_sync_probe(void);
+void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv);
+void cnss_pci_sw_reset(struct cnss_pci_data *pci_priv, bool power_on);
 
-#if IS_ENABLED(CONFIG_ARCH_QCOM)
-int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv);
-int cnss_pci_wake_gpio_init(struct cnss_pci_data *pci_priv);
-void cnss_pci_wake_gpio_deinit(struct cnss_pci_data *pci_priv);
-#endif /* CONFIG_ARCH_QCOM */
 #endif /* _CNSS_PCI_PLATFORM_H*/

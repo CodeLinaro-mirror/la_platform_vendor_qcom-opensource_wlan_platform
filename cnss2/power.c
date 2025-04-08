@@ -1131,18 +1131,47 @@ enum domains_t {
 	POWER_GPIO = 1,
 };
 
-void cnss_pm_runtime_enable(struct cnss_plat_data *plat_priv)
+static int cnss_pm_notify(struct notifier_block *b,
+			 unsigned long event, void *p)
 {
-	pm_runtime_enable(&plat_priv->plat_dev->dev);
+	struct cnss_plat_data *plat_priv;
+
+	plat_priv = container_of(b, struct cnss_plat_data, pm_notifier);
+
+	if (!plat_priv)
+		return NOTIFY_STOP;
+
+	cnss_pr_dbg("system PM event: %lu", event);
+
+	switch (event) {
+	case PM_SUSPEND_PREPARE:
+	case PM_HIBERNATION_PREPARE:
+		plat_priv->pm_suspend_in_progress = true;
+		break;
+	case PM_POST_SUSPEND:
+	case PM_POST_HIBERNATION:
+		plat_priv->pm_suspend_in_progress = false;
+		break;
+	}
+
+	return NOTIFY_DONE;
 }
 
-void cnss_pm_runtime_disable(struct cnss_plat_data *plat_priv)
+void cnss_pm_notifier_init(struct cnss_plat_data *plat_priv)
 {
-	pm_runtime_dont_use_autosuspend(&plat_priv->plat_dev->dev);
-	pm_runtime_disable(&plat_priv->plat_dev->dev);
+	plat_priv->pm_notifier.notifier_call = cnss_pm_notify;
+	plat_priv->pm_notifier.priority = 100;
+	register_pm_notifier(&plat_priv->pm_notifier);
 }
 
-int cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv, bool enabled)
+void cnss_pm_notifier_deinit(struct cnss_plat_data *plat_priv)
+{
+	unregister_pm_notifier(&plat_priv->pm_notifier);
+}
+
+int
+cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
+				bool enabled)
 {
 	struct device *dev = plat_priv->pd_devs[POWER_REGULATOR];
 	int ret;
@@ -1158,7 +1187,8 @@ int cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv, bool enabl
 	return ret;
 }
 
-int cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
+int
+cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
 {
 	struct device *dev = plat_priv->pd_devs[POWER_GPIO];
 	int ret;
@@ -1174,7 +1204,7 @@ int cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
 	return ret;
 }
 
-int cnss_scmi_pm_enable(struct cnss_plat_data *plat_priv)
+static int cnss_scmi_pm_enable(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
 
@@ -1204,7 +1234,7 @@ int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 	int i;
 
 	plat_priv->pd_count = of_count_phandle_with_args(
-		dev->of_node, "power-domains", NULL);
+		dev->of_node, "power-domains", "#power-domain-cells");
 	if (plat_priv->pd_count <= 1)
 		return 0;
 
@@ -1238,27 +1268,30 @@ void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
 	}
 }
 #else
-void cnss_pm_runtime_enable(struct cnss_plat_data *plat_priv)
+void cnss_pm_notifier_init(struct cnss_plat_data *plat_priv)
 {
 	return;
 }
 
-void cnss_pm_runtime_disable(struct cnss_plat_data *plat_priv)
+void cnss_pm_notifier_deinit(struct cnss_plat_data *plat_priv)
 {
 	return;
 }
 
-int cnss_scmi_pm_enable(struct cnss_plat_data *plat_priv)
+static int cnss_scmi_pm_enable(struct cnss_plat_data *plat_priv)
 {
 	return -EOPNOTSUPP;
 }
 
-int cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
+int
+cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
 {
 	return -EOPNOTSUPP;
 }
 
-int cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv, bool enabled)
+int
+cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
+				bool enabled)
 {
 	return -EOPNOTSUPP;
 }
