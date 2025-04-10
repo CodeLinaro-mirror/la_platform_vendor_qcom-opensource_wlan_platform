@@ -5870,7 +5870,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 		cnss_pr_info("WLAN HW Disabled. Defer PCI enumeration\n");
 	}
 	cnss_register_coex_service(plat_priv);
-	cnss_register_ims_service(plat_priv);
+//	cnss_register_ims_service(plat_priv);
 
 	mutex_init(&plat_priv->tcdev_lock);
 	INIT_LIST_HEAD(&plat_priv->cnss_tcdev_list);
