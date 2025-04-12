@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2020, 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt) "icnss2: " fmt
@@ -35,6 +35,7 @@
 #include <linux/soc/qcom/qmi.h>
 #include <linux/sysfs.h>
 #include <linux/thermal.h>
+#include <linux/reboot.h>
 #include <soc/qcom/memory_dump.h>
 #include <soc/qcom/secure_buffer.h>
 #include <soc/qcom/socinfo.h>
@@ -53,6 +54,7 @@
 #include <uapi/linux/slatecom_interface.h>
 #endif
 #include <linux/qcom-iommu-util.h>
+#include <soc/qcom/of_common.h>
 #include "main.h"
 #include "qmi.h"
 #include "debug.h"
@@ -163,11 +165,12 @@ static ssize_t icnss_sysfs_store(struct kobject *kobj,
 	if (!priv)
 		return count;
 
-	icnss_pr_dbg("Received shutdown indication");
+	icnss_pr_info("Received shutdown indication");
 
 	atomic_set(&priv->is_shutdown, true);
-	if ((priv->wpss_supported || priv->rproc_fw_download) &&
-	    priv->device_id == ADRASTEA_DEVICE_ID)
+	if (((priv->wpss_supported || priv->rproc_fw_download) &&
+	      priv->device_id == ADRASTEA_DEVICE_ID) ||
+	      priv->device_id == WCN7750_DEVICE_ID)
 		icnss_wpss_unload(priv);
 	return count;
 }
@@ -203,6 +206,37 @@ static void icnss_pm_relax(struct icnss_priv *priv)
 	pm_relax(&priv->pdev->dev);
 	priv->stats.pm_relax++;
 }
+
+/**
+ * icnss_get_fw_cap - Check whether FW supports specific capability or not
+ * @dev: Device
+ * @fw_cap: FW Capability which needs to be checked
+ *
+ * Return: TRUE if supported, FALSE on failure or if not supported
+ */
+bool icnss_get_fw_cap(struct device *dev, enum icnss_fw_caps fw_cap)
+{
+	struct icnss_priv *priv = dev_get_drvdata(dev);
+	bool is_supported = false;
+
+	if (!priv || !priv->fw_caps)
+		return is_supported;
+
+	switch (fw_cap) {
+	case ICNSS_FW_CAP_CE_CMN_CFG_SUPPORT:
+		is_supported = !!(priv->fw_caps &
+				  QMI_WLFW_CE_CMN_CFG_SUPPORT_V01);
+		break;
+	default:
+		icnss_pr_err("Invalid FW Capability: 0x%x\n", fw_cap);
+	}
+
+	icnss_pr_dbg("FW Capability 0x%x is %s\n", fw_cap,
+		     is_supported ? "supported" : "not supported");
+
+	return is_supported;
+}
+EXPORT_SYMBOL(icnss_get_fw_cap);
 
 char *icnss_driver_event_to_str(enum icnss_driver_event_type type)
 {
@@ -430,9 +464,11 @@ EXPORT_SYMBOL(icnss_is_fw_ready);
 static int icnss_register_bus_scale(struct icnss_priv *plat_priv)
 {
 	int ret = -EINVAL;
-	u32 idx, i, j, cfg_arr_size, *cfg_arr = NULL;
+	u32 idx, i, j, cfg_arr_size, *cfg_arr = NULL, ddr = 0;
 	struct icnss_bus_bw_info *bus_bw_info, *tmp;
 	struct device *dev = &plat_priv->pdev->dev;
+	struct device_node *child;
+	struct device_node *ddr_node = plat_priv->pdev->dev.of_node;
 
 	INIT_LIST_HEAD(&plat_priv->icc.list_head);
 	ret = of_property_read_u32(dev->of_node,
@@ -458,7 +494,25 @@ static int icnss_register_bus_scale(struct icnss_priv *plat_priv)
 		goto cleanup;
 	}
 
-	ret = of_property_read_u32_array(plat_priv->pdev->dev.of_node,
+	for_each_available_child_of_node(plat_priv->pdev->dev.of_node,
+					 child) {
+		if (strcmp(child->name, "ddr_cfg"))
+			continue;
+
+		ret = of_property_read_u32(child, "ddr_type", &ddr);
+		if (!ret) {
+			/* ddr_type = 7(LPDDR4) and 8(LPDDR5) */
+			if (ddr == plat_priv->ddr_type) {
+				ddr_node = child;
+				icnss_pr_info("child node set for DDR type %d", ddr);
+			}
+		} else {
+			icnss_pr_err("DDR type: %d is not found in dt\n", plat_priv->ddr_type);
+			goto cleanup;
+		}
+	}
+
+	ret = of_property_read_u32_array(ddr_node,
 					 "qcom,bus-bw-cfg", cfg_arr,
 					 cfg_arr_size);
 	if (ret) {
@@ -467,8 +521,8 @@ static int icnss_register_bus_scale(struct icnss_priv *plat_priv)
 	}
 
 	icnss_pr_dbg("ICC Path_Count: %d BW_CFG_Count: %d\n",
-		     plat_priv->icc.path_count,
-		     plat_priv->icc.bus_bw_cfg_count);
+		      plat_priv->icc.path_count,
+		      plat_priv->icc.bus_bw_cfg_count);
 
 	for (idx = 0; idx < plat_priv->icc.path_count; idx++) {
 		bus_bw_info = devm_kzalloc(dev, sizeof(*bus_bw_info),
@@ -491,7 +545,7 @@ static int icnss_register_bus_scale(struct icnss_priv *plat_priv)
 			ret = PTR_ERR(bus_bw_info->icc_path);
 			if (ret != -EPROBE_DEFER) {
 				icnss_pr_err("Failed to get Interconnect path for %s. Err: %d\n",
-					     bus_bw_info->icc_name, ret);
+					      bus_bw_info->icc_name, ret);
 				goto out;
 			}
 		}
@@ -505,7 +559,7 @@ static int icnss_register_bus_scale(struct icnss_priv *plat_priv)
 			goto out;
 		}
 		icnss_pr_dbg("ICC Vote CFG for path: %s\n",
-			     bus_bw_info->icc_name);
+			      bus_bw_info->icc_name);
 		for (i = 0, j = (idx * plat_priv->icc.bus_bw_cfg_count *
 		     ICNSS_ICC_VOTE_MAX);
 		     i < plat_priv->icc.bus_bw_cfg_count;
@@ -513,8 +567,8 @@ static int icnss_register_bus_scale(struct icnss_priv *plat_priv)
 			bus_bw_info->cfg_table[i].avg_bw = cfg_arr[j];
 			bus_bw_info->cfg_table[i].peak_bw = cfg_arr[j + 1];
 			icnss_pr_dbg("ICC Vote BW: %d avg: %d peak: %d\n",
-				     i, bus_bw_info->cfg_table[i].avg_bw,
-				     bus_bw_info->cfg_table[i].peak_bw);
+				      i, bus_bw_info->cfg_table[i].avg_bw,
+				      bus_bw_info->cfg_table[i].peak_bw);
 		}
 		list_add_tail(&bus_bw_info->list,
 			      &plat_priv->icc.list_head);
@@ -1261,6 +1315,22 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 			goto  device_info_failure;
 		}
 
+		if (priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].size)
+			priv->fw_lpass_shared_mem_size = priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].size;
+
+		if (priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].pa_addr) {
+			priv->fw_lpass_shared_mem = dma_map_resource(&priv->pdev->dev, (phys_addr_t)priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].pa_addr,
+								     priv->fw_lpass_shared_mem_size,
+								     DMA_BIDIRECTIONAL, 0);
+
+			if (dma_mapping_error(&priv->pdev->dev, priv->fw_lpass_shared_mem)) {
+				icnss_pr_err("DMA map failed for lpass shared mem address:0x%llx\n",
+						priv->shared_mem[WLFW_SHARED_MEM_CLIENT_XPAN_V01].pa_addr);
+
+				goto device_info_failure;
+			}
+		}
+
 		priv->mem_base_va = devm_ioremap(&priv->pdev->dev,
 						 priv->mem_base_pa,
 						 priv->mem_base_size);
@@ -1800,7 +1870,7 @@ void icnss_collect_host_dump_info(struct icnss_priv *priv)
 		}
 
 		for (x = 0; x < num_entries_loaded; x++) {
-			icnss_pr_info("Idx:%d, ptr: %p, name: %s, size: %zu\n",
+			icnss_pr_vdbg("Idx:%d, ptr: %p, name: %s, size: %zu\n",
 				      x, ssr_entry[x].buffer_pointer,
 				      ssr_entry[x].region_name,
 				      ssr_entry[x].buffer_size);
@@ -2825,7 +2895,7 @@ static int icnss_msa0_ramdump(struct icnss_priv *priv)
 	return ret;
 }
 
-static void icnss_update_state_send_modem_shutdown(struct icnss_priv *priv,
+static void icnss_update_shutdown_state_to_fw(struct icnss_priv *priv,
 							void *data)
 {
 	struct qcom_ssr_notify_data *notif = data;
@@ -2836,12 +2906,15 @@ static void icnss_update_state_send_modem_shutdown(struct icnss_priv *priv,
 			atomic_set(&priv->is_shutdown, false);
 			if (!test_bit(ICNSS_PD_RESTART, &priv->state) &&
 				!test_bit(ICNSS_SHUTDOWN_DONE, &priv->state) &&
-				!test_bit(ICNSS_BLOCK_SHUTDOWN, &priv->state)) {
-				clear_bit(ICNSS_FW_READY, &priv->state);
+				!test_bit(ICNSS_BLOCK_SHUTDOWN, &priv->state) &&
+				!atomic_read(&priv->is_idle_shutdown)) {
+
 				icnss_driver_event_post(priv,
 					  ICNSS_DRIVER_EVENT_UNREGISTER_DRIVER,
 					  ICNSS_EVENT_SYNC_UNINTERRUPTIBLE,
 					  NULL);
+
+				clear_bit(ICNSS_FW_READY, &priv->state);
 			}
 		}
 
@@ -2849,12 +2922,12 @@ static void icnss_update_state_send_modem_shutdown(struct icnss_priv *priv,
 			if (!wait_for_completion_timeout(
 					&priv->unblock_shutdown,
 					msecs_to_jiffies(PROBE_TIMEOUT)))
-				icnss_pr_err("modem block shutdown timeout\n");
+				icnss_pr_err("FW block shutdown timeout\n");
 		}
 
-		ret = wlfw_send_modem_shutdown_msg(priv);
+		ret = wlfw_send_fw_shutdown_msg(priv);
 		if (ret < 0)
-			icnss_pr_err("Fail to send modem shutdown Indication %d\n",
+			icnss_pr_err("Fail to send FW shutdown Indication %d\n",
 				     ret);
 	}
 }
@@ -2882,13 +2955,32 @@ static int icnss_wpss_early_notifier_nb(struct notifier_block *nb,
 	struct icnss_priv *priv = container_of(nb, struct icnss_priv,
 					       wpss_early_ssr_nb);
 
-	icnss_pr_vdbg("WPSS-EARLY-Notify: event %s(%lu)\n",
+	icnss_pr_info("WPSS-EARLY-Notify: event %s(%lu)\n",
 		      icnss_qcom_ssr_notify_state_to_str(code), code);
 
 	if (code == QCOM_SSR_BEFORE_SHUTDOWN) {
 		set_bit(ICNSS_FW_DOWN, &priv->state);
 		icnss_ignore_fw_timeout(true);
+		clear_bit(ICNSS_SOC_WAKE_DONE, &priv->state);
+		complete(&priv->smp2p_soc_wake_wait);
 	}
+
+	return NOTIFY_DONE;
+}
+
+static int icnss_reboot_notifier(struct notifier_block *nb,
+				 unsigned long action, void *data)
+{
+	struct icnss_priv *priv = container_of(nb, struct icnss_priv,
+					       reboot_nb);
+
+	if (atomic_read(&priv->is_shutdown))
+		return NOTIFY_DONE;
+
+	icnss_pr_info("Received Reboot indication");
+
+	atomic_set(&priv->is_shutdown, true);
+	icnss_wpss_unload(priv);
 
 	return NOTIFY_DONE;
 }
@@ -2903,7 +2995,7 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 					       wpss_ssr_nb);
 	struct icnss_uevent_fw_down_data fw_down_data = {0};
 
-	icnss_pr_vdbg("WPSS-Notify: event %s(%lu)\n",
+	icnss_pr_info("WPSS-Notify: event %s(%lu)\n",
 		      icnss_qcom_ssr_notify_state_to_str(code), code);
 
 	switch (code) {
@@ -2931,8 +3023,9 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 	icnss_pr_info("WPSS went down, state: 0x%lx, crashed: %d\n",
 		      priv->state, notif->crashed);
 
-	if (priv->device_id == ADRASTEA_DEVICE_ID)
-		icnss_update_state_send_modem_shutdown(priv, data);
+	if (priv->device_id == ADRASTEA_DEVICE_ID ||
+	    priv->device_id == WCN7750_DEVICE_ID)
+		icnss_update_shutdown_state_to_fw(priv, data);
 
 	set_bit(ICNSS_FW_DOWN, &priv->state);
 	icnss_ignore_fw_timeout(true);
@@ -2964,7 +3057,7 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 		mod_timer(&priv->recovery_timer,
 			  jiffies + msecs_to_jiffies(ICNSS_RECOVERY_TIMEOUT));
 out:
-	icnss_pr_vdbg("Exit %s,state: 0x%lx\n", __func__, priv->state);
+	icnss_pr_info("Exit %s,state: 0x%lx\n", __func__, priv->state);
 	return NOTIFY_OK;
 }
 
@@ -3017,7 +3110,7 @@ static int icnss_modem_notifier_nb(struct notifier_block *nb,
 		priv->root_pd_shutdown = true;
 	}
 
-	icnss_update_state_send_modem_shutdown(priv, data);
+	icnss_update_shutdown_state_to_fw(priv, data);
 
 	if (test_bit(ICNSS_PDR_REGISTERED, &priv->state)) {
 		set_bit(ICNSS_FW_DOWN, &priv->state);
@@ -3104,6 +3197,24 @@ static int icnss_wpss_ssr_register_notifier(struct icnss_priv *priv)
 	}
 
 	set_bit(ICNSS_SSR_REGISTERED, &priv->state);
+
+	atomic_set(&priv->is_idle_shutdown, false);
+
+	return ret;
+}
+
+static int icnss_reboot_register_notifier(struct icnss_priv *priv)
+{
+	int ret = 0;
+
+	priv->reboot_nb.notifier_call = icnss_reboot_notifier;
+
+	ret = register_reboot_notifier(&priv->reboot_nb);
+	if (ret)
+		icnss_pr_err("Failed to register Reboot notifier, err = %d\n",
+			     ret);
+	else
+		set_bit(ICNSS_REBOOT_REGISTERED, &priv->state);
 
 	return ret;
 }
@@ -3303,6 +3414,16 @@ static int icnss_modem_ssr_unregister_notifier(struct icnss_priv *priv)
 	qcom_unregister_ssr_notifier(priv->modem_notify_handler,
 				     &priv->modem_ssr_nb);
 	priv->modem_notify_handler = NULL;
+
+	return 0;
+}
+
+static int icnss_reboot_unregister_notifier(struct icnss_priv *priv)
+{
+	if (!test_and_clear_bit(ICNSS_REBOOT_REGISTERED, &priv->state))
+		return 0;
+
+	unregister_reboot_notifier(&priv->reboot_nb);
 
 	return 0;
 }
@@ -3692,12 +3813,20 @@ int icnss_thermal_cdev_register(struct device *dev, unsigned long max_state,
 	icnss_tcdev->max_thermal_state = max_state;
 
 	snprintf(cdev_node_name, THERMAL_NAME_LENGTH,
-		 "qcom,icnss_cdev%d", tcdev_id);
+		 "icnss_cdev%d", tcdev_id);
 
 	dev_node = of_find_node_by_name(NULL, cdev_node_name);
+
 	if (!dev_node) {
-		icnss_pr_err("Failed to get cooling device node\n");
-		return -EINVAL;
+		snprintf(cdev_node_name, THERMAL_NAME_LENGTH,
+			 "qcom,icnss_cdev%d", tcdev_id);
+
+		dev_node = of_find_node_by_name(NULL, cdev_node_name);
+
+		if (!dev_node) {
+			icnss_pr_err("Failed to get cooling device node\n");
+			return -EINVAL;
+		}
 	}
 
 	icnss_pr_dbg("tcdev node->name=%s\n", dev_node->name);
@@ -3868,7 +3997,7 @@ int icnss_unregister_driver(struct icnss_driver_ops *ops)
 		goto out;
 	}
 
-	icnss_pr_dbg("Unregistering driver, state: 0x%lx\n", priv->state);
+	icnss_pr_info("Unregistering driver, state: 0x%lx\n", priv->state);
 
 	if (!priv->ops) {
 		icnss_pr_err("Driver not registered\n");
@@ -4727,11 +4856,11 @@ int icnss_get_fw_lpass_shared_mem(struct device *dev, dma_addr_t *iova,
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
 
-	if (!priv || !priv->fw_lpass_shared_mem_pa)
+	if (!priv || !priv->fw_lpass_shared_mem)
 		return -EINVAL;
 
-	*iova = priv->fw_lpass_shared_mem_pa;
-	*size = ICNSS_FW_LPASS_SHARED_MEM_SIZE;
+	*iova = priv->fw_lpass_shared_mem;
+	*size = priv->fw_lpass_shared_mem_size;
 
 	return 0;
 }
@@ -4897,20 +5026,29 @@ EXPORT_SYMBOL(icnss_trigger_recovery);
 int icnss_idle_shutdown(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
+	int ret = 0;
 
 	if (!priv) {
 		icnss_pr_err("Invalid drvdata: dev %pK", dev);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
+
+	atomic_set(&priv->is_idle_shutdown, true);
 
 	if (priv->is_ssr || test_bit(ICNSS_PDR, &priv->state) ||
-	    test_bit(ICNSS_REJUVENATE, &priv->state)) {
-		icnss_pr_err("SSR/PDR is already in-progress during idle shutdown\n");
-		return -EBUSY;
+	    test_bit(ICNSS_REJUVENATE, &priv->state) || atomic_read(&priv->is_shutdown)) {
+		icnss_pr_err("SSR/PDR/Shutdown is already in-progress during idle shutdown\n");
+		atomic_set(&priv->is_idle_shutdown, false);
+		ret = -EBUSY;
+		goto out;
 	}
 
-	return icnss_driver_event_post(priv, ICNSS_DRIVER_EVENT_IDLE_SHUTDOWN,
+	ret = icnss_driver_event_post(priv, ICNSS_DRIVER_EVENT_IDLE_SHUTDOWN,
 					ICNSS_EVENT_SYNC_UNINTERRUPTIBLE, NULL);
+	atomic_set(&priv->is_idle_shutdown, false);
+out:
+	return ret;
 }
 EXPORT_SYMBOL(icnss_idle_shutdown);
 
@@ -5573,7 +5711,7 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
-void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
+static void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 {
 	struct platform_device *pdev = priv->pdev;
 	struct device *dev = &pdev->dev;
@@ -5583,7 +5721,7 @@ void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 				priv);
 }
 #else
-void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
+static void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 {
 	qcom_iommu_set_fault_handler_irq(priv->iommu_domain,
 					 icnss_pci_smmu_fault_handler_irq,
@@ -5591,7 +5729,7 @@ void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 }
 #endif
 #else
-void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
+static void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 {
 }
 
@@ -6020,6 +6158,8 @@ static int icnss_probe(struct platform_device *pdev)
 	icnss_allow_recursive_recovery(dev);
 	icnss_get_cpumask_for_wlan_txrx_intr(priv);
 
+	priv->ddr_type = of_fdt_get_ddrtype();
+
 	if (!prealloc_initialized) {
 		icnss_initialize_mem_pool(priv->device_id);
 		prealloc_initialized = true;
@@ -6110,6 +6250,10 @@ static int icnss_probe(struct platform_device *pdev)
 		set_bit(ICNSS_COLD_BOOT_CAL, &priv->state);
 		priv->bdf_download_support = true;
 		register_rproc_restart_level_notifier();
+	}
+
+	if (priv->device_id == WCN7750_DEVICE_ID) {
+		icnss_reboot_register_notifier(priv);
 	}
 
 	if (priv->wpss_supported) {
@@ -6222,6 +6366,10 @@ static void icnss_remove(struct platform_device *pdev)
 	} else {
 		icnss_modem_ssr_unregister_notifier(priv);
 		icnss_pdr_unregister_notifier(priv);
+	}
+
+	if (priv->device_id == WCN7750_DEVICE_ID) {
+		icnss_reboot_unregister_notifier(priv);
 	}
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||

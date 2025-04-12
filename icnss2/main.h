@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2017-2020, 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef __MAIN_H__
@@ -50,7 +50,6 @@
 #define WLAN_RF_APACHE 1
 #define ICNSS_RAMDUMP_MAGIC		0x574C414E
 #define ICNSS_RAMDUMP_VERSION		0
-#define ICNSS_FW_LPASS_SHARED_MEM_SIZE  8
 #define MSI_USERS                       2
 
 extern uint64_t dynamic_feature_mask;
@@ -196,6 +195,7 @@ enum icnss_driver_state {
 	ICNSS_SLATE_READY,
 	ICNSS_LOW_POWER,
 	ICNSS_SOC_WAKE_DONE,
+	ICNSS_REBOOT_REGISTERED,
 };
 
 struct ce_irq_list {
@@ -545,6 +545,7 @@ struct icnss_priv {
 	struct notifier_block wpss_early_ssr_nb;
 	void *slate_notify_handler;
 	struct notifier_block slate_ssr_nb;
+	struct notifier_block reboot_nb;
 	uint32_t diag_reg_read_addr;
 	uint32_t diag_reg_read_mem_type;
 	uint32_t diag_reg_read_len;
@@ -573,6 +574,7 @@ struct icnss_priv {
 	struct kobject *icnss_kobject;
 	struct rproc *rproc;
 	atomic_t is_shutdown;
+	atomic_t is_idle_shutdown;
 	u32 qdss_mem_seg_len;
 	struct icnss_fw_mem qdss_mem[QMI_WLFW_MAX_NUM_MEM_SEG_V01];
 	struct icnss_fw_mem phy_ucode_mem;
@@ -646,9 +648,14 @@ struct icnss_priv {
 	u32 cpumask_for_tx_comp_intrs;
 	bool fw_direct_link_support;
 	bool is_audio_shared_iommu_group;
-	phys_addr_t fw_lpass_shared_mem_pa;
+	phys_addr_t fw_lpass_shared_mem;
+	size_t fw_lpass_shared_mem_size;
 	struct iommu_domain *audio_iommu_domain;
 	struct kobject *wifi_kobj;
+	struct wlfw_shared_mem_client_info_v01
+		shared_mem[QMI_WLFW_SHARED_MAX_CLIENT_SUPPORT_V01];
+	u64 fw_caps;
+	u32 ddr_type;
 };
 
 struct icnss_reg_info {

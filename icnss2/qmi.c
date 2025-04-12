@@ -283,6 +283,7 @@ int wlfw_device_info_send_msg(struct icnss_priv *priv)
 	struct wlfw_device_info_req_msg_v01 *req;
 	struct wlfw_device_info_resp_msg_v01 *resp;
 	struct qmi_txn txn;
+	int i = 0;
 
 	if (!priv)
 		return -ENODEV;
@@ -364,6 +365,19 @@ int wlfw_device_info_send_msg(struct icnss_priv *priv)
 
 	if (!priv->mhi_state_info_pa)
 		icnss_pr_err("Fail to get MHI info address\n");
+
+	if (resp->shared_mem_valid) {
+		for (i = 0; i < resp->shared_mem_len; i++) {
+			priv->shared_mem[i].pa_addr = resp->shared_mem[i].pa_addr;
+			priv->shared_mem[i].mem_client_id = resp->shared_mem[i].mem_client_id;
+			priv->shared_mem[i].size = resp->shared_mem[i].size;
+
+			icnss_pr_dbg(
+				"wlan fw shared mem info: pa_addr:0x%llx, mem_client_id:%d, size:%d",
+				priv->shared_mem[i].pa_addr, priv->shared_mem[i].mem_client_id,
+				priv->shared_mem[i].size);
+		}
+	}
 
 	kfree(resp);
 	kfree(req);
@@ -848,14 +862,18 @@ int wlfw_cap_send_sync_msg(struct icnss_priv *priv)
 			     resp->serial_id.serial_id_lsb);
 	}
 
+	if (resp->fw_caps_valid)
+		priv->fw_caps = resp->fw_caps;
+
 	icnss_pr_dbg("Capability, chip_id: 0x%x, chip_family: 0x%x, board_id: 0x%x, soc_id: 0x%x",
 		     priv->chip_info.chip_id, priv->chip_info.chip_family,
 		     priv->board_id, priv->soc_id);
 
-	icnss_pr_dbg("fw_version: 0x%x, fw_build_timestamp: %s, fw_build_id: %s",
+	icnss_pr_dbg("fw_version: 0x%x, fw_build_timestamp: %s,\
+		     fw_build_id: %s, fw_caps: 0x%llx",
 		     priv->fw_version_info.fw_version,
 		     priv->fw_version_info.fw_build_timestamp,
-		     priv->fw_build_id);
+		     priv->fw_build_id, priv->fw_caps);
 
 	icnss_pr_dbg("RD card chain cap: %d, PHY HE channel width cap: %d, PHY QAM cap: %d",
 		     priv->rd_card_chain_cap, priv->phy_he_channel_width_cap,
@@ -1533,7 +1551,7 @@ int wlfw_wlan_mode_send_sync_msg(struct icnss_priv *priv,
 	    mode == QMI_WLFW_OFF_V01)
 		return 0;
 
-	icnss_pr_dbg("Sending Mode request, state: 0x%lx, mode: %d\n",
+	icnss_pr_info("Sending Mode request, state: 0x%lx, mode: %d\n",
 		     priv->state, mode);
 
 	req = kzalloc(sizeof(*req), GFP_KERNEL);
@@ -1762,7 +1780,7 @@ out:
 	return ret;
 }
 
-int wlfw_send_modem_shutdown_msg(struct icnss_priv *priv)
+int wlfw_send_fw_shutdown_msg(struct icnss_priv *priv)
 {
 	int ret;
 	struct wlfw_shutdown_req_msg_v01 *req;
@@ -1775,7 +1793,7 @@ int wlfw_send_modem_shutdown_msg(struct icnss_priv *priv)
 	if (test_bit(ICNSS_FW_DOWN, &priv->state))
 		return -EINVAL;
 
-	icnss_pr_dbg("Sending modem shutdown request, state: 0x%lx\n",
+	icnss_pr_info("Sending FW shutdown request, state: 0x%lx\n",
 		     priv->state);
 
 	req = kzalloc(sizeof(*req), GFP_KERNEL);
@@ -1816,7 +1834,7 @@ int wlfw_send_modem_shutdown_msg(struct icnss_priv *priv)
 			     ret);
 		goto out;
 	} else if (resp->resp.result != QMI_RESULT_SUCCESS_V01) {
-		icnss_pr_err("QMI modem shutdown request rejected result:%d error:%d\n",
+		icnss_pr_err("QMI FW shutdown request rejected result:%d error:%d\n",
 			     resp->resp.result, resp->resp.error);
 		ret = -resp->resp.result;
 		goto out;
@@ -3419,6 +3437,21 @@ int icnss_send_wlan_enable_to_fw(struct icnss_priv *priv,
 		       * req->shadow_reg_v3_len);
 	}
 
+	if (priv->device_id == WCN6450_DEVICE_ID &&
+	    priv->fw_caps & QMI_WLFW_CE_CMN_CFG_SUPPORT_V01) {
+		req->ce_cmn_reg_valid = 1;
+
+		if (config->num_ce_cmn_reg_config >
+					QMI_WLFW_MAX_NUM_CE_CMN_REG_V01)
+			req->ce_cmn_reg_len = QMI_WLFW_MAX_NUM_CE_CMN_REG_V01;
+		else
+			req->ce_cmn_reg_len = config->num_ce_cmn_reg_config;
+
+		memcpy(req->ce_cmn_reg, config->ce_cmn_reg_cfg,
+		       sizeof(struct wlfw_ce_cmn_register_config_v01)
+		       * req->ce_cmn_reg_len);
+	}
+
 	ret = wlfw_wlan_cfg_send_sync_msg(priv, req);
 
 	kfree(req);
@@ -3489,7 +3522,6 @@ int wlfw_host_cap_send_sync(struct icnss_priv *priv)
 	int ret = 0;
 	u64 iova_start = 0, iova_size = 0,
 	    iova_ipa_start = 0, iova_ipa_size = 0, feature_list = 0;
-	void *vaddr;
 
 	icnss_pr_dbg("Sending host capability message, state: 0x%lx\n",
 		    priv->state);
@@ -3527,18 +3559,6 @@ int wlfw_host_cap_send_sync(struct icnss_priv *priv)
 			    req->ddr_range[0].start, req->ddr_range[0].size);
 		icnss_pr_dbg("Sending msa starting 0x%llx with size 0x%llx\n",
 			    req->ddr_range[1].start, req->ddr_range[1].size);
-
-		vaddr = dma_alloc_coherent(&priv->pdev->dev,
-					   ICNSS_FW_LPASS_SHARED_MEM_SIZE,
-					   &priv->fw_lpass_shared_mem_pa,
-					   GFP_KERNEL);
-		if (vaddr) {
-			req->ddr_range[2].start = priv->fw_lpass_shared_mem_pa;
-			req->ddr_range[2].size = ICNSS_FW_LPASS_SHARED_MEM_SIZE;
-			icnss_pr_dbg("Sending FW-LPASS shared mem starting 0x%llx with size 0x%llx\n",
-				     req->ddr_range[2].start,
-				     req->ddr_range[2].size);
-		}
 	}
 
 	req->host_build_type_valid = 1;
@@ -3562,7 +3582,7 @@ int wlfw_host_cap_send_sync(struct icnss_priv *priv)
 	}
 
 	/* ddr_type = 7(LPDDR4) and 8(LPDDR5) */
-	ddr_type = of_fdt_get_ddrtype();
+	ddr_type = priv->ddr_type;
 	if (ddr_type > 0) {
 		icnss_pr_dbg("DDR Type: %d\n", ddr_type);
 		req->ddr_type_valid = 1;
@@ -3944,7 +3964,7 @@ out:
 }
 
 /* IMS Service */
-int ims_subscribe_for_indication_send_async(struct icnss_priv *priv)
+static int ims_subscribe_for_indication_send_async(struct icnss_priv *priv)
 {
 	int ret;
 	struct ims_private_service_subscribe_for_indications_req_msg_v01 *req;
