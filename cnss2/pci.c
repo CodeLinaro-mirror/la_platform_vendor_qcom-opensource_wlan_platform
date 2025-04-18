@@ -48,7 +48,7 @@
 #define KIWI_PATH_PREFIX		"kiwi/"
 #define MANGO_PATH_PREFIX		"mango/"
 #define PEACH_PATH_PREFIX		"peach/"
-#define COLOGNE_PATH_PREFIX		"cologne/"
+#define COLOGNE_PATH_PREFIX		"wcn7760/"
 #define FIG_PATH_PREFIX		"fig/"
 #define DEFAULT_PHY_M3_FILE_NAME	"m3.bin"
 #define DEFAULT_AUX_FILE_NAME		"aux_ucode.elf"
@@ -2220,6 +2220,7 @@ static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 		pbl_log_sram_start = COLOGNE_DEBUG_PBL_LOG_SRAM_START;
 		pbl_log_max_size = COLOGNE_DEBUG_PBL_LOG_SRAM_MAX_SIZE;
 		sbl_log_max_size = COLOGNE_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
+		sbl_log_def_end = COLOGNE_SRAM_END;
 		break;
 	case FIG_DEVICE_ID:
 		if (cnss_pci_fetch_pbl_base_size(pci_priv, &pbl_log_sram_start,

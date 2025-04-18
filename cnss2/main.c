@@ -5075,6 +5075,9 @@ static void cnss_sram_dump_init(struct cnss_plat_data *plat_priv)
 	} else if (plat_priv->device_id == PEACH_DEVICE_ID) {
 		plat_priv->sram_dump_start_addr = SRAM_START;
 		plat_priv->sram_dump_size = PEACH_SRAM_SIZE;
+	} else if (plat_priv->device_id == COLOGNE_DEVICE_ID) {
+		plat_priv->sram_dump_start_addr = SRAM_START;
+		plat_priv->sram_dump_size = COLOGNE_SRAM_SIZE;
 	} else if (plat_priv->device_id == FIG_DEVICE_ID) {
 		plat_priv->sram_dump_start_addr = SRAM_START;
 		plat_priv->sram_dump_size = FIG_SRAM_SIZE;
@@ -5814,6 +5817,15 @@ static int cnss_probe(struct platform_device *plat_dev)
 	ret = cnss_get_resources(plat_priv);
 	if (ret)
 		goto reset_ctx;
+
+	/* FMD WAR for Ganges, disable BT_EN GPIO */
+	if (plat_priv && plat_priv->device_id == PEACH_DEVICE_ID) {
+		int bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
+		if (bt_en_gpio > 0) {
+			cnss_pr_err("Disabling BT_EN");
+			gpio_direction_output(bt_en_gpio, 0);
+		}
+	}
 
 	ret = cnss_register_esoc(plat_priv);
 	if (ret)
