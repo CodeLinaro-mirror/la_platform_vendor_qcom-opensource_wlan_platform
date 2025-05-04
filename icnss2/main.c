@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2020, 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt) "icnss2: " fmt
@@ -2412,7 +2412,8 @@ static void icnss_update_state_send_modem_shutdown(struct icnss_priv *priv,
 			atomic_set(&priv->is_shutdown, false);
 			if (!test_bit(ICNSS_PD_RESTART, &priv->state) &&
 				!test_bit(ICNSS_SHUTDOWN_DONE, &priv->state) &&
-				!test_bit(ICNSS_BLOCK_SHUTDOWN, &priv->state)) {
+				!test_bit(ICNSS_BLOCK_SHUTDOWN, &priv->state) &&
+				!atomic_read(&priv->is_idle_shutdown)) {
 				clear_bit(ICNSS_FW_READY, &priv->state);
 				icnss_driver_event_post(priv,
 					  ICNSS_DRIVER_EVENT_UNREGISTER_DRIVER,
@@ -2680,6 +2681,8 @@ static int icnss_wpss_ssr_register_notifier(struct icnss_priv *priv)
 	}
 
 	set_bit(ICNSS_SSR_REGISTERED, &priv->state);
+
+	atomic_set(&priv->is_idle_shutdown, false);
 
 	return ret;
 }
@@ -4226,20 +4229,29 @@ EXPORT_SYMBOL(icnss_trigger_recovery);
 int icnss_idle_shutdown(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
+	int ret = 0;
 
 	if (!priv) {
 		icnss_pr_err("Invalid drvdata: dev %pK", dev);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
+
+	atomic_set(&priv->is_idle_shutdown, true);
 
 	if (priv->is_ssr || test_bit(ICNSS_PDR, &priv->state) ||
-	    test_bit(ICNSS_REJUVENATE, &priv->state)) {
-		icnss_pr_err("SSR/PDR is already in-progress during idle shutdown\n");
-		return -EBUSY;
+	    test_bit(ICNSS_REJUVENATE, &priv->state) || atomic_read(&priv->is_shutdown)) {
+		icnss_pr_err("SSR/PDR/Shutdown is already in-progress during idle shutdown\n");
+		atomic_set(&priv->is_idle_shutdown, false);
+		ret = -EBUSY;
+		goto out;
 	}
 
-	return icnss_driver_event_post(priv, ICNSS_DRIVER_EVENT_IDLE_SHUTDOWN,
+	ret = icnss_driver_event_post(priv, ICNSS_DRIVER_EVENT_IDLE_SHUTDOWN,
 					ICNSS_EVENT_SYNC_UNINTERRUPTIBLE, NULL);
+	atomic_set(&priv->is_idle_shutdown, false);
+out:
+	return ret;
 }
 EXPORT_SYMBOL(icnss_idle_shutdown);
 
@@ -5271,7 +5283,11 @@ static void icnss_unregister_power_supply_notifier(struct icnss_priv *priv)
 	}
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
 static int icnss_remove(struct platform_device *pdev)
+#else
+static void icnss_remove(struct platform_device *pdev)
+#endif
 {
 	struct icnss_priv *priv = dev_get_drvdata(&pdev->dev);
 
@@ -5344,7 +5360,9 @@ static int icnss_remove(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, NULL);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
 	return 0;
+#endif
 }
 
 void icnss_recovery_timeout_hdlr(struct timer_list *t)
