@@ -250,6 +250,9 @@ struct icnss_clk_info {
 struct icnss_pinctrl_info {
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *sw_ctrl;
+	struct pinctrl_state *wlan_en_active;
+	struct pinctrl_state *wlan_en_sleep;
+	int wlan_en_gpio;
 	int sw_ctrl_gpio;
 };
 
@@ -470,6 +473,66 @@ struct cnss_host_dump_meta_info {
 	struct icnss_dump_entry entry[CNSS_HOST_DUMP_TYPE_MAX];
 };
 
+enum icnss_wlfw_gpio_config_type {
+	WLFW_GPIO_NUM_V01,
+	WLFW_GPIO_NAME_V01,
+	WLFW_PMIC_INDEX_V01,
+	WLFW_GPIO_TYPE_V01,
+	WLFW_OUTPUT_VALUE_V01,
+	WLFW_FUNC_V01,
+	WLFW_DIRECTION_V01,
+	WLFW_DRIVE_V01,
+	WLFW_BIAS_V01,
+	WLFW_IS_CLK_V01,
+	WLFW_IS_WAKE_V01,
+	WLFW_INTRPT_TRIGGER_TYPE_V01,
+	WLFW_PRIORITY_V01,
+	WLFW_GPIO_BITRESERVED_V01,
+	WLFW_GPIO_ARRAY_VALID_V01,
+	WLFW_GPIO_OWNER_V01,
+	WLFW_GPIO_PARAMS_MAX_V01,
+};
+
+static const char * const icnss_gpio_output_str[] = {
+	[WLFW_GPIO_LOW_VALUE_V01] = "low",
+	[WLFW_GPIO_HIGH_VALUE_V01] = "high",
+};
+
+static const char * const icnss_gpio_bias_str[] = {
+	[WLFW_GPIO_NO_PULL_V01] = "no_pull",
+	[WLFW_GPIO_PULL_DOWN_V01] = "pull_down",
+	[WLFW_GPIO_PULL_UP_V01] = "pull_up",
+	[WLFW_GPIO_KEEPER_V01] = "keeper",
+};
+
+static const char * const icnss_gpio_direction_str[] = {
+	[WLFW_GPIO_INPUT_V01] = "input",
+	[WLFW_GPIO_OUTPUT_V01] = "output",
+	[WLFW_GPIO_BI_DIRECTIONAL_V01] = "bi_directional",
+};
+
+static const char * const icnss_gpio_intr_trigger_str[] = {
+	[WLFW_GPIO_INTR_TRIGGER_HIGH_V01] = "high",
+	[WLFW_GPIO_INTR_TRIGGER_LOW_V01] = "low",
+	[WLFW_GPIO_INTR_TRIGGER_RISING_V01] = "rising",
+	[WLFW_GPIO_INTR_TRIGGER_FALLING_V01] = "falling",
+	[WLFW_GPIO_INTR_TRIGGER_DUAL_EDGE_V01] = "dual_edge",
+};
+
+static const char * const icnss_gpio_type_str[] = {
+	[WLFW_GPIO_TYPE_PMIC_V01] = "pmic",
+	[WLFW_GPIO_TYPE_TLMM_V01] = "tlmm",
+};
+
+static const char * const icnss_gpio_name_str[] = {
+	[WLAN_EN_GPIO_V01] = "WLAN_EN",
+	[BT_EN_GPIO_V01] = "BT_EN",
+	[HOST_SOL_GPIO_V01] = "HOST_SOL",
+	[TARGET_SOL_GPIO_V01] = "DEV_SOL",
+	[WLAN_SW_CTRL_GPIO_V01] = "WLAN_SW_CTRL",
+	[RESET_B_GPIO_V01] = "RESET_B",
+};
+
 struct icnss_priv {
 	uint32_t magic;
 	struct platform_device *pdev;
@@ -656,6 +719,7 @@ struct icnss_priv {
 		shared_mem[QMI_WLFW_SHARED_MAX_CLIENT_SUPPORT_V01];
 	u64 fw_caps;
 	u32 ddr_type;
+	u32 gpio_config_arr[GPIO_TYPE_MAX_V01][WLFW_GPIO_PARAMS_MAX_V01];
 };
 
 struct icnss_reg_info {

@@ -134,7 +134,8 @@ struct cnss_wlan_driver {
 	int  (*suspend_noirq)(struct pci_dev *pdev);
 	int  (*resume_noirq)(struct pci_dev *pdev);
 	void (*modem_status)(struct pci_dev *pdev, int state);
-	void (*update_status)(struct pci_dev *pdev, uint32_t status);
+	void (*update_status)(struct pci_dev *pdev,
+			      enum cnss_driver_status status);
 	int  (*update_event)(struct pci_dev *pdev,
 			     struct cnss_uevent_data *uevent);
 	struct cnss_wlan_runtime_ops *runtime_ops;
@@ -215,6 +216,7 @@ enum cnss_recovery_reason {
 	CNSS_REASON_RDDM,
 	CNSS_REASON_TIMEOUT,
 	CNSS_REASON_FW_ASSERTION_FAIL,
+	CNSS_REASON_FATAL_ERROR,
 };
 
 enum cnss_fw_caps {
@@ -235,8 +237,6 @@ struct cnss_mem_segment {
 	phys_addr_t pa;
 };
 
-
-extern int cnss_pci_assert_host_sol_dev(struct device *dev);
 extern int cnss_wlan_register_driver(struct cnss_wlan_driver *driver);
 extern void cnss_wlan_unregister_driver(struct cnss_wlan_driver *driver);
 extern void cnss_device_crashed(struct device *dev);
