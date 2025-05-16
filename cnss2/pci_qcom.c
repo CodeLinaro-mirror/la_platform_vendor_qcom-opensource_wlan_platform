@@ -635,3 +635,14 @@ int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 {
 	return msm_pcie_reg_dump(pci_priv->pci_dev, buf, len);
 }
+
+void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv)
+{
+	pci_priv->reset_regs = NULL;
+	return;
+}
+
+void cnss_pci_sw_reset(struct cnss_pci_data *pci_priv, bool power_on)
+{
+	return;
+}

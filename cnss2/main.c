@@ -3189,7 +3189,11 @@ int cnss_qcom_elf_dump(struct list_head *segs, struct device *dev,
 /* Saving dump to file system is always needed in this case. */
 static bool cnss_dump_enabled(void)
 {
+#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
+	return false;
+#else
 	return true;
+#endif
 }
 #endif /* CONFIG_QCOM_RAMDUMP */
 
@@ -5370,6 +5374,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_get_cpr_info(plat_priv);
 	cnss_aop_interface_init(plat_priv);
 	cnss_init_control_params(plat_priv);
+	cnss_pm_notifier_init(plat_priv);
 
 	ret = cnss_get_resources(plat_priv);
 	if (ret)
@@ -5460,6 +5465,7 @@ static int cnss_remove(struct platform_device *plat_dev)
 
 	plat_priv->audio_iommu_domain = NULL;
 	cnss_genl_exit();
+	cnss_pm_notifier_deinit(plat_priv);
 	cnss_unregister_ims_service(plat_priv);
 	cnss_unregister_coex_service(plat_priv);
 	cnss_bus_deinit(plat_priv);
@@ -5481,9 +5487,20 @@ static int cnss_remove(struct platform_device *plat_dev)
 	return 0;
 }
 
+static void cnss_shutdown(struct platform_device *plat_dev)
+{
+	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
+
+	if (plat_priv->is_fw_managed_pwr) {
+		cnss_pr_info("wlan cnss do shutdown\n");
+		cnss_power_off_device(plat_priv);
+	}
+}
+
 static struct platform_driver cnss_platform_driver = {
 	.probe  = cnss_probe,
 	.remove = cnss_remove,
+	.shutdown = cnss_shutdown,
 	.driver = {
 		.name = "cnss2",
 		.of_match_table = cnss_of_match_table,
