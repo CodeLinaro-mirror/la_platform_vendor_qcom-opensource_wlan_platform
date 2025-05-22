@@ -5450,6 +5450,7 @@ unreg_esoc:
 free_res:
 	cnss_put_resources(plat_priv);
 reset_ctx:
+	cnss_pm_notifier_deinit(plat_priv);
 	cnss_aop_interface_deinit(plat_priv);
 	platform_set_drvdata(plat_dev, NULL);
 	cnss_deinitialize_mem_pool();
