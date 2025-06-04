@@ -46,6 +46,10 @@
 #include "qmi.h"
 #include "cnss_prealloc.h"
 #include "cnss_common.h"
+#include <linux/pm_runtime.h>
+#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
+#include <linux/pm_domain.h>
+#endif
 
 #define MAX_NO_OF_MAC_ADDR		4
 #define QMI_WLFW_MAX_TIMESTAMP_LEN	32
@@ -670,6 +674,11 @@ struct cnss_plat_data {
 	bool ipa_shared_cb_enable;
 	struct task_struct *cnss_event_work_task;
 	u64 pcie_time_sync_offset;
+	bool is_fw_managed_pwr;
+	struct device **pd_devs;
+	int pd_count;
+	bool pm_suspend_in_progress;
+	struct notifier_block pm_notifier;
 };
 
 #if IS_ENABLED(CONFIG_ARCH_QCOM)
@@ -699,7 +708,7 @@ struct cnss_plat_data *cnss_get_first_plat_priv(void);
 void cnss_pm_stay_awake(struct cnss_plat_data *plat_priv);
 void cnss_pm_relax(struct cnss_plat_data *plat_priv);
 struct cnss_plat_data *cnss_get_plat_priv_by_rc_num(int rc_num);
-int cnss_get_plat_env_count(void);
+int cnss_get_max_plat_env_count(void);
 struct cnss_plat_data *cnss_get_plat_env(int index);
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv);
 void cnss_get_sleep_clk_supported(struct cnss_plat_data *plat_priv);
@@ -784,4 +793,12 @@ size_t cnss_get_platform_name(struct cnss_plat_data *plat_priv,
 int cnss_iommu_map(struct iommu_domain *domain, unsigned long iova,
 		   phys_addr_t paddr, size_t size, int prot);
 int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv);
+int cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
+				    bool enabled);
+int cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv,
+			       bool enabled);
+int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv);
+void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv);
+void cnss_pm_notifier_init(struct cnss_plat_data *plat_priv);
+void cnss_pm_notifier_deinit(struct cnss_plat_data *plat_priv);
 #endif /* _CNSS_MAIN_H */

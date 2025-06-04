@@ -13,7 +13,6 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/vmalloc.h>
-#include <linux/pm_runtime.h>
 #include <linux/suspend.h>
 #include <linux/version.h>
 #include <linux/sched.h>
@@ -2730,7 +2729,7 @@ static int cnss_pci_config_msi_data(struct cnss_pci_data *pci_priv)
 static struct cnss_plat_data *
 cnss_get_plat_priv_by_driver_ops(struct cnss_wlan_driver *driver_ops)
 {
-	int plat_env_count = cnss_get_plat_env_count();
+	int plat_env_count = cnss_get_max_plat_env_count();
 	struct cnss_plat_data *plat_env;
 	struct cnss_pci_data *pci_priv;
 	int i = 0;
@@ -3788,6 +3787,74 @@ static int cnss_qca6174_ramdump(struct cnss_pci_data *pci_priv)
 	return cnss_do_ramdump(plat_priv);
 }
 
+#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
+static int cnss_enable_pcie_device(struct cnss_pci_data *pci_priv)
+{
+	int ret = 0;
+
+	if (!pci_priv)
+		return -ENODEV;
+
+	if (pci_priv->pci_dev->device != QCA6174_DEVICE_ID) {
+		ret = pci_set_power_state(pci_priv->pci_dev, PCI_D0);
+		if (ret) {
+			cnss_pr_err("Failed to set D0, err = %d\n", ret);
+			goto out;
+		}
+	}
+
+	ret = cnss_set_pci_config_space(pci_priv, RESTORE_PCI_CONFIG_SPACE);
+	if (ret)
+		goto out;
+
+	ret = pci_enable_device(pci_priv->pci_dev);
+	if (ret) {
+		cnss_pr_err("Failed to enable PCI device, err = %d\n", ret);
+		goto out;
+	}
+
+	pci_set_master(pci_priv->pci_dev);
+out:
+	return ret;
+}
+
+static int cnss_disable_pcie_device(struct cnss_pci_data *pci_priv)
+{
+	int ret = 0;
+
+	if (!pci_priv)
+		return -ENODEV;
+
+	pci_clear_master(pci_priv->pci_dev);
+
+	ret = cnss_set_pci_config_space(pci_priv, SAVE_PCI_CONFIG_SPACE);
+	if (ret)
+		return ret;
+
+	pci_disable_device(pci_priv->pci_dev);
+
+	if (pci_priv->pci_dev->device != QCA6174_DEVICE_ID) {
+		ret = pci_set_power_state(pci_priv->pci_dev, PCI_D3hot);
+		if (ret)
+			cnss_pr_err("Failed to set D3Hot, err = %d\n", ret);
+	}
+
+	pci_priv->drv_connected_last = 0;
+
+	return 0;
+}
+#else
+static int cnss_enable_pcie_device(struct cnss_pci_data *pci_priv)
+{
+	return 0;
+}
+
+static int cnss_disable_pcie_device(struct cnss_pci_data *pci_priv)
+{
+	return 0;
+}
+#endif
+
 static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -3814,6 +3881,20 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 	pci_priv->qmi_send_usage_count = 0;
 
 	plat_priv->power_up_error = 0;
+
+	/* when idle restart is called after system
+	 * suspend/resume, wlan should be powered
+	 * during resume in SCMI solution
+	 * */
+	if (plat_priv->is_fw_managed_pwr &&
+	    cnss_is_device_powered_on(plat_priv) &&
+	    pci_priv->pci_link_state == PCI_LINK_UP) {
+		ret = cnss_enable_pcie_device(pci_priv);
+		if (ret)
+			goto out;
+		else
+			goto power_on_done;
+	}
 retry:
 	ret = cnss_power_on_device(plat_priv, false);
 	if (ret) {
@@ -3855,6 +3936,7 @@ retry:
 		goto power_off;
 	}
 
+power_on_done:
 	cnss_pci_set_wlaon_pwr_ctrl(pci_priv, false, false, false);
 	timeout = cnss_get_timeout(plat_priv, CNSS_TIMEOUT_QMI);
 
@@ -3956,12 +4038,26 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 		goto skip_power_off;
 
 	set_bit(CNSS_SHUTDOWN_DEVICE, &plat_priv->driver_state);
-	cnss_pci_power_off_mhi(pci_priv, false);
-	ret = cnss_suspend_pci_link(pci_priv);
-	if (ret)
-		cnss_pr_err("Failed to suspend PCI link, err = %d\n", ret);
-	cnss_pci_deinit_mhi(pci_priv);
-	cnss_power_off_device(plat_priv);
+	if (plat_priv->pm_suspend_in_progress) {
+		/* shutdown suspend, suspend pcie link
+		 * and wlan power off will be handled
+		 * by pcie/cnss pm
+		 */
+		cnss_pci_power_off_mhi(pci_priv, false);
+		ret = cnss_disable_pcie_device(pci_priv);
+		if (ret)
+			goto out;
+		cnss_pci_deinit_mhi(pci_priv);
+		goto skip_power_off;
+	} else {
+		cnss_pci_power_off_mhi(pci_priv, false);
+		ret = cnss_suspend_pci_link(pci_priv);
+		if (ret)
+			cnss_pr_err("Failed to suspend PCI link, err = %d\n",
+				    ret);
+		cnss_pci_deinit_mhi(pci_priv);
+		cnss_power_off_device(plat_priv);
+	}
 
 skip_power_off:
 	pci_priv->remap_window = 0;
@@ -4191,7 +4287,8 @@ static void cnss_wlan_reg_driver_work(struct work_struct *work)
 
 		del_timer(&plat_priv->fw_boot_timer);
 		if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state) &&
-		    !test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
+		    !test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state) &&
+		    !test_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state)) {
 			cnss_pr_err("Timeout waiting for calibration to complete\n");
 			CNSS_ASSERT(0);
 		}
@@ -4589,6 +4686,10 @@ static int cnss_pci_suspend(struct device *dev)
 	if (!cnss_is_device_powered_on(plat_priv))
 		goto out;
 
+	if (plat_priv->is_fw_managed_pwr)
+		/* pcie link will be suspend by pcie PM */
+		goto out;
+
 	/* No mhi state bit set if only finish pcie enumeration,
 	 * so test_bit is not applicable to check if it is INIT state.
 	 */
@@ -4666,6 +4767,12 @@ static int cnss_pci_resume(struct device *dev)
 	if (pci_priv->pci_link_down_ind)
 		goto out;
 
+	if (plat_priv->is_fw_managed_pwr) {
+		/* pcie link have been resume by pcie bus pm */
+		pci_priv->pci_link_state = PCI_LINK_UP;
+		goto out;
+	}
+
 	if (!cnss_is_device_powered_on(pci_priv->plat_priv))
 		goto out;
 
@@ -4702,6 +4809,13 @@ static int cnss_pci_suspend_noirq(struct device *dev)
 
 	driver_ops = pci_priv->driver_ops;
 	plat_priv = pci_priv->plat_priv;
+
+	if (plat_priv->is_fw_managed_pwr) {
+		pci_priv->pci_link_state = PCI_LINK_DOWN;
+		cnss_power_off_device(plat_priv);
+		goto out;
+	}
+
 	if (test_bit(CNSS_DRIVER_REGISTERED, &plat_priv->driver_state) &&
 	    driver_ops && driver_ops->suspend_noirq)
 		ret = driver_ops->suspend_noirq(pci_dev);
@@ -4725,10 +4839,17 @@ static int cnss_pci_resume_noirq(struct device *dev)
 	if (!pci_priv)
 		goto out;
 
-	if (!cnss_is_device_powered_on(pci_priv->plat_priv))
-		goto out;
-
 	plat_priv = pci_priv->plat_priv;
+	if (!cnss_is_device_powered_on(pci_priv->plat_priv)) {
+		if (plat_priv->is_fw_managed_pwr) {
+			ret = cnss_power_on_device(plat_priv, false);
+			if (ret)
+				cnss_pr_err("Failed to power on device, err = %d\n",
+					    ret);
+		}
+		goto out;
+	}
+
 	driver_ops = pci_priv->driver_ops;
 	if (test_bit(CNSS_DRIVER_REGISTERED, &plat_priv->driver_state) &&
 	    driver_ops && driver_ops->resume_noirq &&
@@ -5898,7 +6019,7 @@ static void cnss_pci_free_aux_mem(struct cnss_pci_data *pci_priv)
 #define CNSS_PRINT_TRACE_SPACES 4
 
 #ifdef CONFIG_ARCH_STACKWALK
-void cnss_print_thread_trace(struct task_struct *task)
+static void cnss_print_thread_trace(struct task_struct *task)
 {
 	const int spaces = CNSS_PRINT_TRACE_SPACES;
 	unsigned long entries[CNSS_PRINT_TRACE_COUNT] = {0};
@@ -5910,7 +6031,7 @@ void cnss_print_thread_trace(struct task_struct *task)
 	stack_trace_print(entries, nr_entries, spaces);
 }
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0))
-void cnss_print_thread_trace(struct task_struct *task)
+static void cnss_print_thread_trace(struct task_struct *task)
 {
 	const int spaces = CNSS_PRINT_TRACE_SPACES;
 	unsigned long entries[CNSS_PRINT_TRACE_COUNT] = {0};
@@ -5925,7 +6046,8 @@ void cnss_print_thread_trace(struct task_struct *task)
 	stack_trace_print(entries, trace.nr_entries, spaces);
 }
 
-void cnss_print_thread_trace(struct task_struct *task)
+#else
+static void cnss_print_thread_trace(struct task_struct *task)
 {
 	const int spaces = CNSS_PRINT_TRACE_SPACES;
 	unsigned long entries[CNSS_PRINT_TRACE_COUNT] = {0};
@@ -5942,7 +6064,7 @@ void cnss_print_thread_trace(struct task_struct *task)
 #endif
 
 #else
-void cnss_print_thread_trace(struct task_struct *task) { }
+static inline void cnss_print_thread_trace(struct task_struct *task) { }
 #endif /* KERNEL_VERSION(4, 14, 0) */
 
 
@@ -6218,10 +6340,19 @@ static int cnss_pci_enable_msi(struct cnss_pci_data *pci_priv)
 		goto out;
 	}
 
-	num_vectors = pci_alloc_irq_vectors(pci_dev,
-					    msi_config->total_vectors,
-					    msi_config->total_vectors,
-					    PCI_IRQ_MSI);
+	switch (pci_priv->device_id) {
+	case COLOGNE_DEVICE_ID:
+		num_vectors = pci_alloc_irq_vectors(pci_dev,
+						    msi_config->total_vectors,
+						    msi_config->total_vectors,
+						    PCI_IRQ_MSI | PCI_IRQ_MSIX);
+		break;
+	default:
+		num_vectors = pci_alloc_irq_vectors(pci_dev,
+						    msi_config->total_vectors,
+						    msi_config->total_vectors,
+						    PCI_IRQ_MSI);
+	}
 	if ((num_vectors != msi_config->total_vectors) &&
 	    !cnss_pci_fallback_one_msi(pci_priv, &num_vectors)) {
 		cnss_pr_err("Failed to get enough MSI vectors (%d), available vectors = %d",
@@ -7332,6 +7463,21 @@ static int cnss_mhi_pm_runtime_get(struct mhi_controller *mhi_ctrl)
 	return cnss_pci_pm_runtime_get(pci_priv, RTPM_ID_MHI);
 }
 
+static int cnss_mhi_pm_runtime_get_sync(struct mhi_controller *mhi_ctrl)
+{
+	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
+
+	return cnss_pci_pm_runtime_get_sync(pci_priv, RTPM_ID_MHI);
+}
+
+static int cnss_mhi_pm_runtime_put_autosuspend(struct mhi_controller *mhi_ctrl)
+{
+	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
+
+	cnss_pci_pm_runtime_mark_last_busy(pci_priv);
+	return cnss_pci_pm_runtime_put_autosuspend(pci_priv, RTPM_ID_MHI);
+}
+
 static void cnss_mhi_pm_runtime_put_noidle(struct mhi_controller *mhi_ctrl)
 {
 	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
@@ -7917,6 +8063,8 @@ static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 
 	mhi_ctrl->status_cb = cnss_mhi_notify_status;
 	mhi_ctrl->runtime_get = cnss_mhi_pm_runtime_get;
+	mhi_ctrl->runtime_get_sync = cnss_mhi_pm_runtime_get_sync;
+	mhi_ctrl->runtime_put_autosuspend = cnss_mhi_pm_runtime_put_autosuspend;
 	mhi_ctrl->runtime_put = cnss_mhi_pm_runtime_put_noidle;
 	mhi_ctrl->read_reg = cnss_mhi_read_reg;
 	mhi_ctrl->write_reg = cnss_mhi_write_reg;
@@ -8027,7 +8175,51 @@ static void cnss_pci_config_regs(struct cnss_pci_data *pci_priv)
 	}
 }
 
-#if !IS_ENABLED(CONFIG_ARCH_QCOM)
+#if IS_ENABLED(CONFIG_ARCH_QCOM)
+/**
+ * cnss_pci_of_reserved_mem_device_init() - Assign reserved memory region
+ *                                          to given PCI device
+ * @pci_priv: driver PCI bus context pointer
+ *
+ * This function shall call corresponding of_reserved_mem_device* API to
+ * assign reserved memory region to PCI device based on where the memory is
+ * defined and attached to (platform device of_node or PCI device of_node)
+ * in device tree.
+ *
+ * Return: 0 for success, negative value for error
+ */
+static int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv)
+{
+	struct device *dev_pci = &pci_priv->pci_dev->dev;
+	int ret;
+
+	/* Use of_reserved_mem_device_init_by_idx() if reserved memory is
+	 * attached to platform device of_node.
+	 */
+	ret = of_reserved_mem_device_init(dev_pci);
+	if (ret) {
+		if (ret == -EINVAL)
+			cnss_pr_vdbg("Ignore, no specific reserved-memory assigned\n");
+		else
+			cnss_pr_err("Failed to init reserved mem device, err = %d\n",
+				    ret);
+	}
+	if (dev_pci->cma_area)
+		cnss_pr_dbg("CMA area is %s\n",
+			    cma_get_name(dev_pci->cma_area));
+
+	return ret;
+}
+
+static int cnss_pci_wake_gpio_init(struct cnss_pci_data *pci_priv)
+{
+	return 0;
+}
+
+static void cnss_pci_wake_gpio_deinit(struct cnss_pci_data *pci_priv)
+{
+}
+#else
 static int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv)
 {
 	return 0;
@@ -8501,7 +8693,8 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 		goto out;
 	if (cnss_is_dual_wlan_enabled() && !plat_priv->enumerate_done)
 		goto probe_done;
-	cnss_pci_suspend_pwroff(pci_dev);
+	if (!plat_priv->is_fw_managed_pwr)
+		cnss_pci_suspend_pwroff(pci_dev);
 
 probe_done:
 	set_bit(CNSS_PCI_PROBE_DONE, &plat_priv->driver_state);
@@ -8685,7 +8878,7 @@ int cnss_pci_init(struct cnss_plat_data *plat_priv)
 				    ret);
 			goto out;
 		}
-		if (!plat_priv->bus_priv) {
+		if (cnss_pci_is_sync_probe() && !plat_priv->bus_priv) {
 			cnss_pr_err("Failed to probe PCI driver\n");
 			ret = -ENODEV;
 			goto unreg_pci;
