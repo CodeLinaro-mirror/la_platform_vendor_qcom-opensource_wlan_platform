@@ -606,20 +606,26 @@ static int cnss_pci_smmu_fault_handler(struct iommu_domain *domain,
 				       int flags, void *handler_token)
 {
 	struct cnss_pci_data *pci_priv = handler_token;
+	u64 ts = __arch_counter_get_cntvct();
 
-	cnss_fatal_err("SMMU fault happened with IOVA 0x%lx\n", iova);
+	cnss_fatal_err("0x%lX SMMU fault happened with IOVA 0x%lx, flags: 0x%x\n",
+			ts, iova, flags);
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
 	}
 
+	return 0;
+
+#if 0
 	pci_priv->is_smmu_fault = true;
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
 	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
 
 	/* IOMMU driver requires -ENOSYS to print debug info. */
 	return -ENOSYS;
+#endif
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
