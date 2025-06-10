@@ -139,7 +139,6 @@ def _define_modules_for_target_variant(target, variant):
                     "//soc-repo:{}/drivers/pinctrl/qcom/pinctrl-msm".format(tv),
                     "//soc-repo:{}/drivers/soc/qcom/cmd-db".format(tv),
                     "//soc-repo:{}/drivers/soc/qcom/qcom_aoss".format(tv),
-                    "//soc-repo:{}/drivers/pci/controller/pci-msm-drv".format(tv),
                 ],
                     "//build/kernel/kleaf:socrepo_false": [],
             })
@@ -172,9 +171,9 @@ def _define_modules_for_target_variant(target, variant):
                         "cnss2/coexistence_service_v01.c",
                     ],
                 },
-                "CONFIG_PCI_MSM": {
+                "CONFIG_PCIE_QCOM_ECAM": {
                     True: [
-                        "cnss2/pci_qcom.c",
+                        "cnss2/pci_qcom_ecam.c",
                     ],
                 },
             },
