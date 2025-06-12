@@ -170,11 +170,6 @@ def _define_modules_for_target_variant(target, variant):
                         "cnss2/pci_qcom.c",
                     ],
                 },
-                "CONFIG_PCIE_QCOM_ECAM": {
-                    True: [
-                        "cnss2/pci_qcom_ecam.c",
-                    ],
-                },
             },
             out = "cnss2.ko",
             kernel_build = kernel_build,
