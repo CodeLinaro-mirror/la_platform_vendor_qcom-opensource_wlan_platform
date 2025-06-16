@@ -41,10 +41,11 @@ static struct icnss_battery_level icnss_battery_level[] = {
 };
 
 static struct icnss_vreg_cfg icnss_wcn6450_vreg_list[] = {
-	{"vdd-cx-mx", 824000, 952000, 0, 0, 0, false, true},
-	{"vdd-1.8-xo", 1872000, 1872000, 0, 0, 0, false, true},
-	{"vdd-1.3-rfa", 1256000, 1352000, 0, 0, 0, false, true},
-	{"vdd-aon", 1256000, 1352000, 0, 0, 0, false, true},
+	{"vdd-aon", 920000, 1040000, 0, 0, 0, false, true},
+	{"vdd-1.8-rfa", 1856000, 1908000, 0, 0, 0, false, true},
+	{"vdd-1.2-rfa", 1256000, 1408000, 0, 0, 0, false, true},
+	{"vdd-cx", 620000, 2200000, 0, 0, 0, false, true},
+	{"vdd-1.8-io", 1800000, 1800000, 0, 0, 0, false, true},
 };
 
 static struct icnss_clk_cfg icnss_clk_list[] = {
@@ -982,8 +983,13 @@ int icnss_update_cpr_info(struct icnss_priv *priv)
 		return -EINVAL;
 	}
 
-	cpr_info->voltage = cpr_info->voltage > BT_CXMX_VOLTAGE_MV ?
-		cpr_info->voltage : BT_CXMX_VOLTAGE_MV;
+	/*For WCN6450, WLAN_CX is a dedicated rail for WLAN and there is a seperate rail
+	 * for BT_CX.
+	 * Hence, there is no need to modifying it with BT_CXMX_VOLTAGE
+	 */
+	if (priv->device_id != WCN6450_DEVICE_ID)
+		cpr_info->voltage = cpr_info->voltage > BT_CXMX_VOLTAGE_MV ?
+			cpr_info->voltage : BT_CXMX_VOLTAGE_MV;
 
 	return icnss_aop_set_vreg_param(priv,
 				       cpr_info->vreg_ol_cpr,

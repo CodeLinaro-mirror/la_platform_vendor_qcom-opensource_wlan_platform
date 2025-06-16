@@ -1694,6 +1694,11 @@ static int cnss_get_resources(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
 
+	if (plat_priv->is_fw_managed_pwr) {
+		ret = cnss_fw_managed_domain_attach(plat_priv);
+		goto out;
+	}
+
 	ret = cnss_get_vreg_type(plat_priv, CNSS_VREG_PRIM);
 	if (ret < 0) {
 		cnss_pr_err("Failed to get vreg, err = %d\n", ret);
@@ -1724,6 +1729,16 @@ out:
 
 static void cnss_put_resources(struct cnss_plat_data *plat_priv)
 {
+	if (plat_priv->is_fw_managed_pwr) {
+		if (plat_priv->powered_on) {
+			cnss_fw_managed_power_gpio(plat_priv,
+						   false);
+			cnss_fw_managed_power_regulator(plat_priv,
+							false);
+		}
+		cnss_fw_managed_domain_detach(plat_priv);
+		return;
+	}
 	cnss_put_clk(plat_priv);
 	cnss_put_vreg_type(plat_priv, CNSS_VREG_PRIM);
 }
@@ -2224,6 +2239,8 @@ static const char *cnss_recovery_reason_to_str(enum cnss_recovery_reason reason)
 		return "RDDM";
 	case CNSS_REASON_TIMEOUT:
 		return "TIMEOUT";
+	case CNSS_REASON_FW_ASSERTION_FAIL:
+		return "FW_ASSERTION_FAIL";
 	}
 
 	return "UNKNOWN";
@@ -3165,6 +3182,26 @@ static void cnss_destroy_ramdump_device(struct cnss_plat_data *plat_priv,
 }
 #endif
 
+#if IS_ENABLED(CONFIG_CNSS2_DISABLE_SSR_RAMDUMP)
+static bool cnss_dump_enabled(void)
+{
+	return false;
+}
+#else
+#if IS_ENABLED(CONFIG_QCOM_RAMDUMP)
+static bool cnss_dump_enabled(void)
+{
+	return dump_enabled();
+}
+#else
+/* Saving dump to file system is always needed in this case. */
+static bool cnss_dump_enabled(void)
+{
+	return true;
+}
+#endif /* IS_ENABLED(CONFIG_QCOM_RAMDUMP) */
+#endif /* IS_ENABLED(CONFIG_CNSS2_DISABLE_SSR_RAMDUMP) */
+
 #if IS_ENABLED(CONFIG_QCOM_RAMDUMP)
 int cnss_do_ramdump(struct cnss_plat_data *plat_priv)
 {
@@ -3172,7 +3209,7 @@ int cnss_do_ramdump(struct cnss_plat_data *plat_priv)
 	struct qcom_dump_segment segment;
 	struct list_head head;
 
-	if (!dump_enabled()) {
+	if (!cnss_dump_enabled()) {
 		cnss_pr_info("Dump collection is not enabled\n");
 		return 0;
 	}
@@ -3228,7 +3265,6 @@ do {									\
  */
 #define qcom_dump_segment cnss_qcom_dump_segment
 #define qcom_elf_dump cnss_qcom_elf_dump
-#define dump_enabled cnss_dump_enabled
 
 struct cnss_qcom_dump_segment {
 	struct list_head node;
@@ -3369,12 +3405,6 @@ static int cnss_qcom_elf_dump(struct list_head *segs, struct device *dev,
 
 	return cnss_qcom_devcd_dump(dev, data, data_size, GFP_KERNEL);
 }
-
-/* Saving dump to file system is always needed in this case. */
-static bool cnss_dump_enabled(void)
-{
-	return true;
-}
 #endif /* CONFIG_QCOM_RAMDUMP */
 
 int cnss_do_elf_ramdump(struct cnss_plat_data *plat_priv)
@@ -3387,7 +3417,7 @@ int cnss_do_elf_ramdump(struct cnss_plat_data *plat_priv)
 	struct list_head head;
 	int i, ret = 0;
 
-	if (!dump_enabled()) {
+	if (!cnss_dump_enabled()) {
 		cnss_pr_info("Dump collection is not enabled\n");
 		return ret;
 	}
@@ -3588,7 +3618,7 @@ int cnss_do_host_ramdump(struct cnss_plat_data *plat_priv,
 	int ret = 0;
 	enum cnss_host_dump_type j;
 
-	if (!dump_enabled()) {
+	if (!cnss_dump_enabled()) {
 		cnss_pr_info("Dump collection is not enabled\n");
 		return ret;
 	}
@@ -5246,6 +5276,13 @@ cnss_dt_type(struct cnss_plat_data *plat_priv)
 	return CNSS_DTT_LEGACY;
 }
 
+static inline bool
+cnss_resource_is_fw_managed(struct cnss_plat_data *plat_priv)
+{
+	return of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				     "firmware-managed-resources");
+}
+
 static int cnss_wlan_device_init(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
@@ -5567,6 +5604,8 @@ static int cnss_probe(struct platform_device *plat_dev)
 	plat_priv->use_fw_path_with_prefix =
 		cnss_use_fw_path_with_prefix(plat_priv);
 
+	plat_priv->is_fw_managed_pwr = cnss_resource_is_fw_managed(plat_priv);
+
 	ret = cnss_get_dev_cfg_node(plat_priv);
 	if (ret) {
 		cnss_pr_err("Failed to get device cfg node, err = %d\n", ret);
@@ -5665,7 +5704,7 @@ deinit_misc:
 destroy_debugfs:
 	cnss_debugfs_destroy(plat_priv);
 deinit_dms:
-	cnss_cancel_dms_work();
+	cnss_cancel_dms_work(plat_priv);
 	cnss_dms_deinit(plat_priv);
 deinit_event_work:
 	cnss_event_work_deinit(plat_priv);
@@ -5687,7 +5726,11 @@ out:
 	return ret;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
 static int cnss_remove(struct platform_device *plat_dev)
+#else
+static void cnss_remove(struct platform_device *plat_dev)
+#endif
 {
 	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
 
@@ -5698,7 +5741,7 @@ static int cnss_remove(struct platform_device *plat_dev)
 	cnss_bus_deinit(plat_priv);
 	cnss_misc_deinit(plat_priv);
 	cnss_debugfs_destroy(plat_priv);
-	cnss_cancel_dms_work();
+	cnss_cancel_dms_work(plat_priv);
 	cnss_dms_deinit(plat_priv);
 	cnss_qmi_deinit(plat_priv);
 	cnss_event_work_deinit(plat_priv);
@@ -5711,7 +5754,9 @@ static int cnss_remove(struct platform_device *plat_dev)
 	platform_set_drvdata(plat_dev, NULL);
 	cnss_clear_plat_priv(plat_priv);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
 	return 0;
+#endif
 }
 
 static struct platform_driver cnss_platform_driver = {
