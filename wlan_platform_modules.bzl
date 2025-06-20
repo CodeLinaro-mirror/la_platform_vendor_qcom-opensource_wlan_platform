@@ -1,5 +1,9 @@
 load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
-load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+    "kernel_module_group",
+)
 load("//msm-kernel:target_variants.bzl", "get_all_variants")
 
 _default_module_enablement_list = [
@@ -303,8 +307,16 @@ def _define_modules_for_target_variant(target, variant):
         log = "info",
     )
 
+def _define_kernel_module_groups(target,variant):
+    kernel_module_group(
+        name = "{}_{}_modules".format(target, variant),
+        srcs = _get_module_list(target, variant),
+    )
+
 def define_modules():
     for (t, v) in get_all_variants():
         print("v=", v)
         if t in _cnss2_enabled_target or t in _icnss2_enabled_target:
             _define_modules_for_target_variant(t, v)
+            if t == "neo-la":
+                _define_kernel_module_groups(t, v)
