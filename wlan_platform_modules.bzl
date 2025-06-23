@@ -1,5 +1,9 @@
 load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
-load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
+load(
+    "//build/kernel/kleaf:kernel.bzl",
+    "ddk_module",
+    "kernel_module_group",
+)
 load("//msm-kernel:target_variants.bzl", "get_all_variants")
 
 _default_module_enablement_list = [
@@ -9,7 +13,7 @@ _default_module_enablement_list = [
     "wlan_firmware_service",
 ]
 
-_cnss2_enabled_target = ["seraph", "neo-la", "anorak", "niobe", "pineapple", "sun", "sdxkova", "sa510m"]
+_cnss2_enabled_target = ["seraph", "neo-la", "anorak", "niobe", "pineapple", "sun", "sdxkova", "sa510m", "autogvm", "autoghgvm"]
 _icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano"]
 
 def _get_module_list(target, variant):
@@ -77,6 +81,16 @@ def _define_platform_config_rule(module, target, variant):
 def _define_modules_for_target_variant(target, variant):
     tv = "{}_{}".format(target, variant)
 
+    if target == "neo-la":
+        kernel_build = select({
+            "//build/kernel/kleaf:microxr_kernel_build_true": "//:target_kernel_build",
+            "//conditions:default": "//msm-kernel:{}".format(tv),
+        })
+    else:
+        kernel_build = select({
+            "//conditions:default": "//msm-kernel:{}".format(tv),
+        })
+
     cnss2_enabled = 0
     plat_ipc_qmi_svc_enabled = 0
     icnss2_enabled = 0
@@ -137,9 +151,14 @@ def _define_modules_for_target_variant(target, variant):
                         "cnss2/pci_qcom.c",
                     ],
                 },
+                "CONFIG_PCIE_QCOM_ECAM": {
+                    True: [
+                        "cnss2/pci_qcom_ecam.c",
+                    ],
+                },
             },
             out = "cnss2.ko",
-            kernel_build = "//msm-kernel:{}".format(tv),
+            kernel_build = kernel_build,
             deps = deps,
         )
 
@@ -169,7 +188,7 @@ def _define_modules_for_target_variant(target, variant):
                 },
             },
             out = "icnss2.ko",
-            kernel_build = "//msm-kernel:{}".format(tv),
+            kernel_build = kernel_build,
             deps = [
                 ":{}_cnss_utils".format(tv),
                 ":{}_cnss_prealloc".format(tv),
@@ -189,7 +208,7 @@ def _define_modules_for_target_variant(target, variant):
         kconfig = "cnss_genl/Kconfig",
         defconfig = defconfig,
         out = "cnss_nl.ko",
-        kernel_build = "//msm-kernel:{}".format(tv),
+        kernel_build = kernel_build,
         deps = [
             kernel_header,
             ":wlan-platform-headers",
@@ -209,7 +228,7 @@ def _define_modules_for_target_variant(target, variant):
         kconfig = "cnss_prealloc/Kconfig",
         defconfig = defconfig,
         out = "cnss_prealloc.ko",
-        kernel_build = "//msm-kernel:{}".format(tv),
+        kernel_build = kernel_build,
         deps = [
             kernel_header,
             ":wlan-platform-headers",
@@ -239,7 +258,7 @@ def _define_modules_for_target_variant(target, variant):
         kconfig = "cnss_utils/Kconfig",
         defconfig = defconfig,
         out = "cnss_utils.ko",
-        kernel_build = "//msm-kernel:{}".format(tv),
+        kernel_build = kernel_build,
         deps = cnss_utils_dep_list,
     )
 
@@ -256,7 +275,7 @@ def _define_modules_for_target_variant(target, variant):
         kconfig = "cnss_utils/Kconfig",
         defconfig = defconfig,
         out = "wlan_firmware_service.ko",
-        kernel_build = "//msm-kernel:{}".format(tv),
+        kernel_build = kernel_build,
         deps = [kernel_header],
     )
 
@@ -273,7 +292,7 @@ def _define_modules_for_target_variant(target, variant):
             kconfig = "cnss_utils/Kconfig",
             defconfig = defconfig,
             out = "cnss_plat_ipc_qmi_svc.ko",
-            kernel_build = "//msm-kernel:{}".format(tv),
+            kernel_build = kernel_build,
             deps = [kernel_header],
         )
     tv = "{}_{}".format(target, variant)
@@ -288,8 +307,16 @@ def _define_modules_for_target_variant(target, variant):
         log = "info",
     )
 
+def _define_kernel_module_groups(target,variant):
+    kernel_module_group(
+        name = "{}_{}_modules".format(target, variant),
+        srcs = _get_module_list(target, variant),
+    )
+
 def define_modules():
     for (t, v) in get_all_variants():
         print("v=", v)
         if t in _cnss2_enabled_target or t in _icnss2_enabled_target:
             _define_modules_for_target_variant(t, v)
+            if t == "neo-la":
+                _define_kernel_module_groups(t, v)
