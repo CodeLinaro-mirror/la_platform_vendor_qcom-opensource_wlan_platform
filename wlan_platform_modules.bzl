@@ -9,8 +9,8 @@ _default_module_enablement_list = [
     "wlan_firmware_service",
 ]
 
-_cnss2_enabled_target = ["niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "sdxkova"]
-_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe"]
+_cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "sdxkova", "autogvm", "autoghgvm", "lahaina"]
+_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina"]
 
 def _get_module_list(target, variant):
     tv = "{}_{}".format(target, variant)
@@ -32,6 +32,21 @@ def _get_module_list(target, variant):
     return [":{}_{}".format(tv, mod) for mod in ret]
 
 def _define_platform_config_rule(module, target, variant):
+    if target == "canoe" and variant == "consolidate" and module == "cnss2":
+        etm = select({
+            "//build/kernel/kleaf:etm_true": [
+            "cnss2/canoe_etm_peach-v2",
+            "cnss2/canoe_consolidate_defconfig",
+            ],
+            "//build/kernel/kleaf:etm_false": [
+            "{}/{}_consolidate_defconfig".format(module, target),
+            ],
+        })
+    else:
+        etm = [
+            "{}/{}_consolidate_defconfig".format(module, target),
+        ]
+
     tv = "{}_{}".format(target, variant)
     native.genrule(
         name = "{}/{}_defconfig_generate_perf".format(module, tv),
@@ -68,9 +83,7 @@ def _define_platform_config_rule(module, target, variant):
     native.genrule(
         name = "{}/{}_defconfig_generate_consolidate".format(module, tv),
         outs = ["{}/{}_defconfig.generated_consolidate".format(module, tv)],
-        srcs = [
-            "{}/{}_consolidate_defconfig".format(module, target),
-        ],
+        srcs = etm,
         cmd = "cat $(SRCS) > $@",
     )
 
@@ -168,6 +181,11 @@ def _define_modules_for_target_variant(target, variant):
                 "CONFIG_PCI_MSM": {
                     True: [
                         "cnss2/pci_qcom.c",
+                    ],
+                },
+                "CONFIG_PCIE_QCOM_ECAM": {
+                    True: [
+                        "cnss2/pci_qcom_ecam.c",
                     ],
                 },
             },
