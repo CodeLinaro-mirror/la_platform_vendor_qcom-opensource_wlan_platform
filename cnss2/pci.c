@@ -1029,8 +1029,8 @@ static void cnss_pci_select_window(struct cnss_pci_data *pci_priv, u32 offset)
 	}
 }
 
-static int cnss_pci_reg_read(struct cnss_pci_data *pci_priv,
-			     u32 offset, u32 *val)
+int cnss_pci_reg_read(struct cnss_pci_data *pci_priv,
+		      u32 offset, u32 *val)
 {
 	int ret;
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
@@ -1066,8 +1066,8 @@ static int cnss_pci_reg_read(struct cnss_pci_data *pci_priv,
 	return 0;
 }
 
-static int cnss_pci_reg_write(struct cnss_pci_data *pci_priv, u32 offset,
-			      u32 val)
+int cnss_pci_reg_write(struct cnss_pci_data *pci_priv, u32 offset,
+		       u32 val)
 {
 	int ret;
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
@@ -3212,11 +3212,19 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 	int sw_ctrl_gpio = plat_priv->pinctrl_info.sw_ctrl_gpio;
 
 	if (plat_priv->ramdump_info_v2.dump_data_valid) {
-		cnss_pci_clear_dump_info(pci_priv);
-		cnss_pci_power_off_mhi(pci_priv);
-		cnss_suspend_pci_link(pci_priv);
-		cnss_pci_deinit_mhi(pci_priv);
-		cnss_power_off_device(plat_priv);
+		if (plat_priv->is_fw_managed_pwr) {
+			cnss_pci_clear_dump_info(pci_priv);
+			cnss_pci_power_off_mhi(pci_priv);
+			cnss_pci_sw_reset(pci_priv, false);
+			cnss_disable_pcie_device(pci_priv);
+			cnss_pci_deinit_mhi(pci_priv);
+		} else {
+			cnss_pci_clear_dump_info(pci_priv);
+			cnss_pci_power_off_mhi(pci_priv);
+			cnss_suspend_pci_link(pci_priv);
+			cnss_pci_deinit_mhi(pci_priv);
+			cnss_power_off_device(plat_priv);
+		}
 	}
 
 	/* Clear QMI send usage count during every power up */
@@ -3280,6 +3288,7 @@ power_on_done:
 		ret = cnss_enable_pcie_device(pci_priv);
 		if (ret)
 			goto out;
+		cnss_pci_sw_reset(pci_priv, true);
 	}
 	timeout = cnss_get_timeout(plat_priv, CNSS_TIMEOUT_QMI);
 
@@ -3386,13 +3395,20 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 		cnss_pci_deinit_mhi(pci_priv);
 		goto skip_power_off;
 	} else {
-		cnss_pci_power_off_mhi(pci_priv);
-		ret = cnss_suspend_pci_link(pci_priv);
-		if (ret)
-			cnss_pr_err("Failed to suspend PCI link, err = %d\n",
-				    ret);
-		cnss_pci_deinit_mhi(pci_priv);
-		cnss_power_off_device(plat_priv);
+		if (plat_priv->is_fw_managed_pwr) {
+			cnss_pci_power_off_mhi(pci_priv);
+			cnss_pci_sw_reset(pci_priv, false);
+			cnss_disable_pcie_device(pci_priv);
+			cnss_pci_deinit_mhi(pci_priv);
+		} else {
+			cnss_pci_power_off_mhi(pci_priv);
+			ret = cnss_suspend_pci_link(pci_priv);
+			if (ret)
+				cnss_pr_err("Failed to suspend PCI link, err = %d\n",
+					    ret);
+			cnss_pci_deinit_mhi(pci_priv);
+			cnss_power_off_device(plat_priv);
+		}
 	}
 
 skip_power_off:
@@ -3439,11 +3455,18 @@ static int cnss_qca6290_ramdump(struct cnss_pci_data *pci_priv)
 
 	ret = cnss_do_elf_ramdump(plat_priv);
 
-	cnss_pci_clear_dump_info(pci_priv);
-	cnss_pci_power_off_mhi(pci_priv);
-	cnss_suspend_pci_link(pci_priv);
-	cnss_pci_deinit_mhi(pci_priv);
-	cnss_power_off_device(plat_priv);
+	if (plat_priv->is_fw_managed_pwr) {
+		cnss_pci_power_off_mhi(pci_priv);
+		cnss_pci_sw_reset(pci_priv, false);
+		cnss_disable_pcie_device(pci_priv);
+		cnss_pci_deinit_mhi(pci_priv);
+	} else {
+		cnss_pci_clear_dump_info(pci_priv);
+		cnss_pci_power_off_mhi(pci_priv);
+		cnss_suspend_pci_link(pci_priv);
+		cnss_pci_deinit_mhi(pci_priv);
+		cnss_power_off_device(plat_priv);
+	}
 
 	return ret;
 }
@@ -7498,6 +7521,7 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 	}
 
 	init_completion(&pci_priv->wake_event_complete);
+	cnss_init_sw_reset_params(pci_priv);
 	cnss_pci_config_regs(pci_priv);
 	if (EMULATION_HW)
 		goto out;
