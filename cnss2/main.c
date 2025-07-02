@@ -2108,7 +2108,7 @@ static void cnss_deinit_host_sol_gpio(struct cnss_plat_data *plat_priv)
 	gpio_free(sol_gpio->host_sol_gpio);
 }
 
-int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
+static int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
 {
 	int ret;
 
@@ -5176,6 +5176,10 @@ static void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
 static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 {
 	int ret;
+
+	ret = cnss_init_sol_gpio(plat_priv);
+	if (ret)
+		return ret;
 
 	timer_setup(&plat_priv->fw_boot_timer,
 		    cnss_bus_fw_boot_timeout_hdlr, 0);
