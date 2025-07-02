@@ -2724,7 +2724,6 @@ static int cnss_pci_config_msi_data(struct cnss_pci_data *pci_priv)
 }
 
 #ifdef CONFIG_CNSS_SUPPORT_DUAL_DEV
-#define PLC_PCIE_NAME_LEN		14
 
 static struct cnss_plat_data *
 cnss_get_plat_priv_by_driver_ops(struct cnss_wlan_driver *driver_ops)
@@ -2743,19 +2742,23 @@ cnss_get_plat_priv_by_driver_ops(struct cnss_wlan_driver *driver_ops)
 		plat_env = cnss_get_plat_env(i);
 		if (!plat_env)
 			continue;
-		if (driver_ops->name && plat_env->pld_bus_ops_name) {
-			/* driver_ops->name = PLD_PCIE_OPS_NAME
-			 * #ifdef MULTI_IF_NAME
-			 * #define PLD_PCIE_OPS_NAME "pld_pcie_" MULTI_IF_NAME
-			 * #else
-			 * #define PLD_PCIE_OPS_NAME "pld_pcie"
-			 * #endif
-			 */
-			if (memcmp(driver_ops->name,
-				   plat_env->pld_bus_ops_name,
-				   PLC_PCIE_NAME_LEN) == 0)
-				return plat_env;
-		}
+
+		if (!(driver_ops->name && plat_env->pld_bus_ops_name &&
+		    (strlen(driver_ops->name) ==
+		     strlen(plat_env->pld_bus_ops_name))))
+			continue;
+
+		/* driver_ops->name = PLD_PCIE_OPS_NAME
+		 * #ifdef MULTI_IF_NAME
+		 * #define PLD_PCIE_OPS_NAME "pld_pcie_" MULTI_IF_NAME
+		 * #else
+		 * #define PLD_PCIE_OPS_NAME "pld_pcie"
+		 * #endif
+		 */
+		if (memcmp(driver_ops->name,
+			   plat_env->pld_bus_ops_name,
+			   strlen(driver_ops->name)) == 0)
+			return plat_env;
 	}
 
 	cnss_pr_vdbg("Invalid cnss driver name from ko %s\n", driver_ops->name);
