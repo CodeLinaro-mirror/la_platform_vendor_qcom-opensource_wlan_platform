@@ -1191,14 +1191,17 @@ static int cnss_pm_notify(struct notifier_block *b,
 
 void cnss_pm_notifier_init(struct cnss_plat_data *plat_priv)
 {
-	plat_priv->pm_notifier.notifier_call = cnss_pm_notify;
-	plat_priv->pm_notifier.priority = 100;
-	register_pm_notifier(&plat_priv->pm_notifier);
+	if (plat_priv->is_fw_managed_pwr) {
+		plat_priv->pm_notifier.notifier_call = cnss_pm_notify;
+		plat_priv->pm_notifier.priority = 100;
+		register_pm_notifier(&plat_priv->pm_notifier);
+	}
 }
 
 void cnss_pm_notifier_deinit(struct cnss_plat_data *plat_priv)
 {
-	unregister_pm_notifier(&plat_priv->pm_notifier);
+	if (plat_priv->is_fw_managed_pwr)
+		unregister_pm_notifier(&plat_priv->pm_notifier);
 }
 
 int
