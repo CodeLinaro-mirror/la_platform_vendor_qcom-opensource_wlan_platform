@@ -47,7 +47,6 @@
 #include <linux/remoteproc/qcom_rproc.h>
 #include <linux/soc/qcom/pdr.h>
 #include <linux/remoteproc.h>
-#include <linux/version.h>
 #include <trace/hooks/remoteproc.h>
 #ifdef SLATE_MODULE_ENABLED
 #include <linux/soc/qcom/slatecom_interface.h>
@@ -2038,7 +2037,7 @@ static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data,
 	if (!priv)
 		return -ENODEV;
 
-	del_timer(&priv->recovery_timer);
+	icnss_timer_delete(&priv->recovery_timer);
 	set_bit(ICNSS_FW_READY, &priv->state);
 	clear_bit(ICNSS_MODE_ON, &priv->state);
 	atomic_set(&priv->soc_wake_ref_count, 0);
@@ -2562,7 +2561,8 @@ static int icnss_driver_event_early_crash_ind(struct icnss_priv *priv,
 	}
 
 	priv->early_crash_ind = true;
-	icnss_fw_crashed(priv, NULL);
+	if (!test_bit(ICNSS_PD_RESTART, &priv->state))
+		icnss_fw_crashed(priv, NULL);
 
 out:
 	kfree(data);
@@ -3089,7 +3089,7 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 
 
 	if (priv->wpss_self_recovery_enabled)
-		del_timer(&priv->wpss_ssr_timer);
+		icnss_timer_delete(&priv->wpss_ssr_timer);
 
 	priv->is_ssr = true;
 
@@ -5186,6 +5186,14 @@ void icnss_allow_l1(struct device *dev)
 }
 EXPORT_SYMBOL(icnss_allow_l1);
 
+int icnss_get_iova_info(struct device *dev, u64 *addr, u64 *size)
+{
+	struct icnss_priv *priv = dev_get_drvdata(dev);
+
+	return icnss_get_iova(priv, addr, size);
+}
+EXPORT_SYMBOL(icnss_get_iova_info);
+
 void icnss_allow_recursive_recovery(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
@@ -5815,6 +5823,60 @@ static inline void icnss_pci_set_suspended(struct icnss_priv *priv, int val)
 }
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+static int icnss_dt_parse_iommu_address(struct device *dev, u32 *addr_win)
+{
+	const u32 *maps;
+	const u32 *end;
+	int size;
+	struct device_node *of_node = dev->of_node;
+	struct device_node *of_node_iova;
+
+	of_node_iova = of_find_node_by_name(of_node,
+				       "icnss2_iommu_region_partition");
+	if (!of_node_iova)
+		return -EINVAL;
+
+	maps = of_get_property(of_node_iova, "iommu-addresses", &size);
+	if (!maps) {
+		of_node_put(of_node_iova);
+		return -EINVAL;
+	}
+
+	end = maps + size / sizeof(u32);
+
+	addr_win[0] = 0;
+	addr_win[1] = 0;
+
+	while (maps < end) {
+		phys_addr_t iova;
+		size_t length;
+
+		maps++;
+		maps = of_translate_dma_region(of_node, maps,
+					       &iova, &length);
+
+		/*
+		 * Assuming a single contiguous DMA address range
+		 */
+		if (!addr_win[0])
+			addr_win[0] = length;
+		else
+			addr_win[1] = iova - addr_win[0];
+	}
+
+	of_node_put(of_node_iova);
+
+	return (addr_win[0] && addr_win[1]) ? 0 : -EINVAL;
+}
+#else
+static inline int icnss_dt_parse_iommu_address(struct device *dev, u32 *addr_win)
+{
+	return -EINVAL;
+}
+#endif
+
+
 static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 {
 	int ret = 0;
@@ -5839,6 +5901,9 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 							 addr_win,
 							 ARRAY_SIZE(addr_win));
 	}
+
+	if (ret)
+		ret = icnss_dt_parse_iommu_address(dev, addr_win);
 
 	if (ret) {
 		icnss_pr_err("SMMU IOVA base not found\n");
@@ -6412,10 +6477,10 @@ static void icnss_remove(struct platform_device *pdev)
 
 	icnss_pr_info("Removing driver: state: 0x%lx\n", priv->state);
 
-	del_timer(&priv->recovery_timer);
+	icnss_timer_delete(&priv->recovery_timer);
 
 	if (priv->wpss_self_recovery_enabled)
-		del_timer(&priv->wpss_ssr_timer);
+		icnss_timer_delete(&priv->wpss_ssr_timer);
 
 	device_init_wakeup(&priv->pdev->dev, false);
 

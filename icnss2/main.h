@@ -34,6 +34,7 @@
 #include <linux/sched/clock.h>
 #endif
 #include <linux/iommu.h>
+#include <linux/version.h>
 
 #define THERMAL_NAME_LENGTH 20
 #define ICNSS_SMEM_VALUE_MASK 0xFFFFFFFF
@@ -496,19 +497,22 @@ enum icnss_wlfw_gpio_config_type {
 static const char * const icnss_gpio_output_str[] = {
 	[WLFW_GPIO_LOW_VALUE_V01] = "low",
 	[WLFW_GPIO_HIGH_VALUE_V01] = "high",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_bias_str[] = {
 	[WLFW_GPIO_NO_PULL_V01] = "no_pull",
 	[WLFW_GPIO_PULL_DOWN_V01] = "pull_down",
-	[WLFW_GPIO_PULL_UP_V01] = "pull_up",
 	[WLFW_GPIO_KEEPER_V01] = "keeper",
+	[WLFW_GPIO_PULL_UP_V01] = "pull_up",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_direction_str[] = {
 	[WLFW_GPIO_INPUT_V01] = "input",
 	[WLFW_GPIO_OUTPUT_V01] = "output",
 	[WLFW_GPIO_BI_DIRECTIONAL_V01] = "bi_directional",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_intr_trigger_str[] = {
@@ -517,11 +521,13 @@ static const char * const icnss_gpio_intr_trigger_str[] = {
 	[WLFW_GPIO_INTR_TRIGGER_RISING_V01] = "rising",
 	[WLFW_GPIO_INTR_TRIGGER_FALLING_V01] = "falling",
 	[WLFW_GPIO_INTR_TRIGGER_DUAL_EDGE_V01] = "dual_edge",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_type_str[] = {
 	[WLFW_GPIO_TYPE_PMIC_V01] = "pmic",
 	[WLFW_GPIO_TYPE_TLMM_V01] = "tlmm",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_name_str[] = {
@@ -531,6 +537,7 @@ static const char * const icnss_gpio_name_str[] = {
 	[TARGET_SOL_GPIO_V01] = "DEV_SOL",
 	[WLAN_SW_CTRL_GPIO_V01] = "WLAN_SW_CTRL",
 	[RESET_B_GPIO_V01] = "RESET_B",
+	[QMI_WLFW_GPIO_INVALID_V01] = "INVALID",
 };
 
 struct icnss_priv {
@@ -753,5 +760,17 @@ int icnss_aop_pdc_reconfig(struct icnss_priv *priv);
 void icnss_power_misc_params_init(struct icnss_priv *priv);
 void icnss_recovery_timeout_hdlr(struct timer_list *t);
 void icnss_wpss_ssr_timeout_hdlr(struct timer_list *t);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+static inline int icnss_timer_delete(struct timer_list *timer)
+{
+	return timer_delete(timer);
+}
+#else
+static inline int icnss_timer_delete(struct timer_list *timer)
+{
+	return del_timer(timer);
+}
+#endif
 #endif
 

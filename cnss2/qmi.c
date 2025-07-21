@@ -339,6 +339,7 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	u64 iova_start = 0, iova_size = 0,
 	    iova_ipa_start = 0, iova_ipa_size = 0;
 	u64 feature_list = 0;
+	u32 cx_mode_dt;
 
 	cnss_pr_dbg("Sending host capability message, state: 0x%lx\n",
 		    plat_priv->driver_state);
@@ -420,6 +421,25 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 				   QMI_WLFW_MAX_PLATFORM_NAME_LEN_V01)) {
 		req->platform_name_valid = 1;
 		cnss_update_build_info(req);
+	}
+
+	if (plat_priv->device_id == FIG_DEVICE_ID ||
+	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				  "fig-direct-cx")) {
+		ret = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
+					   "cx-mode", &cx_mode_dt);
+		if (ret) {
+			cnss_pr_err("could not get cx mode\n");
+			goto out;
+		}
+
+		req->target_attachment_valid = 1;
+		if (cx_mode_dt == CX_DATA_PIN_PMIC)
+			req->target_attachment = WLFW_PMIC_V01;
+		else if (cx_mode_dt == CX_DATA_PIN_PDC)
+			req->target_attachment = WLFW_PDC_V01;
+		else
+			req->target_attachment = WLFW_THIRD_PARTY_V01;
 	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
@@ -640,6 +660,20 @@ int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 		strscpy(plat_priv->fw_build_id, resp->fw_build_id,
 			QMI_WLFW_MAX_BUILD_ID_LEN + 1);
 	}
+
+	cnss_pr_info("direct cx data pin mode: %d\n",
+		     resp->direct_cx_data_pin_mode_valid);
+	if (resp->direct_cx_data_pin_mode_valid) {
+		plat_priv->direct_cx_data_pin_mode =
+			resp->direct_cx_data_pin_mode;
+	}
+
+	if (plat_priv->direct_cx_data_pin_mode) {
+		ret = cnss_set_cx_mode(plat_priv, CX_DATA_PIN);
+		if (ret < 0)
+			cnss_pr_err("Failed to set to Data Pin Mode\n");
+	}
+
 	/* FW will send aop retention volatage for qca6490 */
 	if (resp->voltage_mv_valid) {
 		plat_priv->cpr_info.voltage = resp->voltage_mv;
@@ -696,8 +730,20 @@ int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 	if (resp->hwid_bitmap_valid)
 		plat_priv->hwid_bitmap = resp->hwid_bitmap;
 
-	if (resp->ol_cpr_cfg_valid)
-		cnss_aop_ol_cpr_cfg_setup(plat_priv, &resp->ol_cpr_cfg);
+	if (plat_priv->device_id == FIG_DEVICE_ID ||
+	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				  "fig-direct-cx")) {
+		cnss_pr_info("ol_cpr_cfg_ext is: %d\n",
+			     resp->ol_cpr_cfg_ext_valid);
+		if (plat_priv->direct_cx_data_pin_mode &&
+		    resp->ol_cpr_cfg_ext_valid) {
+			cnss_ol_cpr_cfg_ext_setup(plat_priv,
+						  &resp->ol_cpr_cfg_ext);
+		}
+	} else {
+		if (resp->ol_cpr_cfg_valid)
+			cnss_aop_ol_cpr_cfg_setup(plat_priv, &resp->ol_cpr_cfg);
+	}
 
 	/* Disable WLAN PDC in AOP firmware for boards which support on chip PMIC
 	 * so AOP will ignore SW_CTRL changes and do not update regulator votes.
@@ -2127,6 +2173,15 @@ int cnss_wlfw_wlan_cfg_send_sync(struct cnss_plat_data *plat_priv,
 					(ce_id % num_vectors) + base_vector;
 			}
 		}
+	}
+
+	if (plat_priv->host_param && plat_priv->host_param->chip_name) {
+		req->chip_name_valid = 1;
+		strscpy(req->chip_name, plat_priv->host_param->chip_name,
+			QMI_WLFW_MAX_STR_LEN_V01 + 1);
+
+		cnss_pr_dbg("chip_name: %s, chip_valid: %d, host_chip_name: %s\n",
+			    req->chip_name, req->chip_name_valid, plat_priv->host_param->chip_name);
 	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
@@ -3699,14 +3754,6 @@ int cnss_wlfw_server_arrive(struct cnss_plat_data *plat_priv, void *data)
 		cnss_pr_err("Unexpected WLFW server arrive\n");
 		CNSS_ASSERT(0);
 		return -EINVAL;
-	}
-
-	if (!test_bit(CNSS_SOL_REGISTERED, &plat_priv->driver_state)) {
-		ret = cnss_init_sol_gpio(plat_priv);
-		if (ret)
-			cnss_pr_err("Unable to register sol GPIO %d\n", ret);
-		else
-			set_bit(CNSS_SOL_REGISTERED, &plat_priv->driver_state);
 	}
 
 	cnss_ignore_qmi_failure(false);
