@@ -496,19 +496,22 @@ enum icnss_wlfw_gpio_config_type {
 static const char * const icnss_gpio_output_str[] = {
 	[WLFW_GPIO_LOW_VALUE_V01] = "low",
 	[WLFW_GPIO_HIGH_VALUE_V01] = "high",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_bias_str[] = {
 	[WLFW_GPIO_NO_PULL_V01] = "no_pull",
 	[WLFW_GPIO_PULL_DOWN_V01] = "pull_down",
-	[WLFW_GPIO_PULL_UP_V01] = "pull_up",
 	[WLFW_GPIO_KEEPER_V01] = "keeper",
+	[WLFW_GPIO_PULL_UP_V01] = "pull_up",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_direction_str[] = {
 	[WLFW_GPIO_INPUT_V01] = "input",
 	[WLFW_GPIO_OUTPUT_V01] = "output",
 	[WLFW_GPIO_BI_DIRECTIONAL_V01] = "bi_directional",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_intr_trigger_str[] = {
@@ -517,11 +520,13 @@ static const char * const icnss_gpio_intr_trigger_str[] = {
 	[WLFW_GPIO_INTR_TRIGGER_RISING_V01] = "rising",
 	[WLFW_GPIO_INTR_TRIGGER_FALLING_V01] = "falling",
 	[WLFW_GPIO_INTR_TRIGGER_DUAL_EDGE_V01] = "dual_edge",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_type_str[] = {
 	[WLFW_GPIO_TYPE_PMIC_V01] = "pmic",
 	[WLFW_GPIO_TYPE_TLMM_V01] = "tlmm",
+	[QMI_WLFW_GPIO_CONFIG_INVALID_V01] = "invalid",
 };
 
 static const char * const icnss_gpio_name_str[] = {
@@ -531,6 +536,7 @@ static const char * const icnss_gpio_name_str[] = {
 	[TARGET_SOL_GPIO_V01] = "DEV_SOL",
 	[WLAN_SW_CTRL_GPIO_V01] = "WLAN_SW_CTRL",
 	[RESET_B_GPIO_V01] = "RESET_B",
+	[QMI_WLFW_GPIO_INVALID_V01] = "INVALID",
 };
 
 struct icnss_priv {
@@ -655,6 +661,7 @@ struct icnss_priv {
 	void *hang_event_data;
 	struct list_head icnss_tcdev_list;
 	struct mutex tcdev_lock;
+	struct mutex wpss_lock;
 	bool is_chain1_supported;
 	u32 hw_trc_override;
 	struct icnss_dms_data dms;
