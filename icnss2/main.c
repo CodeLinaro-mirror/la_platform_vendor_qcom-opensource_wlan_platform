@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2020, 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #define pr_fmt(fmt) "icnss2: " fmt
@@ -1790,7 +1790,7 @@ static int icnss_event_soc_wake_release(struct icnss_priv *priv, void *data)
 		return -ENODEV;
 
 	if (atomic_dec_if_positive(&priv->soc_wake_ref_count)) {
-		icnss_pr_soc_wake("Wake release not called. Ref count: %x",
+		icnss_pr_soc_wake("Wake release not called. Ref count: %d",
 				  atomic_read(&priv->soc_wake_ref_count));
 		return 0;
 	}
@@ -2008,7 +2008,8 @@ static int icnss_driver_event_early_crash_ind(struct icnss_priv *priv,
 	}
 
 	priv->early_crash_ind = true;
-	icnss_fw_crashed(priv, NULL);
+	if (!test_bit(ICNSS_PD_RESTART, &priv->state))
+		icnss_fw_crashed(priv, NULL);
 
 out:
 	kfree(data);
