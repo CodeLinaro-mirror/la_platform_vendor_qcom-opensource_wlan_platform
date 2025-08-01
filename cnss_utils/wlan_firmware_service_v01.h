@@ -19,6 +19,7 @@
 #define QMI_WLFW_M3_INFO_RESP_V01 0x003C
 #define QMI_WLFW_CAL_REPORT_RESP_V01 0x0026
 #define QMI_WLFW_PCIE_LINK_CTRL_RESP_V01 0x0059
+#define QMI_WLFW_MISC_REQ_V01 0x0063
 #define QMI_WLFW_MAC_ADDR_RESP_V01 0x0033
 #define QMI_WLFW_DYNAMIC_FEATURE_MASK_RESP_V01 0x003B
 #define QMI_WLFW_IND_REGISTER_REQ_V01 0x0020
@@ -45,6 +46,7 @@
 #define QMI_WLFW_M3_INFO_REQ_V01 0x003C
 #define QMI_WLFW_PCIE_GEN_SWITCH_REQ_V01 0x0053
 #define QMI_WLFW_ANTENNA_GRANT_RESP_V01 0x0048
+#define QMI_WLFW_MISC_RESP_V01 0x0063
 #define QMI_WLFW_INITIATE_CAL_UPDATE_IND_V01 0x002A
 #define QMI_WLFW_RESPOND_MEM_REQ_V01 0x0036
 #define QMI_WLFW_HOST_CAP_RESP_V01 0x0034
@@ -128,6 +130,7 @@
 #define QMI_WLFW_MAX_HOST_DDR_RANGE_SIZE_V01 3
 #define QMI_WLFW_MAX_MLO_CHIP_V01 3
 #define QMI_WLFW_TOTAL_GPIO_CONFIG_V01 15
+#define QMI_WLFW_GPIO_INVALID_V01 0xFFFF
 #define QMI_WLFW_MAX_NUM_SHADOW_REG_V01 24
 #define QMI_WLFW_MAX_BUILD_ID_LEN_V01 128
 #define QMI_WLFW_MAX_DEV_MEM_NUM_V01 4
@@ -139,10 +142,11 @@
 #define QMI_WLFW_MAX_NUM_GPIO_INFO_V01 20
 #define QMI_WLFW_MLO_V2_CHP_V01 4
 #define QMI_WLFW_MAX_NUM_MEM_CFG_V01 2
+#define QMI_WLFW_PMU_PARAMS_MAX_EXT_V01 25
 #define QMI_WLFW_CNSS_DAEMON_CLIENT_ID_V01 0x444d4f4e
 #define QMI_WLFW_MAX_NUM_CE_CMN_REG_V01 100
 #define QMI_WLFW_PMU_PARAMS_MAX_V01 16
-#define QMI_INVALID_GPIO_NUM_V01 0xffff
+#define QMI_WLFW_GPIO_CONFIG_INVALID_V01 0xFF
 #define QMI_WLFW_MAX_NUM_MEM_SEG_V01 52
 #define QMI_WLFW_MAX_WFC_CALL_STATUS_DATA_SIZE_V01 256
 #define QMI_WLFW_MAX_DATA_SIZE_V01 6144
@@ -459,6 +463,20 @@ enum wlfw_gpio_output_value_type_v01 {
 	WLFW_GPIO_OUTPUT_VALUE_TYPE_MAX_VAL_V01 = INT_MAX,
 };
 
+enum wlfw_misc_req_enum_v01 {
+	WLFW_MISC_REQ_ENUM_MIN_VAL_V01 = INT_MIN,
+	WLFW_REQ_BT_DUMP_V01 = 0,
+	WLFW_MISC_REQ_ENUM_MAX_VAL_V01 = INT_MAX,
+};
+
+enum wlfw_target_attachment_v01 {
+	WLFW_TARGET_ATTACHMENT_MIN_VAL_V01 = INT_MIN,
+	WLFW_THIRD_PARTY_V01 = 0,
+	WLFW_PDC_V01 = 1,
+	WLFW_PMIC_V01 = 2,
+	WLFW_TARGET_ATTACHMENT_MAX_VAL_V01 = INT_MAX,
+};
+
 #define QMI_WLFW_CE_ATTR_FLAGS_V01 ((u32)0x00)
 #define QMI_WLFW_CE_ATTR_NO_SNOOP_V01 ((u32)0x01)
 #define QMI_WLFW_CE_ATTR_BYTE_SWAP_DATA_V01 ((u32)0x02)
@@ -482,6 +500,8 @@ enum wlfw_gpio_output_value_type_v01 {
 #define QMI_WLFW_AUX_UC_SUPPORT_V01 ((u64)0x04ULL)
 #define QMI_WLFW_CALDB_SEG_DDR_SUPPORT_V01 ((u64)0x08ULL)
 #define QMI_WLFW_CE_CMN_CFG_SUPPORT_V01 ((u64)0x10ULL)
+#define QMI_WLFW_WLAN_DUMP_OVER_BT_SUPPORT_V01 ((u64)0x20ULL)
+#define QMI_WLFW_BT_DUMP_OVER_WLAN_SUPPORT_V01 ((u64)0x40ULL)
 
 #define QMI_WLFW_DIRECT_LINK_SKU_SUPPORT_V01 ((u64)0x01ULL)
 
@@ -600,9 +620,28 @@ struct wlfw_pmu_param_v01 {
 	u32 sleep_volt;
 };
 
+struct wlfw_pmu_param_ext_v01 {
+	u8 pin_name[QMI_WLFW_PMU_PIN_NAME_MAX_LEN_V01];
+	u8 wake_volt_valid;
+	u32 wake_volt;
+	u8 sleep_volt_valid;
+	u32 sleep_volt;
+	u8 svs_v_valid;
+	u32 svs_v;
+	u8 lsvs_valid;
+	u32 lsvs;
+	u8 svsL1_valid;
+	u32 svsL1_v;
+};
+
 struct wlfw_pmu_cfg_v01 {
 	u32 pmu_param_len;
 	struct wlfw_pmu_param_v01 pmu_param[QMI_WLFW_PMU_PARAMS_MAX_V01];
+};
+
+struct wlfw_pmu_cfg_ext_v01 {
+	u32 pmu_param_ext_len;
+	struct wlfw_pmu_param_ext_v01 pmu_param_ext[QMI_WLFW_PMU_PARAMS_MAX_EXT_V01];
 };
 
 struct wlfw_shadow_reg_v3_cfg_s_v01 {
@@ -785,8 +824,10 @@ struct wlfw_wlan_cfg_req_msg_v01 {
 	u8 ce_cmn_reg_valid;
 	u32 ce_cmn_reg_len;
 	struct wlfw_ce_cmn_register_config_v01 ce_cmn_reg[QMI_WLFW_MAX_NUM_CE_CMN_REG_V01];
+	u8 chip_name_valid;
+	char chip_name[QMI_WLFW_MAX_STR_LEN_V01 + 1];
 };
-#define WLFW_WLAN_CFG_REQ_MSG_V01_MAX_MSG_LEN 2314
+#define WLFW_WLAN_CFG_REQ_MSG_V01_MAX_MSG_LEN 2333
 extern struct qmi_elem_info wlfw_wlan_cfg_req_msg_v01_ei[];
 
 struct wlfw_wlan_cfg_resp_msg_v01 {
@@ -853,8 +894,12 @@ struct wlfw_cap_resp_msg_v01 {
 	enum wlfw_phy_qam_cap_v01 phy_qam_cap;
 	u8 serial_id_valid;
 	struct wlchip_serial_id_v01 serial_id;
+	u8 direct_cx_data_pin_mode_valid;
+	u8 direct_cx_data_pin_mode;
+	u8 ol_cpr_cfg_ext_valid;
+	struct wlfw_pmu_cfg_ext_v01 ol_cpr_cfg_ext;
 };
-#define WLFW_CAP_RESP_MSG_V01_MAX_MSG_LEN 1171
+#define WLFW_CAP_RESP_MSG_V01_MAX_MSG_LEN 2604
 extern struct qmi_elem_info wlfw_cap_resp_msg_v01_ei[];
 
 struct wlfw_bdf_download_req_msg_v01 {
@@ -1142,8 +1187,10 @@ struct wlfw_host_cap_req_msg_v01 {
 	u8 gpio_config_valid;
 	u32 gpio_config_len;
 	struct wlfw_gpio_config_v01 gpio_config[QMI_WLFW_TOTAL_GPIO_CONFIG_V01];
+	u8 target_attachment_valid;
+	enum wlfw_target_attachment_v01 target_attachment;
 };
-#define WLFW_HOST_CAP_REQ_MSG_V01_MAX_MSG_LEN 975
+#define WLFW_HOST_CAP_REQ_MSG_V01_MAX_MSG_LEN 982
 extern struct qmi_elem_info wlfw_host_cap_req_msg_v01_ei[];
 
 struct wlfw_host_cap_resp_msg_v01 {
@@ -1758,5 +1805,17 @@ struct wlfw_dump_ddr_region_ind_msg_v01 {
 };
 #define WLFW_DUMP_DDR_REGION_IND_MSG_V01_MAX_MSG_LEN 907
 extern struct qmi_elem_info wlfw_dump_ddr_region_ind_msg_v01_ei[];
+
+struct wlfw_misc_req_msg_v01 {
+	enum wlfw_misc_req_enum_v01 type;
+};
+#define WLFW_MISC_REQ_MSG_V01_MAX_MSG_LEN 7
+extern struct qmi_elem_info wlfw_misc_req_msg_v01_ei[];
+
+struct wlfw_misc_resp_msg_v01 {
+	struct qmi_response_type_v01 resp;
+};
+#define WLFW_MISC_RESP_MSG_V01_MAX_MSG_LEN 7
+extern struct qmi_elem_info wlfw_misc_resp_msg_v01_ei[];
 
 #endif
