@@ -9,7 +9,9 @@
 
 #include <linux/cma.h>
 #include <linux/iommu.h>
+#if IS_ENABLED(CONFIG_QCOM_IOMMU_UTIL)
 #include <linux/qcom-iommu-util.h>
+#endif
 #include <linux/mhi.h>
 #if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 #include <linux/mhi_misc.h>
