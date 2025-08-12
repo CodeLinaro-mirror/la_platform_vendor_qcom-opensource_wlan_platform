@@ -3552,12 +3552,22 @@ static void icnss_populate_gpio_config(struct icnss_priv *priv,
 			     req->gpio_config[gpio_info_type].gpio_bitreserved,
 			     priv->gpio_config_arr[gpio_info_type][WLFW_GPIO_ARRAY_VALID_V01],
 			     priv->gpio_config_arr[gpio_info_type][WLFW_GPIO_OWNER_V01]);
-	} else {
+
+		//Note: Cleanup this section later once FW has stable support for NEW gpio_config structure
 		if (cfg_arr[WLFW_GPIO_NUM_V01]) {
 			req->gpio_info[gpio_info_type] = cfg_arr[WLFW_GPIO_NUM_V01];
 			icnss_pr_dbg("GPIO_NUM: %d", req->gpio_info[gpio_info_type]);
 		} else {
-			req->gpio_info[gpio_info_type] = 0xFFFF;
+			req->gpio_info[gpio_info_type] = QMI_WLFW_GPIO_INVALID_V01;
+		}
+	} else {
+		//support backward compatibilty
+		if (cfg_arr[WLFW_GPIO_NUM_V01]) {
+			req->gpio_info[gpio_info_type] = cfg_arr[WLFW_GPIO_NUM_V01];
+			icnss_pr_dbg("GPIO_NUM: %d", req->gpio_info[gpio_info_type]);
+		} else {
+			req->gpio_info[gpio_info_type] = QMI_WLFW_GPIO_INVALID_V01;
+			req->gpio_config[gpio_info_type].gpio_num = QMI_WLFW_GPIO_INVALID_V01;
 		}
 	}
 }

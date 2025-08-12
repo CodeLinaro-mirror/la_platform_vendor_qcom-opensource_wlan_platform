@@ -1,11 +1,14 @@
 targets = [
     # keep sorted
+    "autogvm",
     "canoe",
     "gen3auto",
     "pineapple",
     "parrot",
     "sun",
     "vienna",
+    "seraph",
+    "lahaina",
 ]
 
 la_variants = [
