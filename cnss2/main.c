@@ -1421,7 +1421,7 @@ static int cnss_fw_ready_hdlr(struct cnss_plat_data *plat_priv)
 	}
 
 	cnss_pr_dbg("Processing FW Init Done..\n");
-	del_timer(&plat_priv->fw_boot_timer);
+	cnss_timer_delete(&plat_priv->fw_boot_timer);
 	set_bit(CNSS_FW_READY, &plat_priv->driver_state);
 	clear_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
 
@@ -1779,7 +1779,7 @@ int cnss_idle_restart(struct device *dev)
 
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot or shutdown is in progress, ignore idle restart\n");
-		del_timer(&plat_priv->fw_boot_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -2557,7 +2557,7 @@ static int cnss_set_cx_voltage_corner_sdam(struct cnss_plat_data *plat_priv,
 	return 0;
 }
 
-u8 *cnss_read_debug_register(struct cnss_plat_data *plat_priv)
+static u8 *cnss_read_debug_register(struct cnss_plat_data *plat_priv)
 {
 	u8 *buf;
 	size_t len;
@@ -2710,7 +2710,7 @@ static int cnss_set_cx_voltage_corner_sdam(struct cnss_plat_data *plat_priv,
 	return 0;
 }
 
-u8 *cnss_read_debug_register(struct cnss_plat_data *plat_priv)
+static u8 *cnss_read_debug_register(struct cnss_plat_data *plat_priv)
 {
 	cnss_pr_info("Entering negative cnss_read_debug_register function\n");
 	return NULL;
@@ -5812,7 +5812,7 @@ static ssize_t shutdown_store(struct device *dev,
 	if (plat_priv) {
 		set_bit(CNSS_IN_REBOOT, &plat_priv->driver_state);
 		cnss_bus_update_status(plat_priv, CNSS_SYS_REBOOT);
-		del_timer(&plat_priv->fw_boot_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		complete_all(&plat_priv->power_up_complete);
 		complete_all(&plat_priv->cal_complete);
 		complete_all(&plat_priv->xdump_helper.wl_over_bt_complete);
@@ -6147,39 +6147,10 @@ out:
 	return ret;
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0))
-union cnss_device_group_devres {
-	const struct attribute_group *group;
-};
-
-static void devm_cnss_group_remove(struct device *dev, void *res)
-{
-	union cnss_device_group_devres *devres = res;
-	const struct attribute_group *group = devres->group;
-
-	cnss_pr_dbg("%s: removing group %p\n", __func__, group);
-	sysfs_remove_group(&dev->kobj, group);
-}
-
-static int devm_cnss_group_match(struct device *dev, void *res, void *data)
-{
-	return ((union cnss_device_group_devres *)res) == data;
-}
-
 static void cnss_remove_sysfs(struct cnss_plat_data *plat_priv)
 {
 	cnss_remove_sysfs_link(plat_priv);
-	WARN_ON(devres_release(&plat_priv->plat_dev->dev,
-			       devm_cnss_group_remove, devm_cnss_group_match,
-			       (void *)&cnss_attr_group));
 }
-#else
-static void cnss_remove_sysfs(struct cnss_plat_data *plat_priv)
-{
-	cnss_remove_sysfs_link(plat_priv);
-	devm_device_remove_group(&plat_priv->plat_dev->dev, &cnss_attr_group);
-}
-#endif
 
 static int cnss_event_work_init(struct cnss_plat_data *plat_priv)
 {
@@ -6211,7 +6182,7 @@ static int cnss_reboot_notifier(struct notifier_block *nb,
 
 	set_bit(CNSS_IN_REBOOT, &plat_priv->driver_state);
 	cnss_bus_update_status(plat_priv, CNSS_SYS_REBOOT);
-	del_timer(&plat_priv->fw_boot_timer);
+	cnss_timer_delete(&plat_priv->fw_boot_timer);
 	complete_all(&plat_priv->power_up_complete);
 	complete_all(&plat_priv->cal_complete);
 	complete_all(&plat_priv->xdump_helper.wl_over_bt_complete);
@@ -6475,7 +6446,7 @@ static void cnss_misc_deinit(struct cnss_plat_data *plat_priv)
 	complete_all(&plat_priv->daemon_connected);
 	device_init_wakeup(&plat_priv->plat_dev->dev, false);
 	unregister_reboot_notifier(&plat_priv->reboot_nb);
-	del_timer(&plat_priv->fw_boot_timer);
+	cnss_timer_delete(&plat_priv->fw_boot_timer);
 	wakeup_source_unregister(plat_priv->recovery_ws);
 	cnss_deinit_direct_cx_host_sol_gpio(plat_priv);
 	cnss_deinit_sol_gpio(plat_priv);

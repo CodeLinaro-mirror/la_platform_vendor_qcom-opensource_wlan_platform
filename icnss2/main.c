@@ -47,7 +47,6 @@
 #include <linux/remoteproc/qcom_rproc.h>
 #include <linux/soc/qcom/pdr.h>
 #include <linux/remoteproc.h>
-#include <linux/version.h>
 #include <trace/hooks/remoteproc.h>
 #ifdef SLATE_MODULE_ENABLED
 #include <linux/soc/qcom/slatecom_interface.h>
@@ -2038,7 +2037,7 @@ static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data,
 	if (!priv)
 		return -ENODEV;
 
-	del_timer(&priv->recovery_timer);
+	icnss_timer_delete(&priv->recovery_timer);
 	set_bit(ICNSS_FW_READY, &priv->state);
 	clear_bit(ICNSS_MODE_ON, &priv->state);
 	atomic_set(&priv->soc_wake_ref_count, 0);
@@ -3090,7 +3089,7 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 
 
 	if (priv->wpss_self_recovery_enabled)
-		del_timer(&priv->wpss_ssr_timer);
+		icnss_timer_delete(&priv->wpss_ssr_timer);
 
 	priv->is_ssr = true;
 
@@ -6478,10 +6477,10 @@ static void icnss_remove(struct platform_device *pdev)
 
 	icnss_pr_info("Removing driver: state: 0x%lx\n", priv->state);
 
-	del_timer(&priv->recovery_timer);
+	icnss_timer_delete(&priv->recovery_timer);
 
 	if (priv->wpss_self_recovery_enabled)
-		del_timer(&priv->wpss_ssr_timer);
+		icnss_timer_delete(&priv->wpss_ssr_timer);
 
 	device_init_wakeup(&priv->pdev->dev, false);
 

@@ -51,6 +51,7 @@
 #include <linux/pm_domain.h>
 #endif
 #include <linux/nvmem-consumer.h>
+#include <linux/version.h>
 
 #define MAX_NO_OF_MAC_ADDR		4
 #define QMI_WLFW_MAX_TIMESTAMP_LEN	32
@@ -903,4 +904,26 @@ int cnss_get_cxpc(struct cnss_plat_data *plat_priv);
 int cnss_set_cx_voltage_corner(struct cnss_plat_data *plat_priv,
 			       enum cx_voltage_corners vc, u16 arg);
 u8 *cnss_debug_direct_cx(struct cnss_plat_data *plat_priv);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+static inline int cnss_timer_delete(struct timer_list *timer)
+{
+	return timer_delete(timer);
+}
+
+static inline int cnss_timer_delete_sync(struct timer_list *timer)
+{
+	return timer_delete_sync(timer);
+}
+#else
+static inline int cnss_timer_delete(struct timer_list *timer)
+{
+	return del_timer(timer);
+}
+
+static inline int cnss_timer_delete_sync(struct timer_list *timer)
+{
+	return del_timer_sync(timer);
+}
+#endif
 #endif /* _CNSS_MAIN_H */

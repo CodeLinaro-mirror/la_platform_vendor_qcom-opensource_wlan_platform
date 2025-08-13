@@ -34,6 +34,7 @@
 #include <linux/sched/clock.h>
 #endif
 #include <linux/iommu.h>
+#include <linux/version.h>
 
 #define THERMAL_NAME_LENGTH 20
 #define ICNSS_SMEM_VALUE_MASK 0xFFFFFFFF
@@ -759,5 +760,17 @@ int icnss_aop_pdc_reconfig(struct icnss_priv *priv);
 void icnss_power_misc_params_init(struct icnss_priv *priv);
 void icnss_recovery_timeout_hdlr(struct timer_list *t);
 void icnss_wpss_ssr_timeout_hdlr(struct timer_list *t);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+static inline int icnss_timer_delete(struct timer_list *timer)
+{
+	return timer_delete(timer);
+}
+#else
+static inline int icnss_timer_delete(struct timer_list *timer)
+{
+	return del_timer(timer);
+}
+#endif
 #endif
 
