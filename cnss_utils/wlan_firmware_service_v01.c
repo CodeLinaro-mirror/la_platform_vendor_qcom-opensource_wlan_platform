@@ -879,7 +879,7 @@ static struct qmi_elem_info wlfw_pmu_cfg_ext_v01_ei[] = {
 	},
 	{
 		.data_type      = QMI_STRUCT,
-		.elem_len       = QMI_WLFW_PMU_PARAMS_MAX_EXT_V01,
+		.elem_len       = QMI_WLFW_PMU_PARAMS_MAX_V01,
 		.elem_size      = sizeof(struct wlfw_pmu_param_ext_v01),
 		.array_type       = VAR_LEN_ARRAY,
 		.tlv_type       = 0,
@@ -2264,6 +2264,26 @@ struct qmi_elem_info wlfw_wlan_cfg_req_msg_v01_ei[] = {
 					   wlfw_wlan_cfg_req_msg_v01,
 					   ce_cmn_reg),
 		.ei_array      = wlfw_ce_cmn_register_config_v01_ei,
+	},
+	{
+		.data_type      = QMI_OPT_FLAG,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x19,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   chip_name_valid),
+	},
+	{
+		.data_type      = QMI_STRING,
+		.elem_len       = QMI_WLFW_MAX_STR_LEN_V01 + 1,
+		.elem_size      = sizeof(char),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x19,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   chip_name),
 	},
 	{
 		.data_type      = QMI_EOTI,

@@ -6,6 +6,7 @@
 
 #include <linux/module.h>
 #include <linux/soc/qcom/qmi.h>
+#include <linux/vmalloc.h>
 
 #include "bus.h"
 #include "debug.h"
@@ -305,6 +306,30 @@ static void cnss_wlfw_host_cap_parse_mlo(struct cnss_plat_data *plat_priv,
 	}
 }
 
+#ifdef CONFIG_KASAN_GENERIC
+#define KSN_STR_LEN 6
+static void cnss_update_build_info(struct wlfw_host_cap_req_msg_v01 *req)
+{
+	char str[] = " + KSN";
+	size_t cur_len = strlen(req->platform_name);
+	size_t new_len = KSN_STR_LEN + 1;
+
+	if (cur_len + new_len >= QMI_WLFW_MAX_PLATFORM_NAME_LEN_V01) {
+		cnss_pr_err("Failed to update build info. new_len: %zu",
+			    new_len);
+		return;
+	}
+
+	strlcat(req->platform_name, str, QMI_WLFW_MAX_PLATFORM_NAME_LEN_V01);
+	cnss_pr_dbg("Build Info: %s (%zu)\n",
+		    req->platform_name, strlen(req->platform_name));
+
+}
+#else
+static void cnss_update_build_info(struct wlfw_host_cap_req_msg_v01 *req)
+{}
+#endif
+
 static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 {
 	struct wlfw_host_cap_req_msg_v01 *req;
@@ -314,6 +339,7 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	u64 iova_start = 0, iova_size = 0,
 	    iova_ipa_start = 0, iova_ipa_size = 0;
 	u64 feature_list = 0;
+	u32 cx_mode_dt;
 
 	cnss_pr_dbg("Sending host capability message, state: 0x%lx\n",
 		    plat_priv->driver_state);
@@ -392,8 +418,29 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	}
 
 	if (cnss_get_platform_name(plat_priv, req->platform_name,
-				   QMI_WLFW_MAX_PLATFORM_NAME_LEN_V01))
+				   QMI_WLFW_MAX_PLATFORM_NAME_LEN_V01)) {
 		req->platform_name_valid = 1;
+		cnss_update_build_info(req);
+	}
+
+	if (plat_priv->device_id == FIG_DEVICE_ID ||
+	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				  "fig-direct-cx")) {
+		ret = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
+					   "cx-mode", &cx_mode_dt);
+		if (ret) {
+			cnss_pr_err("could not get cx mode\n");
+			goto out;
+		}
+
+		req->target_attachment_valid = 1;
+		if (cx_mode_dt == CX_DATA_PIN_PMIC)
+			req->target_attachment = WLFW_PMIC_V01;
+		else if (cx_mode_dt == CX_DATA_PIN_PDC)
+			req->target_attachment = WLFW_PDC_V01;
+		else
+			req->target_attachment = WLFW_THIRD_PARTY_V01;
+	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
 			   wlfw_host_cap_resp_msg_v01_ei, resp);
@@ -613,6 +660,20 @@ int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 		strscpy(plat_priv->fw_build_id, resp->fw_build_id,
 			QMI_WLFW_MAX_BUILD_ID_LEN + 1);
 	}
+
+	cnss_pr_info("direct cx data pin mode: %d\n",
+		     resp->direct_cx_data_pin_mode_valid);
+	if (resp->direct_cx_data_pin_mode_valid) {
+		plat_priv->direct_cx_data_pin_mode =
+			resp->direct_cx_data_pin_mode;
+	}
+
+	if (plat_priv->direct_cx_data_pin_mode) {
+		ret = cnss_set_cx_mode(plat_priv, CX_DATA_PIN);
+		if (ret < 0)
+			cnss_pr_err("Failed to set to Data Pin Mode\n");
+	}
+
 	/* FW will send aop retention volatage for qca6490 */
 	if (resp->voltage_mv_valid) {
 		plat_priv->cpr_info.voltage = resp->voltage_mv;
@@ -647,10 +708,10 @@ int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 				QMI_WLFW_WLAN_DUMP_OVER_BT_SUPPORT_V01);
 		bt_over_wl = !!(resp->fw_caps &
 				QMI_WLFW_BT_DUMP_OVER_WLAN_SUPPORT_V01);
-		cnss_pr_dbg("FW aux uc support capability: %d, wl_over_bt %d, bt_over_wl %d\n",
-			    plat_priv->fw_aux_uc_support,
-			    wl_over_bt, bt_over_wl);
+		cnss_pr_dbg("FW aux uc support capability: %d\n",
+			    plat_priv->fw_aux_uc_support);
 
+		cnss_xdump_update_wl_cap(plat_priv, wl_over_bt, bt_over_wl);
 		plat_priv->fw_caps = resp->fw_caps;
 	}
 
@@ -669,8 +730,20 @@ int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 	if (resp->hwid_bitmap_valid)
 		plat_priv->hwid_bitmap = resp->hwid_bitmap;
 
-	if (resp->ol_cpr_cfg_valid)
-		cnss_aop_ol_cpr_cfg_setup(plat_priv, &resp->ol_cpr_cfg);
+	if (plat_priv->device_id == FIG_DEVICE_ID ||
+	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				  "fig-direct-cx")) {
+		cnss_pr_info("ol_cpr_cfg_ext is: %d\n",
+			     resp->ol_cpr_cfg_ext_valid);
+		if (plat_priv->direct_cx_data_pin_mode &&
+		    resp->ol_cpr_cfg_ext_valid) {
+			cnss_ol_cpr_cfg_ext_setup(plat_priv,
+						  &resp->ol_cpr_cfg_ext);
+		}
+	} else {
+		if (resp->ol_cpr_cfg_valid)
+			cnss_aop_ol_cpr_cfg_setup(plat_priv, &resp->ol_cpr_cfg);
+	}
 
 	/* Disable WLAN PDC in AOP firmware for boards which support on chip PMIC
 	 * so AOP will ignore SW_CTRL changes and do not update regulator votes.
@@ -1456,7 +1529,7 @@ int cnss_wlfw_qdss_data_send_sync(struct cnss_plat_data *plat_priv, char *file_n
 		return -ENOMEM;
 	}
 
-	p_qdss_trace_data = kzalloc(total_size, GFP_KERNEL);
+	p_qdss_trace_data = vzalloc(total_size);
 	if (!p_qdss_trace_data) {
 		cnss_pr_err("%s: failed to allocate qdss trace data: %zu\n",
 			    __func__, total_size);
@@ -1558,7 +1631,7 @@ int cnss_wlfw_qdss_data_send_sync(struct cnss_plat_data *plat_priv, char *file_n
 	}
 
 fail:
-	kfree(p_qdss_trace_data);
+	vfree(p_qdss_trace_data);
 
 end:
 	kfree(req);
@@ -2100,6 +2173,15 @@ int cnss_wlfw_wlan_cfg_send_sync(struct cnss_plat_data *plat_priv,
 					(ce_id % num_vectors) + base_vector;
 			}
 		}
+	}
+
+	if (plat_priv->host_param && plat_priv->host_param->chip_name) {
+		req->chip_name_valid = 1;
+		strscpy(req->chip_name, plat_priv->host_param->chip_name,
+			QMI_WLFW_MAX_STR_LEN_V01 + 1);
+
+		cnss_pr_dbg("chip_name: %s, chip_valid: %d, host_chip_name: %s\n",
+			    req->chip_name, req->chip_name_valid, plat_priv->host_param->chip_name);
 	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
@@ -3674,14 +3756,6 @@ int cnss_wlfw_server_arrive(struct cnss_plat_data *plat_priv, void *data)
 		return -EINVAL;
 	}
 
-	if (!test_bit(CNSS_SOL_REGISTERED, &plat_priv->driver_state)) {
-		ret = cnss_init_sol_gpio(plat_priv);
-		if (ret)
-			cnss_pr_err("Unable to register sol GPIO %d\n", ret);
-		else
-			set_bit(CNSS_SOL_REGISTERED, &plat_priv->driver_state);
-	}
-
 	cnss_ignore_qmi_failure(false);
 
 	ret = cnss_wlfw_connect_to_server(plat_priv, data);
@@ -3882,6 +3956,8 @@ int cnss_qmi_get_dms_mac(struct cnss_plat_data *plat_priv)
 	plat_priv->dms.mac_valid = true;
 	memcpy(plat_priv->dms.mac, resp.mac_address, QMI_WLFW_MAC_ADDR_SIZE_V01);
 	cnss_pr_info("Received DMS MAC: [%pM]\n", plat_priv->dms.mac);
+
+	return 0;
 out:
 	return ret;
 }
