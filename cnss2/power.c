@@ -432,6 +432,11 @@ static void cnss_put_vreg(struct cnss_plat_data *plat_priv,
 	}
 }
 
+static int cnss_is_cx_rail(struct cnss_vreg_info *vreg)
+{
+	return strcmp(vreg->cfg.name, "vdd-wlan-cx") == 0;
+}
+
 static int cnss_vreg_on(struct cnss_plat_data *plat_priv,
 			struct list_head *vreg_list)
 {
@@ -441,6 +446,10 @@ static int cnss_vreg_on(struct cnss_plat_data *plat_priv,
 	list_for_each_entry(vreg, vreg_list, list) {
 		if (IS_ERR_OR_NULL(vreg->reg))
 			continue;
+		if ((plat_priv->device_id == FIG_DEVICE_ID) &&
+		    cnss_is_cx_rail(vreg)) {
+			continue;
+		}
 		ret = cnss_vreg_on_single(vreg);
 		if (ret)
 			break;
@@ -459,36 +468,20 @@ static int cnss_vreg_on(struct cnss_plat_data *plat_priv,
 	return ret;
 }
 
-static int cnss_is_cx_rail(struct cnss_vreg_info *vreg)
-{
-	return strcmp(vreg->cfg.name, "vdd-wlan-cx") == 0;
-}
-
 static int cnss_vreg_off(struct cnss_plat_data *plat_priv,
 			 struct list_head *vreg_list)
 {
 	struct cnss_vreg_info *vreg;
-	struct cnss_vreg_info *cx_vreg = NULL;
 
 	list_for_each_entry_reverse(vreg, vreg_list, list) {
 		if (IS_ERR_OR_NULL(vreg->reg))
 			continue;
 
-		if ((plat_priv->device_id == FIG_DEVICE_ID ||
-		     of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-					   "fig-direct-cx")) &&
+		if ((plat_priv->device_id == FIG_DEVICE_ID) &&
 		    cnss_is_cx_rail(vreg)) {
-			cx_vreg = vreg;
 			continue;
 		}
 		cnss_vreg_off_single(vreg);
-	}
-
-	if ((plat_priv->device_id == FIG_DEVICE_ID ||
-	     of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-				   "fig-direct-cx")) && cx_vreg &&
-	    !test_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state)) {
-		cnss_vreg_off_single(cx_vreg);
 	}
 
 	return 0;
@@ -505,6 +498,11 @@ static int cnss_vreg_unvote(struct cnss_plat_data *plat_priv,
 	list_for_each_entry_reverse(vreg, vreg_list, list) {
 		if (IS_ERR_OR_NULL(vreg->reg))
 			continue;
+
+		if ((plat_priv->device_id == FIG_DEVICE_ID) &&
+		    cnss_is_cx_rail(vreg)) {
+			continue;
+		}
 
 		if (vreg->cfg.need_unvote)
 			cnss_vreg_unvote_single(vreg);
@@ -1394,12 +1392,24 @@ int cnss_power_on_device(struct cnss_plat_data *plat_priv, bool reset)
 	}
 
 	cnss_pr_info("Device id: 0x%lx\n", plat_priv->device_id);
-	if (plat_priv->device_id == FIG_DEVICE_ID ||
-	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-				  "fig-direct-cx")) {
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
 		ret = cnss_set_cx_mode(plat_priv, CX_LEGACY);
-		if (ret < 0)
+		if (ret < 0) {
 			cnss_pr_err("Failed to set to Legacy Mode\n");
+			goto out;
+		}
+
+		ret = cnss_cx_voltage_corners_init(plat_priv);
+		if (ret < 0) {
+			cnss_pr_err("Failed to set CX voltage corners\n");
+			goto out;
+		}
+
+		ret = cnss_set_cxpc_power_on_off(plat_priv, CX_RET);
+		if (ret < 0) {
+			cnss_pr_err("failed to set cx to CX_RET\n");
+			goto out;
+		}
 	}
 
 	cnss_wlan_hw_disable_check(plat_priv);
@@ -1429,10 +1439,6 @@ int cnss_power_on_device(struct cnss_plat_data *plat_priv, bool reset)
 
 		cnss_pr_info("Device id: 0x%lx\n", plat_priv->device_id);
 		if (plat_priv->device_id == FIG_DEVICE_ID) {
-			ret = cnss_init_direct_cx_host_sol_gpio(plat_priv);
-			if (ret) {
-				cnss_pr_err("Failed to init DCX Host SOL\n");
-			}
 			ret = cnss_set_direct_cx_host_sol_value(plat_priv, 1);
 			if (ret < 0) {
 				cnss_pr_err("Failed to assert Host SOL\n");
@@ -1546,27 +1552,8 @@ out:
 	return ret;
 }
 
-static int cnss_select_vreg_off_single(struct cnss_plat_data *plat_priv,
-				       const char *vreg_name)
-{
-	struct cnss_vreg_info *vreg;
-	int ret = 0;
-
-	list_for_each_entry(vreg, &plat_priv->vreg_list, list) {
-		if (IS_ERR_OR_NULL(vreg->reg))
-			continue;
-		if (strcmp(vreg->cfg.name, vreg_name) == 0) {
-			cnss_pr_info("found %s rail\n", vreg_name);
-			ret = cnss_vreg_off_single(vreg);
-		}
-	}
-
-	return ret;
-}
-
 void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 {
-	const char *cx_rail = "vdd-wlan-cx";
 	int ret = 0;
 
 	if (!plat_priv->powered_on) {
@@ -1587,30 +1574,25 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 		cnss_fw_managed_power_regulator(plat_priv, false);
 
 	} else {
-		if (plat_priv->device_id == FIG_DEVICE_ID ||
-		    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-					  "fig-direct-cx")) {
-			ret = cnss_set_cxpc_power_off(plat_priv, CX_OFF);
+		if (plat_priv->device_id == FIG_DEVICE_ID) {
+			ret = cnss_set_cxpc_power_on_off(plat_priv, CX_OFF);
 			if (ret < 0) {
-				cnss_pr_err("failed to set cx to CX_RET\n");
+				cnss_pr_err("failed to set cx to CX_OFF\n");
 				//CNSS_ASSERT(0);
 			}
 
 			ret = cnss_set_direct_cx_host_sol_value(plat_priv, 0);
 			if (ret < 0)
 				cnss_pr_err("Failed to de-assert Host SOL\n");
+			cnss_pr_info("De-asserted Host SOL\n");
 			usleep_range(1000, 2000);
 			if ((cnss_get_cxpc(plat_priv) == CX_RET) &&
 			    test_bit(CNSS_DRIVER_RECOVERY,
 				     &plat_priv->driver_state)) {
-				cnss_select_vreg_off_single(plat_priv,
-							    cx_rail);
+				cnss_pr_info("CX is in RET state\n");
 			}
 		}
 		cnss_select_pinctrl_state(plat_priv, false);
-		cnss_pr_info("Device id: 0x%lx\n", plat_priv->device_id);
-		if (plat_priv->device_id == FIG_DEVICE_ID)
-			usleep_range(1000, 2000);
 		cnss_clk_off(plat_priv, &plat_priv->clk_list);
 		cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
 	}
@@ -2003,6 +1985,39 @@ static inline bool cnss_aop_interface_ready(struct cnss_plat_data *plat_priv)
 	return (plat_priv->mbox_chan || plat_priv->qmp);
 }
 
+#if IS_ENABLED(CONFIG_CNSS2_DIRECT_CX_SDAM)
+static int cnss_aop_pdc_disable_cx(struct cnss_plat_data *plat_priv)
+{
+	char pdc_mode[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
+	char pdc_voltage[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
+	int ret = 0;
+
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		cnss_pr_info("Disabling PDC control of WLAN CX on device: %d\n",
+			     plat_priv->device_id);
+
+		snprintf(pdc_mode, CNSS_MBOX_MSG_MAX_LEN,
+			 "{class: wlan_pdc, ss: bb, res: S1J1.m, enable: 0}");
+		ret = cnss_aop_send_msg(plat_priv, pdc_mode);
+		if (ret < 0)
+			return ret;
+
+		snprintf(pdc_voltage, CNSS_MBOX_MSG_MAX_LEN,
+			 "{class: wlan_pdc, ss: bb, res: S1J1.v, enable: 0}");
+		ret = cnss_aop_send_msg(plat_priv, pdc_voltage);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+#else
+static int cnss_aop_pdc_disable_cx(struct cnss_plat_data *plat_priv)
+{
+	return 0;
+}
+#endif
+
 /* cnss_pdc_reconfig: Send PDC init table as configured in DT for wlan device */
 int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv)
 {
@@ -2011,6 +2026,13 @@ int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv)
 
 	cnss_pr_dbg("PDC init table length: %d\n",
 		    plat_priv->pdc_init_table_len);
+
+	cnss_aop_pdc_disable_cx(plat_priv);
+	if (ret < 0) {
+		cnss_pr_err("Failed to disable PDC control of CX, err = %d\n",
+			    ret);
+		goto out;
+	}
 
 	if (plat_priv->pdc_init_table_len <= 0 || !plat_priv->pdc_init_table)
 		return 0;
@@ -2030,6 +2052,8 @@ int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv)
 		if (ret < 0)
 			break;
 	}
+
+out:
 	return ret;
 }
 
