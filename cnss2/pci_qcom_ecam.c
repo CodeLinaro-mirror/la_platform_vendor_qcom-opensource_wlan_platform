@@ -3,7 +3,6 @@
 
 #include "pci_platform.h"
 #include "debug.h"
-#include <linux/pm.h>
 #include <linux/of_address.h>
 
 static struct cnss_msi_config msi_config = {
@@ -61,114 +60,9 @@ int cnss_wlan_adsp_pc_enable(struct cnss_pci_data *pci_priv, bool control)
 	return 0;
 }
 
-#define CNSS_PCI_SUSPEND_RETRY_MAX 20
 int cnss_set_pci_link(struct cnss_pci_data *pci_priv, bool link_up)
 {
-	int ret = 0, retry = 0;
-	struct device *dev, *host_bridge_dev, *pci_bridge_dev;
-	struct pci_dev *root_port;
-
-	if (!pci_priv) {
-		cnss_pr_err("pci_priv is null\n");
-		return -EINVAL;
-	}
-
-	pci_bridge_dev = pci_priv->pci_dev->bus->bridge;
-	if (!pci_bridge_dev) {
-		cnss_pr_err("PCI bridge is null\n");
-		return -EINVAL;
-	}
-
-	root_port = pcie_find_root_port(pci_priv->pci_dev);
-	if (!root_port) {
-		cnss_pr_err("PCI root port is null\n");
-		return -EINVAL;
-	}
-
-	host_bridge_dev = root_port->dev.parent;
-	if (!host_bridge_dev) {
-		cnss_pr_err("host_bridge_dev is null\n");
-		return -EINVAL;
-	}
-
-	dev = host_bridge_dev->parent;
-	if (!dev) {
-		cnss_pr_err("PCI platform device is null\n");
-		return -EINVAL;
-	}
-
-	cnss_pr_info("%s PCI link, \n", link_up ? "Resuming" : "Suspending");
-
-	cnss_pr_info("PCI rp pm: usage_count:%d, runtime_status:%d, child_count:%d\n",
-		     atomic_read(&pci_bridge_dev->power.usage_count),
-		     pci_bridge_dev->power.runtime_status,
-		     atomic_read(&pci_bridge_dev->power.child_count));
-
-	if (link_up) {
-		atomic_inc(&pci_bridge_dev->power.child_count);
-
-		ret = pm_runtime_get_sync(pci_bridge_dev);
-		cnss_pr_info("PCI rp resume: ret:%d, usage_count:%d, runtime_status:%d, child_count:%d\n",
-			     ret, atomic_read(&pci_bridge_dev->power.usage_count),
-			     pci_bridge_dev->power.runtime_status,
-			     atomic_read(&pci_bridge_dev->power.child_count));
-
-		if (ret) {
-			if (dev->power.runtime_status != RPM_ACTIVE)
-				pm_runtime_put_noidle(dev);
-
-			atomic_add_unless(&pci_bridge_dev->power.child_count, -1, 0);
-			pm_runtime_put_noidle(pci_bridge_dev);
-			cnss_pr_info("PCI platform pm state: usage_count:%d, runtime_status:%d, child_count:%d\n",
-				     atomic_read(&dev->power.usage_count),
-				     dev->power.runtime_status,
-				     atomic_read(&dev->power.child_count));
-                        cnss_pr_info("Failed to resume PCI link\n");
-                        return ret;
-		}
-
-		cnss_pr_info("successfully resume PCIe link, ret:%d\n", ret);
-	} else {
-		atomic_add_unless(&pci_bridge_dev->power.child_count, -1, 0);
-
-		if (dev->power.runtime_status == RPM_ACTIVE) {
-			atomic_set(&dev->power.usage_count, 1);
-			pm_runtime_put_noidle(dev);
-		}
-
-		ret = pm_runtime_put_sync(pci_bridge_dev);
-		cnss_pr_info("PCI rp suspend: ret:%d, usage_count:%d, runtime_status:%d, child_count:%d\n",
-			     ret, atomic_read(&pci_bridge_dev->power.usage_count),
-			     pci_bridge_dev->power.runtime_status,
-			     atomic_read(&pci_bridge_dev->power.child_count));
-
-		if (ret ||
-		    pci_bridge_dev->power.runtime_status != RPM_SUSPENDED) {
-			atomic_inc(&pci_bridge_dev->power.child_count);
-			pm_runtime_get_noresume(pci_bridge_dev);
-			pm_runtime_get_noresume(dev);
-			cnss_pr_info("Failed to suspend PCI bridge\n");
-			return ret;
-		} else {
-			while (retry < CNSS_PCI_SUSPEND_RETRY_MAX &&
-			       dev->power.runtime_status != RPM_SUSPENDED) {
-				retry++;
-				msleep(100);
-			}
-			if (retry == CNSS_PCI_SUSPEND_RETRY_MAX) {
-				pm_runtime_get_noresume(dev);
-				cnss_pr_info("PCI platform pm state: usage_count:%d, runtime_status:%d, child_count:%d\n",
-					     atomic_read(&dev->power.usage_count),
-					     dev->power.runtime_status,
-					     atomic_read(&dev->power.child_count));
-				cnss_pr_info("Failed to suspend PCI link\n");
-				return -EINVAL;
-			}
-		}
-		cnss_pr_info("successfully suspend PCI link, ret:%d\n", ret);
-	}
-
-	return ret;
+	return 0;
 }
 
 int cnss_pci_prevent_l1(struct device *dev)
