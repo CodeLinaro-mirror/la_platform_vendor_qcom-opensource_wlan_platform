@@ -3791,6 +3791,50 @@ static int cnss_qca6174_ramdump(struct cnss_pci_data *pci_priv)
 }
 
 #if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
+static void cnss_update_dpm_list_seq(struct cnss_pci_data *pci_priv)
+{
+	struct cnss_plat_data *plat_priv;
+	struct pci_dev *root_port;
+	struct device *pci_plat_dev, *host_bridge_dev, *dev;
+	int i;
+
+	plat_priv = pci_priv->plat_priv;
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is null\n");
+		return;
+	}
+
+	if (!plat_priv->is_fw_managed_pwr)
+		return;
+
+	pci_priv->pci_dev->dev.power.ignore_children = true;
+
+	root_port = pcie_find_root_port(pci_priv->pci_dev);
+	if (!root_port) {
+		cnss_pr_err("PCI root port is null\n");
+		return;
+	}
+
+	host_bridge_dev = root_port->dev.parent;
+	if (!host_bridge_dev) {
+		cnss_pr_err("host_bridge_dev is null\n");
+		return;
+	}
+
+	pci_plat_dev = host_bridge_dev->parent;
+	if (!pci_plat_dev) {
+		cnss_pr_err("PCI platform device is null\n");
+		return;
+	}
+
+	for (i = 0; i < plat_priv->pd_count; i++) {
+		dev = plat_priv->pd_devs[i];
+		if (dev && dev->pm_domain && pci_plat_dev->pm_domain)
+                        list_move_tail(&dev->power.entry,
+				       &pci_plat_dev->power.entry);
+	}
+}
+
 static int cnss_enable_pcie_device(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -3847,6 +3891,10 @@ static int cnss_disable_pcie_device(struct cnss_pci_data *pci_priv)
 	return 0;
 }
 #else
+static void cnss_update_dpm_list_seq(struct cnss_pci_data *pci_priv)
+{
+}
+
 static int cnss_enable_pcie_device(struct cnss_pci_data *pci_priv)
 {
 	return 0;
@@ -8731,6 +8779,7 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 	}
 
 	cnss_init_sw_reset_params(pci_priv);
+	cnss_update_dpm_list_seq(pci_priv);
 	cnss_pci_config_regs(pci_priv);
 	if (EMULATION_HW)
 		goto out;
