@@ -14,7 +14,6 @@
 #include <linux/of_gpio.h>
 #include <linux/vmalloc.h>
 #include <linux/suspend.h>
-#include <linux/version.h>
 #include <linux/sched.h>
 #include <linux/nmi.h>
 #include <linux/stacktrace.h>
@@ -55,9 +54,9 @@
 #define DEFAULT_AUX_FILE_NAME		"aux_ucode.elf"
 #define AUX_V2_FILE_NAME		"aux_ucode20.elf"
 #define DEFAULT_PHY_UCODE_FILE_NAME	"phy_ucode.elf"
-#define TME_PATCH_FILE_NAME_1_0		"tmel_peach_10.elf"
-#define TME_PATCH_FILE_NAME_2_0		"tmel_peach_20.elf"
-#define SOFT_SKU_LICENSE_FILENAME	"cnss_softsku_peach.pfm"
+#define TME_PATCH_FILE_NAME_1_0		"tmel_%s_10.elf"
+#define TME_PATCH_FILE_NAME_2_0		"tmel_%s_20.elf"
+#define SOFT_SKU_LICENSE_FILENAME	"cnss_softsku_%s.pfm"
 #define PHY_UCODE_V2_FILE_NAME		"phy_ucode20.elf"
 #define DEFAULT_FW_FILE_NAME		"amss.bin"
 #define FW_V2_FILE_NAME			"amss20.bin"
@@ -966,7 +965,7 @@ __cnss_del_rddm_timer(struct cnss_pci_data *pci_priv,
 {
 	int ret;
 
-	ret = del_timer(&pci_priv->dev_rddm_timer);
+	ret = cnss_timer_delete(&pci_priv->dev_rddm_timer);
 	cnss_pr_dbg("Delete RDDM timer @%s(%d), ret %d\n",
 		    func, line, ret);
 	return ret;
@@ -995,11 +994,6 @@ static void cnss_mhi_debug_reg_dump(struct cnss_pci_data *pci_priv)
 		return;
 
 	mhi_debug_reg_dump(pci_priv->mhi_ctrl);
-}
-
-static void cnss_mhi_dump_sfr(struct cnss_pci_data *pci_priv)
-{
-	mhi_dump_sfr(pci_priv->mhi_ctrl);
 }
 
 static bool cnss_mhi_scan_rddm_cookie(struct cnss_pci_data *pci_priv,
@@ -1070,10 +1064,6 @@ static void cnss_mhi_debug_reg_dump(struct cnss_pci_data *pci_priv)
 {
 }
 
-static void cnss_mhi_dump_sfr(struct cnss_pci_data *pci_priv)
-{
-}
-
 static bool cnss_mhi_scan_rddm_cookie(struct cnss_pci_data *pci_priv,
 				      u32 cookie)
 {
@@ -1128,6 +1118,130 @@ void cnss_mhi_controller_set_base(struct cnss_pci_data *pci_priv,
 {
 }
 #endif /* CONFIG_MHI_BUS_MISC */
+
+static void cnss_mhi_process_sfr(struct image_info *rddm_image,
+				 struct file_info *info)
+{
+	struct mhi_buf *mhi_buf = rddm_image->mhi_buf;
+	u8 *sfr_buf, *file_offset = info->file_offset;
+	u32 file_size = info->file_size;
+	u32 rem_seg_len = info->rem_seg_len;
+	u32 seg_idx = info->seg_idx;
+
+	sfr_buf = kzalloc(file_size + 1, GFP_KERNEL);
+	if (!sfr_buf)
+		return;
+
+	while (file_size) {
+		/* file offset starting from seg base */
+		if (!rem_seg_len) {
+			file_offset = mhi_buf[seg_idx].buf;
+			if (file_size > mhi_buf[seg_idx].len)
+				rem_seg_len = mhi_buf[seg_idx].len;
+			else
+				rem_seg_len = file_size;
+		}
+
+		if (file_size <= rem_seg_len) {
+			memcpy(sfr_buf, file_offset, file_size);
+			break;
+		}
+
+		memcpy(sfr_buf, file_offset, rem_seg_len);
+		sfr_buf += rem_seg_len;
+		file_size -= rem_seg_len;
+		rem_seg_len = 0;
+		seg_idx++;
+		if (seg_idx == rddm_image->entries) {
+			cnss_pr_err("invalid size for SFR file\n");
+			goto err;
+		}
+	}
+	sfr_buf[info->file_size] = '\0';
+
+	/* force sfr string to log in kernel msg */
+	cnss_pr_err("%s\n", sfr_buf);
+err:
+	kfree(sfr_buf);
+}
+
+static int cnss_mhi_find_next_file_offset(struct image_info *rddm_image,
+					  struct file_info *info,
+					  struct rddm_table_info *table_info)
+{
+	struct mhi_buf *mhi_buf = rddm_image->mhi_buf;
+
+	if (info->rem_seg_len >= table_info->size) {
+		info->file_offset += table_info->size;
+		info->rem_seg_len -= table_info->size;
+		return 0;
+	}
+
+	info->file_size = table_info->size - info->rem_seg_len;
+	info->rem_seg_len = 0;
+	/* iterate over segments until eof is reached */
+	while (info->file_size) {
+		info->seg_idx++;
+		if (info->seg_idx == rddm_image->entries) {
+			cnss_pr_err("invalid size for file %s\n",
+				    table_info->file_name);
+			return -EINVAL;
+		}
+		if (info->file_size > mhi_buf[info->seg_idx].len) {
+			info->file_size -= mhi_buf[info->seg_idx].len;
+		} else {
+			info->file_offset = mhi_buf[info->seg_idx].buf +
+				info->file_size;
+			info->rem_seg_len = mhi_buf[info->seg_idx].len -
+				info->file_size;
+			info->file_size = 0;
+		}
+	}
+
+	return 0;
+}
+
+static void cnss_mhi_dump_sfr(struct cnss_pci_data *pci_priv)
+{
+	struct image_info *rddm_image = pci_priv->mhi_ctrl->rddm_image;
+	struct mhi_buf *mhi_buf = rddm_image->mhi_buf;
+	struct rddm_header *rddm_header =
+		(struct rddm_header *)mhi_buf->buf;
+	struct rddm_table_info *table_info;
+	struct file_info info;
+	u32 table_size, n;
+
+	memset(&info, 0, sizeof(info));
+
+	if (rddm_header->header_size > sizeof(*rddm_header) ||
+	    rddm_header->header_size < 8) {
+		cnss_pr_err("invalid reported header size %u\n",
+			    rddm_header->header_size);
+		return;
+	}
+
+	table_size = (rddm_header->header_size - 8) / sizeof(*table_info);
+	if (!table_size) {
+		cnss_pr_err("invalid rddm table size %u\n", table_size);
+		return;
+	}
+
+	info.file_offset = (u8 *)rddm_header + rddm_header->header_size;
+	info.rem_seg_len = mhi_buf[0].len - rddm_header->header_size;
+	for (n = 0; n < table_size; n++) {
+		table_info = &rddm_header->table_info[n];
+
+		if (!strcmp(table_info->file_name, "Q6-SFR.bin")) {
+			    info.file_size = table_info->size;
+			    cnss_mhi_process_sfr(rddm_image, &info);
+			return;
+		}
+
+		if (cnss_mhi_find_next_file_offset(rddm_image, &info,
+						   table_info))
+			return;
+	}
+}
 
 void cnss_pci_controller_set_base(struct cnss_pci_data *pci_priv)
 {
@@ -3037,7 +3151,7 @@ retry:
 	mod_timer(&pci_priv->boot_debug_timer,
 		  jiffies + msecs_to_jiffies(BOOT_DEBUG_TIMEOUT_MS));
 	ret = cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_POWER_ON);
-	del_timer_sync(&pci_priv->boot_debug_timer);
+	cnss_timer_delete_sync(&pci_priv->boot_debug_timer);
 	if (ret == 0)
 		cnss_wlan_adsp_pc_enable(pci_priv, false);
 
@@ -4318,7 +4432,7 @@ static void cnss_wlan_reg_driver_work(struct work_struct *work)
 			return;
 		}
 
-		del_timer(&plat_priv->fw_boot_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state) &&
 		    !test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state) &&
 		    !test_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state)) {
@@ -4723,6 +4837,11 @@ static int cnss_pci_suspend(struct device *dev)
 		/* pcie link will be suspend by pcie PM */
 		goto out;
 
+	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state)) {
+		ret = -EAGAIN;
+		goto out;
+	}
+
 	/* No mhi state bit set if only finish pcie enumeration,
 	 * so test_bit is not applicable to check if it is INIT state.
 	 */
@@ -4769,6 +4888,12 @@ static int cnss_pci_suspend(struct device *dev)
 
 	cnss_pci_set_monitor_wake_intr(pci_priv, false);
 
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		ret = cnss_set_cxpc(dev, CX_OFF);
+		if (ret < 0)
+			CNSS_ASSERT(0);
+	}
+
 	cnss_pr_info("WoW Entry. pcie_time_sync_offset = %llu",
 		     plat_priv->pcie_time_sync_offset);
 
@@ -4809,14 +4934,10 @@ static int cnss_pci_resume(struct device *dev)
 	if (!cnss_is_device_powered_on(pci_priv->plat_priv))
 		goto out;
 
-	if (plat_priv->device_id == FIG_DEVICE_ID ||
-	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-				  "fig-direct-cx")) {
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
 		ret = cnss_set_cxpc(dev, CX_RET);
-		if (ret < 0) {
-			cnss_pr_err("failed to set cx to CX_RET\n");
-			//CNSS_ASSERT(0);
-		}
+		if (ret < 0)
+			CNSS_ASSERT(0);
 	}
 
 	if (!pci_priv->disable_pc) {
@@ -4985,6 +5106,12 @@ static int cnss_pci_runtime_suspend(struct device *dev)
 	if (ret)
 		pci_priv->drv_connected_last = 0;
 
+	if (!ret && (plat_priv->device_id == FIG_DEVICE_ID)) {
+		ret = cnss_set_cxpc(dev, CX_OFF);
+		if (ret < 0)
+			CNSS_ASSERT(0);
+	}
+
 	cnss_pr_vdbg("Runtime suspend status: %d\n", ret);
 
 	return ret;
@@ -5015,14 +5142,10 @@ static int cnss_pci_runtime_resume(struct device *dev)
 
 	cnss_pr_vdbg("Runtime resume start\n");
 
-	if (plat_priv->device_id == FIG_DEVICE_ID ||
-	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-				  "fig-direct-cx")) {
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
 		ret = cnss_set_cxpc(dev, CX_RET);
-		if (ret < 0) {
-			cnss_pr_err("failed to set cx to CX_RET\n");
-			//CNSS_ASSERT(0);
-		}
+		if (ret < 0)
+			CNSS_ASSERT(0);
 	}
 
 	driver_ops = pci_priv->driver_ops;
@@ -5717,6 +5840,92 @@ void cnss_pci_free_qdss_mem(struct cnss_pci_data *pci_priv)
 	plat_priv->qdss_mem_seg_len = 0;
 }
 
+void __cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
+				   char *prefix_name, char *name)
+{
+	switch (pci_priv->device_id) {
+	case QCN7605_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  QCN7605_PATH_PREFIX "%s", name);
+		break;
+	case QCA6390_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  QCA6390_PATH_PREFIX "%s", name);
+		break;
+	case QCA6490_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  QCA6490_PATH_PREFIX "%s", name);
+		break;
+	case KIWI_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  KIWI_PATH_PREFIX "%s", name);
+		break;
+	case MANGO_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  MANGO_PATH_PREFIX "%s", name);
+		break;
+	case PEACH_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  PEACH_PATH_PREFIX "%s", name);
+		break;
+	case COLOGNE_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  COLOGNE_PATH_PREFIX "%s", name);
+		break;
+	case FIG_DEVICE_ID:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
+			  FIG_PATH_PREFIX "%s", name);
+		break;
+	default:
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN, "%s", name);
+		break;
+	}
+
+	cnss_pr_dbg("FW name added with prefix: %s\n", prefix_name);
+}
+
+void cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
+				 char *prefix_name, char *name)
+{
+	struct cnss_plat_data *plat_priv;
+
+	if (!pci_priv)
+		return;
+
+	plat_priv = pci_priv->plat_priv;
+
+	if (!plat_priv->use_fw_path_with_prefix) {
+		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN, "%s", name);
+		return;
+	}
+
+	__cnss_pci_add_fw_prefix_name(pci_priv, prefix_name, name);
+}
+
+static void cnss_pci_add_fw_infix_name(struct cnss_pci_data *pci_priv,
+				       char *input_name, char *output_name)
+{
+	char device_name[MAX_FIRMWARE_NAME_LEN];
+	char *empty_char = "\0";
+	int i, j = 0;
+
+	if (!pci_priv)
+		return;
+
+	/*Re-using prefix API to get infix target name string*/
+	__cnss_pci_add_fw_prefix_name(pci_priv, device_name, empty_char);
+
+	/*Remove extra slash along with target name*/
+	for (i = 0; device_name[i] != '\0'; i++) {
+		if (device_name[i] != '/')
+			device_name[j++] = device_name[i];
+	}
+	device_name[j] = '\0';
+
+	scnprintf(output_name, MAX_FIRMWARE_NAME_LEN, input_name, device_name);
+	cnss_pr_dbg("FW infix output filename %s\n", output_name);
+}
+
 int cnss_pci_load_sku_license(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
@@ -5727,7 +5936,6 @@ int cnss_pci_load_sku_license(struct cnss_pci_data *pci_priv)
 	int ret = 0;
 
 	switch (pci_priv->device_id) {
-	case PEACH_DEVICE_ID:
 	case FIG_DEVICE_ID:
 		soft_sku_filename = SOFT_SKU_LICENSE_FILENAME;
 		break;
@@ -5737,6 +5945,7 @@ int cnss_pci_load_sku_license(struct cnss_pci_data *pci_priv)
 	case QCA6490_DEVICE_ID:
 	case KIWI_DEVICE_ID:
 	case MANGO_DEVICE_ID:
+	case PEACH_DEVICE_ID:
 	default:
 		cnss_pr_dbg("Soft SKU not supported for device ID: (0x%x)\n",
 			    pci_priv->device_id);
@@ -5744,7 +5953,8 @@ int cnss_pci_load_sku_license(struct cnss_pci_data *pci_priv)
 	}
 
 	if (!sku_license_mem->va && !sku_license_mem->size) {
-		scnprintf(filename, MAX_FIRMWARE_NAME_LEN, "%s", soft_sku_filename);
+		cnss_pci_add_fw_infix_name(pci_priv, soft_sku_filename,
+					   filename);
 
 		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 
@@ -5783,7 +5993,6 @@ int cnss_pci_load_tme_patch(struct cnss_pci_data *pci_priv)
 	int ret = 0;
 
 	switch (pci_priv->device_id) {
-	case PEACH_DEVICE_ID:
 	case FIG_DEVICE_ID:
 		if (plat_priv->device_version.major_version == FW_V1_NUMBER)
 			tme_patch_filename = TME_PATCH_FILE_NAME_1_0;
@@ -5796,6 +6005,7 @@ int cnss_pci_load_tme_patch(struct cnss_pci_data *pci_priv)
 	case QCA6490_DEVICE_ID:
 	case KIWI_DEVICE_ID:
 	case MANGO_DEVICE_ID:
+	case PEACH_DEVICE_ID:
 	default:
 		cnss_pr_dbg("TME-L not supported for device ID: (0x%x)\n",
 			    pci_priv->device_id);
@@ -5803,7 +6013,8 @@ int cnss_pci_load_tme_patch(struct cnss_pci_data *pci_priv)
 	}
 
 	if (!tme_lite_mem->va && !tme_lite_mem->size) {
-		scnprintf(filename, MAX_FIRMWARE_NAME_LEN, "%s", tme_patch_filename);
+		cnss_pci_add_fw_infix_name(pci_priv, tme_patch_filename,
+					   filename);
 
 		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 
@@ -5857,12 +6068,14 @@ int cnss_pci_load_tme_opt_file(struct cnss_pci_data *pci_priv,
 	struct cnss_fw_mem *tme_lite_mem = NULL;
 	char filename[MAX_FIRMWARE_NAME_LEN];
 	char *tme_opt_filename = NULL;
+	char tme_opt_filename_outcome[MAX_FIRMWARE_NAME_LEN];
 	const struct firmware *fw_entry;
 	int ret = 0;
 
 	switch (pci_priv->device_id) {
 	case PEACH_DEVICE_ID:
 	case FIG_DEVICE_ID:
+	case COLOGNE_DEVICE_ID:
 		if (file == WLFW_TME_LITE_OEM_FUSE_FILE_V01) {
 			tme_opt_filename = TME_OEM_FUSE_FILE_NAME;
 			tme_lite_mem = &plat_priv->tme_opt_file_mem[0];
@@ -5872,12 +6085,6 @@ int cnss_pci_load_tme_opt_file(struct cnss_pci_data *pci_priv,
 		} else if (file == WLFW_TME_LITE_DPR_FILE_V01) {
 			tme_opt_filename = TME_DPR_FILE_NAME;
 			tme_lite_mem = &plat_priv->tme_opt_file_mem[2];
-		}
-		break;
-	case COLOGNE_DEVICE_ID:
-		if (file == WLFW_TME_LITE_OEM_FUSE_FILE_V01) {
-			tme_opt_filename = CGN_TME_OEM_FUSE_FILE_NAME;
-			tme_lite_mem = &plat_priv->tme_opt_file_mem[0];
 		}
 		break;
 	case QCA6174_DEVICE_ID:
@@ -5896,8 +6103,10 @@ int cnss_pci_load_tme_opt_file(struct cnss_pci_data *pci_priv,
 		return 0;
 
 	if (!tme_lite_mem->va && !tme_lite_mem->size) {
+		cnss_pci_add_fw_infix_name(pci_priv, tme_opt_filename,
+					   tme_opt_filename_outcome);
 		cnss_pci_add_fw_prefix_name(pci_priv, filename,
-					    tme_opt_filename);
+					    tme_opt_filename_outcome);
 
 		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
 
@@ -7571,82 +7780,11 @@ static int cnss_mhi_pm_runtime_get(struct mhi_controller *mhi_ctrl)
 	return cnss_pci_pm_runtime_get(pci_priv, RTPM_ID_MHI);
 }
 
-static int cnss_mhi_pm_runtime_get_sync(struct mhi_controller *mhi_ctrl)
-{
-	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
-
-	return cnss_pci_pm_runtime_get_sync(pci_priv, RTPM_ID_MHI);
-}
-
-static int cnss_mhi_pm_runtime_put_autosuspend(struct mhi_controller *mhi_ctrl)
-{
-	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
-
-	cnss_pci_pm_runtime_mark_last_busy(pci_priv);
-	return cnss_pci_pm_runtime_put_autosuspend(pci_priv, RTPM_ID_MHI);
-}
-
 static void cnss_mhi_pm_runtime_put_noidle(struct mhi_controller *mhi_ctrl)
 {
 	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
 
 	cnss_pci_pm_runtime_put_noidle(pci_priv, RTPM_ID_MHI);
-}
-
-void cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
-				 char *prefix_name, char *name)
-{
-	struct cnss_plat_data *plat_priv;
-
-	if (!pci_priv)
-		return;
-
-	plat_priv = pci_priv->plat_priv;
-
-	if (!plat_priv->use_fw_path_with_prefix) {
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN, "%s", name);
-		return;
-	}
-
-	switch (pci_priv->device_id) {
-	case QCN7605_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  QCN7605_PATH_PREFIX "%s", name);
-		break;
-	case QCA6390_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  QCA6390_PATH_PREFIX "%s", name);
-		break;
-	case QCA6490_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  QCA6490_PATH_PREFIX "%s", name);
-		break;
-	case KIWI_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  KIWI_PATH_PREFIX "%s", name);
-		break;
-	case MANGO_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  MANGO_PATH_PREFIX "%s", name);
-		break;
-	case PEACH_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  PEACH_PATH_PREFIX "%s", name);
-		break;
-	case COLOGNE_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  COLOGNE_PATH_PREFIX "%s", name);
-		break;
-	case FIG_DEVICE_ID:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN,
-			  FIG_PATH_PREFIX "%s", name);
-		break;
-	default:
-		scnprintf(prefix_name, MAX_FIRMWARE_NAME_LEN, "%s", name);
-		break;
-	}
-
-	cnss_pr_dbg("FW name added with prefix: %s\n", prefix_name);
 }
 
 static int cnss_pci_update_fw_name(struct cnss_pci_data *pci_priv)
@@ -7671,6 +7809,7 @@ static int cnss_pci_update_fw_name(struct cnss_pci_data *pci_priv)
 	case MANGO_DEVICE_ID:
 	case PEACH_DEVICE_ID:
 	case COLOGNE_DEVICE_ID:
+	case FIG_DEVICE_ID:
 		switch (plat_priv->device_version.major_version) {
 		case FW_V2_NUMBER:
 				cnss_pci_add_fw_prefix_name(pci_priv,
@@ -7819,7 +7958,7 @@ static int cnss_pci_handle_mhi_sys_err(struct cnss_pci_data *pci_priv)
 
 	cnss_ignore_qmi_failure(true);
 	set_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
-	del_timer(&plat_priv->fw_boot_timer);
+	cnss_timer_delete(&plat_priv->fw_boot_timer);
 	reinit_completion(&pci_priv->wake_event_complete);
 	cnss_start_rddm_timer(pci_priv);
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
@@ -7862,7 +8001,7 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 	case MHI_CB_FATAL_ERROR:
 		cnss_ignore_qmi_failure(true);
 		set_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
-		del_timer(&plat_priv->fw_boot_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
 		cnss_reason = CNSS_REASON_FATAL_ERROR;
 		break;
@@ -7872,7 +8011,7 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 	case MHI_CB_EE_RDDM:
 		cnss_ignore_qmi_failure(true);
 		set_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
-		del_timer(&plat_priv->fw_boot_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		cnss_del_rddm_timer(pci_priv);
 		cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
 		cnss_reason = CNSS_REASON_RDDM;
@@ -7984,95 +8123,47 @@ static void cnss_mhi_write_reg(struct mhi_controller *mhi_ctrl,
 	writel_relaxed(val, addr);
 }
 
-#if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 /**
- * __cnss_get_mhi_soc_info - Get SoC info before registering mhi controller
- * @mhi_ctrl: MHI controller
+ * cnss_get_soc_info_pre_mhi - Get SoC info before registering mhi controller
+ * @pci_priv: driver PCI bus context pointer
  *
  * Return: 0 for success, error code on failure
  */
-static inline int __cnss_get_mhi_soc_info(struct mhi_controller *mhi_ctrl)
-{
-	return mhi_get_soc_info(mhi_ctrl);
-}
-#else
-#define SOC_HW_VERSION_OFFS (0x224)
-#define SOC_HW_VERSION_FAM_NUM_BMSK (0xF0000000)
-#define SOC_HW_VERSION_FAM_NUM_SHFT (28)
-#define SOC_HW_VERSION_DEV_NUM_BMSK (0x0FFF0000)
-#define SOC_HW_VERSION_DEV_NUM_SHFT (16)
-#define SOC_HW_VERSION_MAJOR_VER_BMSK (0x0000FF00)
-#define SOC_HW_VERSION_MAJOR_VER_SHFT (8)
-#define SOC_HW_VERSION_MINOR_VER_BMSK (0x000000FF)
-#define SOC_HW_VERSION_MINOR_VER_SHFT (0)
-
-static int __cnss_get_mhi_soc_info(struct mhi_controller *mhi_ctrl)
+static int cnss_get_soc_info_pre_mhi(struct cnss_pci_data *pci_priv)
 {
 	u32 soc_info;
-	int ret;
+	struct cnss_device_version *device_version =
+		&pci_priv->plat_priv->device_version;
 
-	ret = mhi_ctrl->read_reg(mhi_ctrl,
-				 mhi_ctrl->regs + SOC_HW_VERSION_OFFS,
-				 &soc_info);
-	if (ret)
-		return ret;
+	soc_info = readl_relaxed(pci_priv->bar + SOC_HW_VERSION_OFFS);
 
-	mhi_ctrl->family_number = (soc_info & SOC_HW_VERSION_FAM_NUM_BMSK) >>
+	/* Unexpected value, query the link status */
+	if (PCI_INVALID_READ(soc_info) &&
+	    cnss_pci_check_link_status(pci_priv))
+		return -EIO;
+
+	device_version->family_number =
+		(soc_info & SOC_HW_VERSION_FAM_NUM_BMSK) >>
 		SOC_HW_VERSION_FAM_NUM_SHFT;
-	mhi_ctrl->device_number = (soc_info & SOC_HW_VERSION_DEV_NUM_BMSK) >>
+	device_version->device_number =
+		(soc_info & SOC_HW_VERSION_DEV_NUM_BMSK) >>
 		SOC_HW_VERSION_DEV_NUM_SHFT;
-	mhi_ctrl->major_version = (soc_info & SOC_HW_VERSION_MAJOR_VER_BMSK) >>
+	device_version->major_version =
+		(soc_info & SOC_HW_VERSION_MAJOR_VER_BMSK) >>
 		SOC_HW_VERSION_MAJOR_VER_SHFT;
-	mhi_ctrl->minor_version = (soc_info & SOC_HW_VERSION_MINOR_VER_BMSK) >>
+	device_version->minor_version =
+		(soc_info & SOC_HW_VERSION_MINOR_VER_BMSK) >>
 		SOC_HW_VERSION_MINOR_VER_SHFT;
-	return 0;
-}
-#endif
-
-static int cnss_get_mhi_soc_info(struct cnss_plat_data *plat_priv,
-				 struct mhi_controller *mhi_ctrl)
-{
-	int ret = 0;
-
-	ret = __cnss_get_mhi_soc_info(mhi_ctrl);
-	if (ret) {
-		cnss_pr_err("failed to get mhi soc info, ret %d\n", ret);
-		goto exit;
-	}
-
-	plat_priv->device_version.family_number = mhi_ctrl->family_number;
-	plat_priv->device_version.device_number = mhi_ctrl->device_number;
-	plat_priv->device_version.major_version = mhi_ctrl->major_version;
-	plat_priv->device_version.minor_version = mhi_ctrl->minor_version;
 
 	cnss_pr_dbg("Get device version info, family number: 0x%x, device number: 0x%x, major version: 0x%x, minor version: 0x%x\n",
-		    plat_priv->device_version.family_number,
-		    plat_priv->device_version.device_number,
-		    plat_priv->device_version.major_version,
-		    plat_priv->device_version.minor_version);
+		    device_version->family_number,
+		    device_version->device_number,
+		    device_version->major_version,
+		    device_version->minor_version);
 
 	/* Only keep lower 4 bits as real device major version */
-	plat_priv->device_version.major_version &= DEVICE_MAJOR_VERSION_MASK;
-
-exit:
-	return ret;
-}
-
-static bool cnss_is_tme_supported(struct cnss_pci_data *pci_priv)
-{
-	if (!pci_priv) {
-		cnss_pr_dbg("pci_priv is NULL");
-		return false;
-	}
-
-	switch (pci_priv->device_id) {
-	case PEACH_DEVICE_ID:
-	case COLOGNE_DEVICE_ID:
-	case FIG_DEVICE_ID:
-		return true;
-	default:
-		return false;
-	}
+	device_version->major_version &= DEVICE_MAJOR_VERSION_MASK;
+	return 0;
 }
 
 #ifdef CONFIG_ONE_MSI_VECTOR
@@ -8111,6 +8202,63 @@ static void cnss_pci_set_mhi_event_config_for_one_msi(void)
 }
 #endif
 
+#if IS_ENABLED(CONFIG_MHI_BUS_MISC)
+static int cnss_mhi_pm_runtime_get_sync(struct mhi_controller *mhi_ctrl)
+{
+	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
+
+	return cnss_pci_pm_runtime_get_sync(pci_priv, RTPM_ID_MHI);
+}
+
+static int cnss_mhi_pm_runtime_put_autosuspend(struct mhi_controller *mhi_ctrl)
+{
+	struct cnss_pci_data *pci_priv = dev_get_drvdata(mhi_ctrl->cntrl_dev);
+
+	cnss_pci_pm_runtime_mark_last_busy(pci_priv);
+	return cnss_pci_pm_runtime_put_autosuspend(pci_priv, RTPM_ID_MHI);
+}
+
+static bool cnss_is_tme_supported(struct cnss_pci_data *pci_priv)
+{
+	if (!pci_priv) {
+		cnss_pr_dbg("pci_priv is NULL");
+		return false;
+	}
+
+	switch (pci_priv->device_id) {
+	case PEACH_DEVICE_ID:
+	case COLOGNE_DEVICE_ID:
+	case FIG_DEVICE_ID:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/**
+ * cnss_mhi_misc_init() - Initialize MHI controller with misc functionality
+ * @pci_priv: PCI device private data structure
+ * @mhi_ctrl: MHI controller to initialize
+ *
+ * Return: None
+ */
+static void cnss_mhi_misc_init(struct cnss_pci_data *pci_priv,
+			       struct mhi_controller *mhi_ctrl)
+{
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
+	mhi_ctrl->fallback_fw_image = pci_priv->plat_priv->fw_fallback_name;
+#endif
+	mhi_ctrl->runtime_get_sync = cnss_mhi_pm_runtime_get_sync;
+	mhi_ctrl->runtime_put_autosuspend = cnss_mhi_pm_runtime_put_autosuspend;
+	mhi_ctrl->tme_supported_image = cnss_is_tme_supported(pci_priv);
+}
+#else
+static inline void cnss_mhi_misc_init(struct cnss_pci_data *pci_priv,
+				      struct mhi_controller *mhi_ctrl)
+{
+}
+#endif
+
 static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -8136,13 +8284,7 @@ static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 
 	pci_priv->mhi_ctrl = mhi_ctrl;
 	mhi_ctrl->cntrl_dev = &pci_dev->dev;
-
 	mhi_ctrl->fw_image = plat_priv->firmware_name;
-#if IS_ENABLED(CONFIG_MHI_BUS_MISC) && \
-(LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
-	mhi_ctrl->fallback_fw_image = plat_priv->fw_fallback_name;
-#endif
-
 	mhi_ctrl->regs = pci_priv->bar;
 	mhi_ctrl->reg_len = pci_resource_len(pci_priv->pci_dev, PCI_BAR_NUM);
 	bar_start = pci_resource_start(pci_priv->pci_dev, PCI_BAR_NUM);
@@ -8171,8 +8313,6 @@ static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 
 	mhi_ctrl->status_cb = cnss_mhi_notify_status;
 	mhi_ctrl->runtime_get = cnss_mhi_pm_runtime_get;
-	mhi_ctrl->runtime_get_sync = cnss_mhi_pm_runtime_get_sync;
-	mhi_ctrl->runtime_put_autosuspend = cnss_mhi_pm_runtime_put_autosuspend;
 	mhi_ctrl->runtime_put = cnss_mhi_pm_runtime_put_noidle;
 	mhi_ctrl->read_reg = cnss_mhi_read_reg;
 	mhi_ctrl->write_reg = cnss_mhi_write_reg;
@@ -8189,7 +8329,7 @@ static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 	mhi_ctrl->seg_len = SZ_512K;
 	mhi_ctrl->fbc_download = true;
 
-	ret = cnss_get_mhi_soc_info(plat_priv, mhi_ctrl);
+	ret = cnss_get_soc_info_pre_mhi(pci_priv);
 	if (ret)
 		goto free_mhi_irq;
 
@@ -8208,7 +8348,7 @@ static int cnss_pci_register_mhi(struct cnss_pci_data *pci_priv)
 		cnss_mhi_config = &cnss_mhi_config_no_diag;
 	}
 
-	mhi_ctrl->tme_supported_image = cnss_is_tme_supported(pci_priv);
+	cnss_mhi_misc_init(pci_priv, mhi_ctrl);
 
 	ret = mhi_register_controller(mhi_ctrl, cnss_mhi_config);
 	if (ret) {
@@ -8855,7 +8995,7 @@ static void cnss_pci_remove(struct pci_dev *pci_dev)
 	case COLOGNE_DEVICE_ID:
 	case FIG_DEVICE_ID:
 		cnss_pci_wake_gpio_deinit(pci_priv);
-		del_timer(&pci_priv->boot_debug_timer);
+		cnss_timer_delete(&pci_priv->boot_debug_timer);
 		cnss_del_rddm_timer(pci_priv);
 		break;
 	default:
