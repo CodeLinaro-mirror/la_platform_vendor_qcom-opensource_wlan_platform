@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/delay.h>
@@ -99,6 +99,11 @@ enum cnss_recovery_type {
 	CNSS_PCSS_RECOVERY = 0x2,
 };
 
+#ifdef CONFIG_CNSS2_SDIO
+/* variable to hold the insmod parameters */
+int g_sdio_mode;
+#endif
+
 #ifdef CONFIG_CNSS_SUPPORT_DUAL_DEV
 #define CNSS_MAX_DEV_NUM		2
 static struct cnss_plat_data *plat_env[CNSS_MAX_DEV_NUM];
@@ -109,12 +114,12 @@ static struct cnss_plat_data *plat_env;
 
 static bool cnss_allow_driver_loading;
 
-static struct cnss_fw_files FW_FILES_QCA6174_FW_3_0 = {
+struct cnss_fw_files FW_FILES_QCA6174_FW_3_0 = {
 	"qwlan30.bin", "bdwlan30.bin", "otp30.bin", "utf30.bin",
 	"utfbd30.bin", "epping30.bin", "evicted30.bin"
 };
 
-static struct cnss_fw_files FW_FILES_DEFAULT = {
+struct cnss_fw_files FW_FILES_DEFAULT = {
 	"qwlan.bin", "bdwlan.bin", "otp.bin", "utf.bin",
 	"utfbd.bin", "epping.bin", "evicted.bin"
 };
@@ -6077,6 +6082,39 @@ static bool cnss_is_valid_dt_node_found(void)
 	return false;
 }
 
+#ifdef CONFIG_CNSS2_SDIO
+extern struct platform_driver cnss_sdio_driver;
+static int cnss_register_platform_driver(void)
+{
+	int ret = 0;
+
+	if (g_sdio_mode)
+		ret = platform_driver_register(&cnss_sdio_driver);
+	else
+		ret = platform_driver_register(&cnss_platform_driver);
+
+	return ret;
+}
+
+static void cnss_unregister_platform_driver(void)
+{
+	if (g_sdio_mode)
+		platform_driver_unregister(&cnss_sdio_driver);
+	else
+		platform_driver_unregister(&cnss_platform_driver);
+}
+#else
+static int cnss_register_platform_driver(void)
+{
+	return platform_driver_register(&cnss_platform_driver);
+}
+
+static void cnss_unregister_platform_driver(void)
+{
+	platform_driver_unregister(&cnss_platform_driver);
+}
+#endif
+
 static int __init cnss_initialize(void)
 {
 	int ret = 0;
@@ -6088,7 +6126,8 @@ static int __init cnss_initialize(void)
 		return ret;
 
 	cnss_debug_init();
-	ret = platform_driver_register(&cnss_platform_driver);
+
+	ret = cnss_register_platform_driver();
 	if (ret)
 		cnss_debug_deinit();
 
@@ -6103,9 +6142,32 @@ static int __init cnss_initialize(void)
 static void __exit cnss_exit(void)
 {
 	cnss_genl_exit();
-	platform_driver_unregister(&cnss_platform_driver);
+	cnss_unregister_platform_driver();
 	cnss_debug_deinit();
 }
+
+#ifdef CONFIG_CNSS2_SDIO
+static int sdio_mode_handler(const char *kmessage, const struct kernel_param *kp)
+{
+	uint32_t sdio_mode = 0;
+
+	int ret = kstrtoint(kmessage, 10, &sdio_mode);
+	if (ret == 0) {
+		*(int *)kp->arg = sdio_mode;
+		g_sdio_mode = sdio_mode;
+		printk("%s:ygs:sdio mode is %d\n", __func__, g_sdio_mode);
+	}
+	return ret;
+}
+
+const struct kernel_param_ops sdio_mode_ops = {
+	.set = sdio_mode_handler,
+	.get = param_get_int,
+};
+
+module_param_cb(sdio_mode, &sdio_mode_ops, &g_sdio_mode,
+		S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+#endif
 
 module_init(cnss_initialize);
 module_exit(cnss_exit);

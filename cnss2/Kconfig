@@ -192,6 +192,12 @@ config CNSS2_FMD_FEATURE_ENABLE
 	help
 	  This enables the fmd functionality on cnss2 driver
 
+config CNSS2_SDIO
+	bool "Enable SDIO support"
+	depends on CNSS2
+	help
+	  This enables SDIO support in CNSS2 driver
+
 config MHI_BUF_LEN
 	int "Mhi buffer size"
 	default "32768"
