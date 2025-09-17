@@ -577,9 +577,7 @@ static const struct mhi_controller_config cnss_mhi_config_genoa = {
 		CNSS_MHI_SATELLITE_EVT_COUNT,
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 	.bhie_offset = 0x0324,
-#endif
 };
 
 static const struct mhi_controller_config cnss_mhi_config_no_satellite = {
@@ -5840,7 +5838,7 @@ void cnss_pci_free_qdss_mem(struct cnss_pci_data *pci_priv)
 	plat_priv->qdss_mem_seg_len = 0;
 }
 
-void __cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
+static void __cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
 				   char *prefix_name, char *name)
 {
 	switch (pci_priv->device_id) {
@@ -8455,9 +8453,9 @@ static int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv)
 			cnss_pr_err("Failed to init reserved mem device, err = %d\n",
 				    ret);
 	}
-	if (dev_pci->cma_area)
-		cnss_pr_dbg("CMA area is %s\n",
-			    cma_get_name(dev_pci->cma_area));
+
+	if (!dev_pci->cma_area)
+		cnss_pr_info("Invalid CMA area\n");
 
 	return ret;
 }
