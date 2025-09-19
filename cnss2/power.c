@@ -1208,10 +1208,13 @@ cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
 	struct device *dev = plat_priv->pd_devs[POWER_REGULATOR];
 	int ret;
 
-	if (enabled)
+	if (enabled) {
 		ret = pm_runtime_resume_and_get(dev);
-	else
+	} else {
+		if (!plat_priv->pm_suspend_in_progress)
+			atomic_set(&dev->power.usage_count, 1);
 		ret = pm_runtime_put_sync(dev);
+	}
 
 	if (ret < 0)
 		cnss_pr_err("regulator operation failed with err=%d\n", ret);
@@ -1225,10 +1228,13 @@ cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
 	struct device *dev = plat_priv->pd_devs[POWER_GPIO];
 	int ret;
 
-	if (enabled)
+	if (enabled) {
 		ret = pm_runtime_resume_and_get(dev);
-	else
+	} else {
+		if (!plat_priv->pm_suspend_in_progress)
+			atomic_set(&dev->power.usage_count, 1);
 		ret = pm_runtime_put_sync(dev);
+	}
 
 	if (ret < 0)
 		cnss_pr_err("gpio operation failed with err=%d\n", ret);
