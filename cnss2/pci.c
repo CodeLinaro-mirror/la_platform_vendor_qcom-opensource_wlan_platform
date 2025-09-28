@@ -577,7 +577,7 @@ static const struct mhi_controller_config cnss_mhi_config_genoa = {
 		CNSS_MHI_SATELLITE_EVT_COUNT,
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
+#if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 	.bhie_offset = 0x0324,
 #endif
 };
@@ -4414,6 +4414,11 @@ static void cnss_wlan_reg_driver_work(struct work_struct *work)
 	if (test_bit(CNSS_WLAN_HW_DISABLED, &plat_priv->driver_state))
 		return;
 
+	if (test_bit(CNSS_RADIO_OFF, &plat_priv->driver_state)) {
+		cnss_pr_dbg("RADIO OFF received from FW, avoid register driver\n");
+		return;
+	}
+
 	if (test_bit(CNSS_COLD_BOOT_CAL_DONE, &plat_priv->driver_state)) {
 		goto reg_driver;
 	} else {
@@ -4521,6 +4526,10 @@ int cnss_wlan_register_driver(struct cnss_wlan_driver *driver_ops)
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot/Shutdown is in progress, ignore register driver\n");
 		return -EINVAL;
+	}
+	if (test_bit(CNSS_RADIO_OFF, &plat_priv->driver_state)) {
+		cnss_pr_info("WLAN register driver rejected for RADIO OFF\n");
+		return 0;
 	}
 
 	if (!id_table || !pci_dev_present(id_table)) {
@@ -5840,7 +5849,7 @@ void cnss_pci_free_qdss_mem(struct cnss_pci_data *pci_priv)
 	plat_priv->qdss_mem_seg_len = 0;
 }
 
-void __cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
+static void __cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
 				   char *prefix_name, char *name)
 {
 	switch (pci_priv->device_id) {
@@ -5935,22 +5944,13 @@ int cnss_pci_load_sku_license(struct cnss_pci_data *pci_priv)
 	const struct firmware *fw_entry;
 	int ret = 0;
 
-	switch (pci_priv->device_id) {
-	case FIG_DEVICE_ID:
-		soft_sku_filename = SOFT_SKU_LICENSE_FILENAME;
-		break;
-	case QCA6174_DEVICE_ID:
-	case QCA6290_DEVICE_ID:
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-	case KIWI_DEVICE_ID:
-	case MANGO_DEVICE_ID:
-	case PEACH_DEVICE_ID:
-	default:
+	if (pci_priv->device_id != FIG_DEVICE_ID) {
 		cnss_pr_dbg("Soft SKU not supported for device ID: (0x%x)\n",
 			    pci_priv->device_id);
 		return 0;
 	}
+
+	soft_sku_filename = SOFT_SKU_LICENSE_FILENAME;
 
 	if (!sku_license_mem->va && !sku_license_mem->size) {
 		cnss_pci_add_fw_infix_name(pci_priv, soft_sku_filename,
@@ -5992,24 +5992,23 @@ int cnss_pci_load_tme_patch(struct cnss_pci_data *pci_priv)
 	const struct firmware *fw_entry;
 	int ret = 0;
 
-	switch (pci_priv->device_id) {
-	case FIG_DEVICE_ID:
-		if (plat_priv->device_version.major_version == FW_V1_NUMBER)
-			tme_patch_filename = TME_PATCH_FILE_NAME_1_0;
-		else if (plat_priv->device_version.major_version == FW_V2_NUMBER)
-			tme_patch_filename = TME_PATCH_FILE_NAME_2_0;
-		break;
-	case QCA6174_DEVICE_ID:
-	case QCA6290_DEVICE_ID:
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-	case KIWI_DEVICE_ID:
-	case MANGO_DEVICE_ID:
-	case PEACH_DEVICE_ID:
-	default:
+	if (pci_priv->device_id != FIG_DEVICE_ID) {
 		cnss_pr_dbg("TME-L not supported for device ID: (0x%x)\n",
 			    pci_priv->device_id);
 		return 0;
+	}
+
+	switch (plat_priv->device_version.major_version) {
+	case FW_V1_NUMBER:
+		tme_patch_filename = TME_PATCH_FILE_NAME_1_0;
+		break;
+	case FW_V2_NUMBER:
+		tme_patch_filename = TME_PATCH_FILE_NAME_2_0;
+		break;
+	default:
+		cnss_pr_dbg("Invalid device major version(0x%x)\n",
+			    plat_priv->device_version.major_version);
+		return -EINVAL;
 	}
 
 	if (!tme_lite_mem->va && !tme_lite_mem->size) {
@@ -7595,6 +7594,7 @@ int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 		cnss_fatal_err("Failed to download RDDM image, err = %d\n",
 			       ret);
 		cnss_mhi_debug_reg_dump(pci_priv);
+		cnss_pci_bhi_debug_reg_dump(pci_priv);
 		cnss_pr_dbg("Sending Host Reset Req\n");
 		ret = cnss_mhi_force_reset(pci_priv);
 		cnss_pr_dbg("Host Reset Req ret %d\n", ret);
@@ -7605,8 +7605,10 @@ int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 			cnss_rddm_trigger_check(pci_priv);
 			cnss_pci_dump_debug_reg(pci_priv);
 			ret =  -EAGAIN;
+		} else {
+			cnss_mhi_debug_reg_dump(pci_priv);
+			cnss_pci_bhi_debug_reg_dump(pci_priv);
 		}
-
 		goto out;
 	}
 	cnss_rddm_trigger_check(pci_priv);
@@ -8452,9 +8454,9 @@ static int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv)
 			cnss_pr_err("Failed to init reserved mem device, err = %d\n",
 				    ret);
 	}
-	if (dev_pci->cma_area)
-		cnss_pr_dbg("CMA area is %s\n",
-			    cma_get_name(dev_pci->cma_area));
+
+	if (!dev_pci->cma_area)
+		cnss_pr_info("Invalid CMA area\n");
 
 	return ret;
 }

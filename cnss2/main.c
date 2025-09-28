@@ -1627,7 +1627,12 @@ unsigned int cnss_get_timeout(struct cnss_plat_data *plat_priv,
 		 * account for FW dump collection and FW re-initialization on
 		 * retry.
 		 */
-		return (qmi_timeout + WLAN_MISSION_MODE_TIMEOUT * 3);
+		/* Since there are 7 FW files to download during restart, and
+		 * each file can take upto 60 seconds to download and request_fw_api
+		 * increasing the idle restart timer to 500 seconds to avoid
+		 * timeout issues.
+		 */
+		return (qmi_timeout + WLAN_MISSION_MODE_TIMEOUT * 3) * 5;
 	case CNSS_TIMEOUT_CALIBRATION:
 		/* Similar to mission mode, in CBC if FW init fails
 		 * fw recovery is tried. Thus return 2x the CBC timeout.
