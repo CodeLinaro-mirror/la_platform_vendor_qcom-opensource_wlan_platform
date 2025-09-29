@@ -374,8 +374,6 @@ enum cnss_driver_state {
 	CNSS_SHUTDOWN_DEVICE,
 	CNSS_POWERING_ON,
 	CNSS_SEC_DOWNLOAD,
-	CNSS_SOL_REGISTERED,
-
 };
 
 struct cnss_recovery_data {
@@ -793,7 +791,6 @@ size_t cnss_get_platform_name(struct cnss_plat_data *plat_priv,
 			      char *buf, const size_t buf_len);
 int cnss_iommu_map(struct iommu_domain *domain, unsigned long iova,
 		   phys_addr_t paddr, size_t size, int prot);
-int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv);
 int cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
 				    bool enabled);
 int cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv,
