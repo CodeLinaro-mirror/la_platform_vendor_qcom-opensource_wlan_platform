@@ -3786,7 +3786,6 @@ static int cnss_qca6174_ramdump(struct cnss_pci_data *pci_priv)
 	return cnss_do_ramdump(plat_priv);
 }
 
-#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
 static int cnss_enable_pcie_device(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -3842,17 +3841,6 @@ static int cnss_disable_pcie_device(struct cnss_pci_data *pci_priv)
 
 	return 0;
 }
-#else
-static int cnss_enable_pcie_device(struct cnss_pci_data *pci_priv)
-{
-	return 0;
-}
-
-static int cnss_disable_pcie_device(struct cnss_pci_data *pci_priv)
-{
-	return 0;
-}
-#endif
 
 static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 {
@@ -4037,7 +4025,8 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 		goto skip_power_off;
 
 	set_bit(CNSS_SHUTDOWN_DEVICE, &plat_priv->driver_state);
-	if (plat_priv->pm_suspend_in_progress) {
+	if (plat_priv->is_fw_managed_pwr &&
+	    plat_priv->pm_suspend_in_progress) {
 		/* shutdown suspend, suspend pcie link
 		 * and wlan power off will be handled
 		 * by pcie/cnss pm
@@ -8882,7 +8871,7 @@ int cnss_pci_init(struct cnss_plat_data *plat_priv)
 				    ret);
 			goto out;
 		}
-		if (cnss_pci_is_sync_probe() && !plat_priv->bus_priv) {
+		if (cnss_pci_is_sync_probe(plat_priv) && !plat_priv->bus_priv) {
 			cnss_pr_err("Failed to probe PCI driver\n");
 			ret = -ENODEV;
 			goto unreg_pci;

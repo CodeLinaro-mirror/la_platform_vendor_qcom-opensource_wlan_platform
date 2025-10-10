@@ -1771,6 +1771,8 @@ static int cnss_get_resources(struct cnss_plat_data *plat_priv)
 
 	if (plat_priv->is_fw_managed_pwr) {
 		ret = cnss_fw_managed_domain_attach(plat_priv);
+		if (ret)
+			cnss_pr_err("Failed to attach pd, err = %d\n", ret);
 		goto out;
 	}
 

@@ -16,24 +16,62 @@ static struct cnss_msi_config msi_config = {
 	},
 };
 
+/**
+ * cnss_pci_is_sync_probe(): check whether wlan device
+ * is powered with scmi way.
+ *
+ * For upstream PCIe ECAM driver, wlan powerup/PCIe enumeration
+ * is controlled by low level GearVM system with scmi way.
+ * This API is used to distinguish downstream/upstream PCIe
+ * driver case.
+ *
+ * Return: true for scmi way, false for non-scmi way
+ */
+static bool cnss_is_fw_managed_pwr(struct cnss_pci_data *pci_priv)
+{
+	struct cnss_plat_data *plat_priv;
+
+	if (!pci_priv) {
+		cnss_pr_err("pci_priv is NULL\n");
+		return false;
+	}
+
+	plat_priv = pci_priv->plat_priv;
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return false;
+	}
+
+	return plat_priv->is_fw_managed_pwr;
+}
+
 int _cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
 {
-	return msm_pcie_enumerate(rc_num);
+	if (plat_priv->is_fw_managed_pwr)
+		return 0;
+	else
+		return msm_pcie_enumerate(rc_num);
 }
 
 int cnss_pci_assert_perst(struct cnss_pci_data *pci_priv)
 {
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
 
-	return msm_pcie_pm_control(MSM_PCIE_HANDLE_LINKDOWN,
-				   pci_dev->bus->number, pci_dev, NULL,
-				   PM_OPTIONS_DEFAULT);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return -EOPNOTSUPP;
+	else
+		return msm_pcie_pm_control(MSM_PCIE_HANDLE_LINKDOWN,
+				pci_dev->bus->number, pci_dev, NULL,
+				PM_OPTIONS_DEFAULT);
 }
 
 #if IS_ENABLED(CONFIG_CNSS2_FMD_FEATURE_ENABLE)
 int cnss_pci_fmd_enable(struct cnss_pci_data *pci_priv)
 {
-	return msm_pcie_fmd_enable(pci_priv->pci_dev);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return -EOPNOTSUPP;
+	else
+		return msm_pcie_fmd_enable(pci_priv->pci_dev);
 }
 #else
 int cnss_pci_fmd_enable(struct cnss_pci_data *pci_priv)
@@ -46,23 +84,33 @@ int cnss_pci_disable_pc(struct cnss_pci_data *pci_priv, bool vote)
 {
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
 
-	return msm_pcie_pm_control(vote ? MSM_PCIE_DISABLE_PC :
-				   MSM_PCIE_ENABLE_PC,
-				   pci_dev->bus->number, pci_dev, NULL,
-				   PM_OPTIONS_DEFAULT);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_pm_control(vote ? MSM_PCIE_DISABLE_PC :
+					MSM_PCIE_ENABLE_PC,
+					pci_dev->bus->number, pci_dev, NULL,
+					PM_OPTIONS_DEFAULT);
 }
 
 int cnss_pci_set_link_bandwidth(struct cnss_pci_data *pci_priv,
 				u16 link_speed, u16 link_width)
 {
-	return msm_pcie_set_link_bandwidth(pci_priv->pci_dev,
-					   link_speed, link_width);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_set_link_bandwidth(pci_priv->pci_dev,
+						link_speed, link_width);
 }
 
 int cnss_pci_set_max_link_speed(struct cnss_pci_data *pci_priv,
 				u32 rc_num, u16 link_speed)
 {
-	return msm_pcie_set_target_link_speed(rc_num, link_speed, false);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_set_target_link_speed(rc_num,
+						link_speed, false);
 }
 
 /**
@@ -159,6 +207,11 @@ void cnss_pci_update_drv_supported(struct cnss_pci_data *pci_priv)
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	struct device_node *root_of_node;
 	bool drv_supported = false;
+
+	if (plat_priv && plat_priv->is_fw_managed_pwr) {
+		pci_priv->drv_supported = false;
+		return;
+	}
 
 	if (!root_port) {
 		cnss_pr_err("PCIe DRV is not supported as root port is null\n");
@@ -257,6 +310,9 @@ int cnss_reg_pci_event(struct cnss_pci_data *pci_priv)
 	int ret = 0;
 	struct msm_pcie_register_event *pci_event;
 
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return ret;
+
 	pci_event = &pci_priv->msm_pci_event;
 	pci_event->events = MSM_PCIE_EVENT_LINK_RECOVER |
 			    MSM_PCIE_EVENT_LINKDOWN |
@@ -282,7 +338,8 @@ int cnss_reg_pci_event(struct cnss_pci_data *pci_priv)
 
 void cnss_dereg_pci_event(struct cnss_pci_data *pci_priv)
 {
-	msm_pcie_deregister_event(&pci_priv->msm_pci_event);
+	if (!cnss_is_fw_managed_pwr(pci_priv))
+		msm_pcie_deregister_event(&pci_priv->msm_pci_event);
 }
 
 int cnss_wlan_adsp_pc_enable(struct cnss_pci_data *pci_priv,
@@ -292,6 +349,9 @@ int cnss_wlan_adsp_pc_enable(struct cnss_pci_data *pci_priv,
 	int ret = 0;
 	u32 pm_options = PM_OPTIONS_DEFAULT;
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+
+	if (plat_priv && plat_priv->is_fw_managed_pwr)
+		return ret;
 
 	if (!cnss_pci_get_drv_supported(pci_priv))
 		return 0;
@@ -367,6 +427,9 @@ int cnss_set_pci_link(struct cnss_pci_data *pci_priv, bool link_up)
 
 	cnss_pr_vdbg("%s PCI link\n", link_up ? "Resuming" : "Suspending");
 
+	if (plat_priv && plat_priv->is_fw_managed_pwr)
+		return ret;
+
 	if (link_up) {
 retry:
 		ret = cnss_pci_set_link_up(pci_priv);
@@ -403,12 +466,15 @@ int cnss_pci_prevent_l1(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int ret;
+	int ret = 0;
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
 	}
+
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return ret;
 
 	mutex_lock(&pci_priv->bus_lock);
 	ret = __cnss_pci_prevent_l1(dev);
@@ -422,12 +488,15 @@ int __cnss_pci_prevent_l1(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int ret;
+	int ret = 0;
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
 	}
+
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return ret;
 
 	if (pci_priv->pci_link_state == PCI_LINK_DOWN) {
 		cnss_pr_err("PCIe link is in suspend state\n");
@@ -458,6 +527,9 @@ void cnss_pci_allow_l1(struct device *dev)
 		return;
 	}
 
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return;
+
 	mutex_lock(&pci_priv->bus_lock);
 	__cnss_pci_allow_l1(dev);
 	mutex_unlock(&pci_priv->bus_lock);
@@ -474,6 +546,9 @@ void __cnss_pci_allow_l1(struct device *dev)
 		return;
 	}
 
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return;
+
 	if (pci_priv->pci_link_state == PCI_LINK_DOWN) {
 		cnss_pr_err("PCIe link is in suspend state\n");
 		return;
@@ -487,9 +562,12 @@ void __cnss_pci_allow_l1(struct device *dev)
 	_cnss_pci_allow_l1(pci_priv);
 }
 
-bool cnss_pci_is_sync_probe(void)
+bool cnss_pci_is_sync_probe(struct cnss_plat_data *plat_priv)
 {
-	return true;
+	if (plat_priv->is_fw_managed_pwr)
+		return false;
+	else
+		return true;
 }
 
 int cnss_pci_get_msi_assignment(struct cnss_pci_data *pci_priv)
@@ -691,5 +769,8 @@ int cnss_pci_init_smmu(struct cnss_pci_data *pci_priv)
 int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 			   u8 *buf, u32 len)
 {
-	return msm_pcie_reg_dump(pci_priv->pci_dev, buf, len);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_reg_dump(pci_priv->pci_dev, buf, len);
 }
