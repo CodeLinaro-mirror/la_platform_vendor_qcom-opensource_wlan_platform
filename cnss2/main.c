@@ -95,6 +95,16 @@
 #define SVS_L1_VOLTAGE			0x28A /* 650mV */
 #define RET_VOLTAGE			0x15E /* 350mV */
 
+#define TSF_SYNC_GPIO		"qcom,wlan-tsf-gpio"
+#define TSF_IRQ_TS		"tsf_irq_ts"
+
+#define TSF_IRQ_TS_OP_VALID	BIT(0)
+#define TSF_IRQ_TS_OP_OVERFLOW	BIT(8)
+
+#define TSF_IRQ_TS_OP_OFFSET	0x0
+#define TSF_IRQ_TS_LO_OFFSET	0x4
+#define TSF_IRQ_TS_HI_OFFSET	0x8
+
 enum cnss_cal_db_op {
 	CNSS_CAL_DB_UPLOAD,
 	CNSS_CAL_DB_DOWNLOAD,
@@ -6544,6 +6554,206 @@ static void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
 	}
 }
 
+static int cnss_get_wlan_tsf_gpio_info(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+	struct cnss_wlan_tsf_info *tsf_info = &plat_priv->tsf_info;
+
+	tsf_info->wlan_tsf_gpio = -EINVAL;
+	tsf_info->irq_num = -EINVAL;
+
+	if (!of_find_property(dev->of_node, TSF_SYNC_GPIO, NULL))
+		return -EINVAL;
+
+	tsf_info->wlan_tsf_gpio = of_get_named_gpio(dev->of_node,
+						    TSF_SYNC_GPIO, 0);
+	cnss_pr_dbg("WLAN TSF GPIO: %d\n", tsf_info->wlan_tsf_gpio);
+	if (tsf_info->wlan_tsf_gpio < 0)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int cnss_get_tsf_ts_info(struct cnss_plat_data *plat_priv)
+{
+	struct platform_device *plat_dev = plat_priv->plat_dev;
+	struct device *dev = &plat_dev->dev;
+	struct resource *res;
+	resource_size_t addr_len;
+	void __iomem *base_addr;
+
+	res = platform_get_resource_byname(plat_dev, IORESOURCE_MEM,
+					   TSF_IRQ_TS);
+	if (!res) {
+		cnss_pr_dbg("TSF_IRQ_TS address is not present\n");
+		return -ENOMEM;
+	}
+
+	addr_len = resource_size(res);
+	base_addr = devm_ioremap(dev, res->start, addr_len);
+	if (!base_addr) {
+		cnss_pr_dbg("Failed to get ts base address\n");
+		return -ENOMEM;
+	}
+	plat_priv->tsf_info.irq_ts_info.cmd_ts_addr = res->start;
+	plat_priv->tsf_info.irq_ts_info.cmd_ts_addr_io = base_addr;
+	plat_priv->tsf_info.irq_ts_info.is_valid_addr = true;
+
+	cnss_pr_dbg("TSF_IRQ_TS base address is %pa with length %pa base_addr %pa\n",
+		    &plat_priv->tsf_info.irq_ts_info.cmd_ts_addr, &addr_len,
+		    &plat_priv->tsf_info.irq_ts_info.cmd_ts_addr_io);
+
+	return 0;
+}
+
+static void cnss_read_tsf_irq_ts(struct cnss_wlan_tsf_info *tsf_info)
+{
+	uint64_t data_val;
+	void __iomem *tsf_cmd;
+
+	if (!tsf_info->irq_ts_info.is_valid_addr)
+		return;
+
+	tsf_cmd = tsf_info->irq_ts_info.cmd_ts_addr_io;
+	data_val = readl_relaxed(tsf_cmd + TSF_IRQ_TS_OP_OFFSET);
+	if (!(data_val & TSF_IRQ_TS_OP_VALID))
+		return;
+
+	if (data_val & TSF_IRQ_TS_OP_OVERFLOW)
+		cnss_pr_dbg("tsf irq timestamp overflow detected\n");
+	data_val = readl_relaxed(tsf_cmd + TSF_IRQ_TS_LO_OFFSET);
+	data_val |= ((uint64_t)readl_relaxed(tsf_cmd + TSF_IRQ_TS_HI_OFFSET)) << 32;
+	if (!data_val)
+		return;
+
+	do_div(data_val, TIME_CLOCK_FREQ_HZ / 100000);
+	tsf_info->host_time_us = data_val * 10;
+}
+
+static irqreturn_t cnss_wlan_tsf_capture_threaded_handler(int irq, void *ctx)
+{
+	struct cnss_wlan_tsf_info *tsf_info = ctx;
+
+	if (!tsf_info)
+		return IRQ_HANDLED;
+
+	if (tsf_info->irq_num < 0 || tsf_info->irq_num != irq ||
+	    !tsf_info->wlan_tsf_handler || !tsf_info->context)
+		return IRQ_HANDLED;
+
+	cnss_read_tsf_irq_ts(tsf_info);
+	tsf_info->wlan_tsf_handler(tsf_info->context, tsf_info->host_time_us);
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t cnss_wlan_tsf_capture_irq_handler(int irq, void *ctx)
+{
+	struct cnss_wlan_tsf_info *tsf_info = ctx;
+	struct cnss_plat_data *plat_priv;
+
+	if (!tsf_info)
+		return IRQ_HANDLED;
+
+	plat_priv = container_of(tsf_info, struct cnss_plat_data, tsf_info);
+	tsf_info->host_time_us = cnss_get_host_timestamp(plat_priv);
+
+	return IRQ_WAKE_THREAD;
+}
+
+static int cnss_wlan_tsf_init(struct cnss_wlan_tsf_info *tsf_info)
+{
+	int ret;
+
+	if (tsf_info->wlan_tsf_gpio < 0)
+		return -EINVAL;
+
+	ret = gpio_request(tsf_info->wlan_tsf_gpio, "wlan_tsf_gpio");
+	if (ret) {
+		cnss_pr_err("Failed to request TSF GPIO %d, err = %d\n",
+				tsf_info->wlan_tsf_gpio, ret);
+		return ret;
+	}
+
+	gpio_direction_input(tsf_info->wlan_tsf_gpio);
+	tsf_info->irq_num = gpio_to_irq(tsf_info->wlan_tsf_gpio);
+	cnss_pr_dbg("WLAN TSF IRQ: %d\n", tsf_info->irq_num);
+	if (tsf_info->irq_num < 0) {
+		gpio_free(tsf_info->wlan_tsf_gpio);
+		return -EINVAL;
+	}
+
+	ret = request_threaded_irq(tsf_info->irq_num,
+				   cnss_wlan_tsf_capture_irq_handler,
+				   cnss_wlan_tsf_capture_threaded_handler,
+				   IRQF_SHARED | IRQF_TRIGGER_RISING,
+				   "wlan_tsf", (void *)tsf_info);
+	if (ret) {
+		gpio_free(tsf_info->wlan_tsf_gpio);
+		cnss_pr_err("Failed to request TSF IRQ, err = %d\n", ret);
+	}
+
+	cnss_pr_dbg("request irq[%d], result: %d\n", tsf_info->irq_num, ret);
+	return ret;
+}
+
+static void cnss_wlan_tsf_deinit(struct cnss_wlan_tsf_info *tsf_info)
+{
+	if (tsf_info->irq_num >= 0)
+		free_irq(tsf_info->irq_num, (void *)tsf_info);
+
+	if (tsf_info->wlan_tsf_gpio >= 0)
+		gpio_free(tsf_info->wlan_tsf_gpio);
+
+	tsf_info->irq_num = -EINVAL;
+	tsf_info->wlan_tsf_handler = NULL;
+	tsf_info->context = NULL;
+}
+
+int cnss_register_tsf_captured_handler(struct device *dev,
+				       wlan_tsf_handler_t handler,
+				       void *ctx)
+{
+	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
+	struct cnss_wlan_tsf_info *tsf_info;
+	int ret;
+
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is NULL!\n");
+		return -EINVAL;
+	}
+
+	tsf_info = &plat_priv->tsf_info;
+	ret = cnss_wlan_tsf_init(tsf_info);
+	if (ret) {
+		cnss_pr_err("wlan tsf irq is not initialized\n");
+		return -EINVAL;
+	}
+
+	tsf_info->wlan_tsf_handler = handler;
+	tsf_info->context = ctx;
+	return 0;
+}
+EXPORT_SYMBOL(cnss_register_tsf_captured_handler);
+
+int cnss_unregister_tsf_captured_handler(struct device *dev, void *ctx)
+{
+	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
+	struct cnss_wlan_tsf_info *tsf_info;
+
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is NULL!\n");
+		return -EINVAL;
+	}
+
+	tsf_info = &plat_priv->tsf_info;
+	cnss_wlan_tsf_deinit(tsf_info);
+	tsf_info->wlan_tsf_handler = NULL;
+	tsf_info->context = NULL;
+	return 0;
+}
+EXPORT_SYMBOL(cnss_unregister_tsf_captured_handler);
+
 static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 {
 	int ret;
@@ -7266,7 +7476,11 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_power_misc_params_init(plat_priv);
 	cnss_get_tcs_info(plat_priv);
 	cnss_get_cpr_info(plat_priv);
-	cnss_get_wlan_tsf_gpio_info(plat_priv);
+
+	ret = cnss_get_wlan_tsf_gpio_info(plat_priv);
+	if (!ret)
+		cnss_get_tsf_ts_info(plat_priv);
+
 	cnss_aop_interface_init(plat_priv);
 	cnss_init_control_params(plat_priv);
 	cnss_get_cpumask_for_wlan_txrx_intr(plat_priv);

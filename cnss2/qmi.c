@@ -1012,15 +1012,20 @@ int cnss_wlfw_bdf_dnld_send_sync(struct cnss_plat_data *plat_priv,
 	release_firmware(fw_entry);
 
 	if (resp->host_bdf_data_valid) {
+		if (resp->host_bdf_data & QMI_WLFW_RADIO_OFF_V01) {
+			set_bit(CNSS_RADIO_OFF, &plat_priv->driver_state);
+		}
+
 		/* QCA6490 enable S3E regulator for IPA configuration only */
 		if (!(resp->host_bdf_data & QMI_WLFW_HW_XPA_V01))
 			cnss_enable_int_pow_amp_vreg(plat_priv);
 
 		plat_priv->cbc_file_download =
 			resp->host_bdf_data & QMI_WLFW_CBC_FILE_DOWNLOAD_V01;
-		cnss_pr_info("Host BDF config: HW_XPA: %d CalDB: %d\n",
+		cnss_pr_info("Host BDF config: HW_XPA: %d CalDB: %d Radio OFF: %d\n",
 			     resp->host_bdf_data & QMI_WLFW_HW_XPA_V01,
-			     plat_priv->cbc_file_download);
+			     plat_priv->cbc_file_download,
+			     resp->host_bdf_data & QMI_WLFW_RADIO_OFF_V01);
 	}
 	kfree(req);
 	kfree(resp);
@@ -3961,6 +3966,7 @@ int cnss_qmi_get_dms_mac(struct cnss_plat_data *plat_priv)
 	    resp.mac_address_len != QMI_WLFW_MAC_ADDR_SIZE_V01) {
 		cnss_pr_err("Invalid MAC address received from DMS\n");
 		plat_priv->dms.mac_valid = false;
+		ret = -EINVAL;
 		goto out;
 	}
 	plat_priv->dms.mac_valid = true;

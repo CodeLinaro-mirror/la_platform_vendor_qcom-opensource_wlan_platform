@@ -1258,6 +1258,7 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 	set_bit(ICNSS_WLFW_EXISTS, &priv->state);
 	clear_bit(ICNSS_FW_DOWN, &priv->state);
 	clear_bit(ICNSS_FW_READY, &priv->state);
+	priv->soc_wake_req_fail = 0;
 
 	if (priv->is_slate_rfa) {
 		ret = icnss_wait_for_slate_complete(priv);
@@ -2885,6 +2886,10 @@ static void icnss_soc_wake_msg_work(struct work_struct *work)
 		case ICNSS_SOC_WAKE_REQUEST_EVENT:
 			ret = icnss_event_soc_wake_request(priv,
 							   event->data);
+			if (ret == -ETIMEDOUT)
+				priv->soc_wake_req_fail++;
+			else
+				priv->soc_wake_req_fail = 0;
 			break;
 		case ICNSS_SOC_WAKE_RELEASE_EVENT:
 			ret = icnss_event_soc_wake_release(priv,
@@ -2898,10 +2903,10 @@ static void icnss_soc_wake_msg_work(struct work_struct *work)
 
 		priv->stats.soc_wake_events[event->type].processed++;
 
-		icnss_pr_soc_wake("Event Processed: %s%s(%d), ret: %d, state: 0x%lx\n",
+		icnss_pr_soc_wake("Event Processed: %s%s(%d), ret: %d, state: 0x%lx soc_wake_fail_count:%u\n",
 				  icnss_soc_wake_event_to_str(event->type),
 				  event->sync ? "-sync" : "", event->type, ret,
-				  priv->state);
+				  priv->state, priv->soc_wake_req_fail);
 
 		spin_lock_irqsave(&priv->soc_wake_msg_lock, flags);
 		if (event->sync) {
@@ -2918,6 +2923,22 @@ static void icnss_soc_wake_msg_work(struct work_struct *work)
 	spin_unlock_irqrestore(&priv->soc_wake_msg_lock, flags);
 
 	icnss_pm_relax(priv);
+
+	/*Check if recovery is required based on fail count*/
+	if (priv->soc_wake_req_fail >= ICNSS_SOC_WAKE_RECOVERY_COUNT &&
+	    !test_bit(ICNSS_FW_DOWN, &priv->state)) {
+		priv->stats.soc_wake_events[ICNSS_SOC_WAKE_REQUEST_EVENT].recovery_count++;
+		icnss_pr_info("Triggering recovery due to soc wake fail count: %u\n",
+		priv->stats.soc_wake_events[ICNSS_SOC_WAKE_REQUEST_EVENT].recovery_count);
+
+		priv->soc_wake_req_fail = 0;
+		ret = icnss_trigger_recovery(&priv->pdev->dev);
+		if (ret < 0) {
+			icnss_fatal_err("Soc wake recovery fail: ret: %d, state: 0x%lx\n",
+					ret, priv->state);
+			ICNSS_ASSERT_ALWAYS(0);
+		}
+	}
 }
 
 static int icnss_msa0_ramdump(struct icnss_priv *priv)

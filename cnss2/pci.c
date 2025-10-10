@@ -577,7 +577,9 @@ static const struct mhi_controller_config cnss_mhi_config_genoa = {
 		CNSS_MHI_SATELLITE_EVT_COUNT,
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
+#if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 	.bhie_offset = 0x0324,
+#endif
 };
 
 static const struct mhi_controller_config cnss_mhi_config_no_satellite = {
@@ -945,6 +947,12 @@ static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev);
 static void cnss_pci_update_link_event(struct cnss_pci_data *pci_priv,
 				       enum cnss_bus_event_type type,
 				       void *data);
+
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+#define cnss_pci_domain_nr(dev) ((dev)->bus->domain_nr)
+#else
+#define cnss_pci_domain_nr(dev) (0)
+#endif
 
 static inline void
 __cnss_start_rddm_timer(struct cnss_pci_data *pci_priv,
@@ -4412,6 +4420,11 @@ static void cnss_wlan_reg_driver_work(struct work_struct *work)
 	if (test_bit(CNSS_WLAN_HW_DISABLED, &plat_priv->driver_state))
 		return;
 
+	if (test_bit(CNSS_RADIO_OFF, &plat_priv->driver_state)) {
+		cnss_pr_dbg("RADIO OFF received from FW, avoid register driver\n");
+		return;
+	}
+
 	if (test_bit(CNSS_COLD_BOOT_CAL_DONE, &plat_priv->driver_state)) {
 		goto reg_driver;
 	} else {
@@ -4519,6 +4532,10 @@ int cnss_wlan_register_driver(struct cnss_wlan_driver *driver_ops)
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot/Shutdown is in progress, ignore register driver\n");
 		return -EINVAL;
+	}
+	if (test_bit(CNSS_RADIO_OFF, &plat_priv->driver_state)) {
+		cnss_pr_info("WLAN register driver rejected for RADIO OFF\n");
+		return 0;
 	}
 
 	if (!id_table || !pci_dev_present(id_table)) {
@@ -5933,22 +5950,13 @@ int cnss_pci_load_sku_license(struct cnss_pci_data *pci_priv)
 	const struct firmware *fw_entry;
 	int ret = 0;
 
-	switch (pci_priv->device_id) {
-	case FIG_DEVICE_ID:
-		soft_sku_filename = SOFT_SKU_LICENSE_FILENAME;
-		break;
-	case QCA6174_DEVICE_ID:
-	case QCA6290_DEVICE_ID:
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-	case KIWI_DEVICE_ID:
-	case MANGO_DEVICE_ID:
-	case PEACH_DEVICE_ID:
-	default:
+	if (pci_priv->device_id != FIG_DEVICE_ID) {
 		cnss_pr_dbg("Soft SKU not supported for device ID: (0x%x)\n",
 			    pci_priv->device_id);
 		return 0;
 	}
+
+	soft_sku_filename = SOFT_SKU_LICENSE_FILENAME;
 
 	if (!sku_license_mem->va && !sku_license_mem->size) {
 		cnss_pci_add_fw_infix_name(pci_priv, soft_sku_filename,
@@ -5990,24 +5998,23 @@ int cnss_pci_load_tme_patch(struct cnss_pci_data *pci_priv)
 	const struct firmware *fw_entry;
 	int ret = 0;
 
-	switch (pci_priv->device_id) {
-	case FIG_DEVICE_ID:
-		if (plat_priv->device_version.major_version == FW_V1_NUMBER)
-			tme_patch_filename = TME_PATCH_FILE_NAME_1_0;
-		else if (plat_priv->device_version.major_version == FW_V2_NUMBER)
-			tme_patch_filename = TME_PATCH_FILE_NAME_2_0;
-		break;
-	case QCA6174_DEVICE_ID:
-	case QCA6290_DEVICE_ID:
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-	case KIWI_DEVICE_ID:
-	case MANGO_DEVICE_ID:
-	case PEACH_DEVICE_ID:
-	default:
+	if (pci_priv->device_id != FIG_DEVICE_ID) {
 		cnss_pr_dbg("TME-L not supported for device ID: (0x%x)\n",
 			    pci_priv->device_id);
 		return 0;
+	}
+
+	switch (plat_priv->device_version.major_version) {
+	case FW_V1_NUMBER:
+		tme_patch_filename = TME_PATCH_FILE_NAME_1_0;
+		break;
+	case FW_V2_NUMBER:
+		tme_patch_filename = TME_PATCH_FILE_NAME_2_0;
+		break;
+	default:
+		cnss_pr_dbg("Invalid device major version(0x%x)\n",
+			    plat_priv->device_version.major_version);
+		return -EINVAL;
 	}
 
 	if (!tme_lite_mem->va && !tme_lite_mem->size) {
@@ -8791,7 +8798,7 @@ cnss_pci_link_retrain_trigger(struct cnss_pci_data *pci_priv)
 static void cnss_pci_suspend_pwroff(struct pci_dev *pci_dev)
 {
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv;
 	int ret = 0;
 	bool suspend_pwroff = cnss_should_suspend_pwroff(pci_dev);
@@ -8817,7 +8824,7 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 	int ret = 0;
 	struct cnss_pci_data *pci_priv;
 	struct device *dev = &pci_dev->dev;
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv = cnss_get_plat_priv_by_rc_num(rc_num);
 
 	cnss_pr_dbg("PCI is probing, vendor ID: 0x%x, device ID: 0x%x rc_num %d\n",
