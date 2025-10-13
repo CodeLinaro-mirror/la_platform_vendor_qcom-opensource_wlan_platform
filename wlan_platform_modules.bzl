@@ -9,7 +9,7 @@ _default_module_enablement_list = [
     "wlan_firmware_service",
 ]
 
-_cnss2_enabled_target = ["niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "sdxkova", "autogvm", "autoghgvm", "sa510m"]
+_cnss2_enabled_target = ["niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "sdxkova", "autogvm", "autoghgvm", "sa510m", "sa510m.1g"]
 _icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe"]
 
 def _get_module_list(target, variant):
@@ -77,7 +77,7 @@ def _define_platform_config_rule(module, target, variant):
 def _define_modules_for_target_variant(target, variant):
     tv = "{}_{}".format(target, variant)
 
-    if target != "sa510m":
+    if target != "sa510m" and target != "sa510m.1g":
         kernel_build = select({
             "//build/kernel/kleaf:socrepo_true": "//soc-repo:{}_base_kernel".format(tv),
             "//build/kernel/kleaf:socrepo_false": "//msm-kernel:{}".format(tv),
@@ -96,7 +96,7 @@ def _define_modules_for_target_variant(target, variant):
     if target in _icnss2_enabled_target:
         icnss2_enabled = 1
 
-    if target != "sa510m":
+    if target != "sa510m" and target != "sa510m.1g":
         kernel_header = "//msm-kernel:all_headers"
     else:
         kernel_header = "//msm-kernel:all_headers_arm"
@@ -117,7 +117,7 @@ def _define_modules_for_target_variant(target, variant):
             deps += [
                 ":{}_cnss_plat_ipc_qmi_svc".format(tv),
             ]
-        if target != "sa510m":
+        if target != "sa510m" and target != "sa510m.1g":
             deps += select({
                    "//build/kernel/kleaf:socrepo_true": [
                       "//soc-repo:all_headers",
@@ -130,7 +130,7 @@ def _define_modules_for_target_variant(target, variant):
         else:
            deps += [ kernel_header ]
 
-        if target != "autogvm" and target != "x1e80100" and target != "sdxkova" and target != "sa510m":
+        if target != "autogvm" and target != "x1e80100" and target != "sdxkova" and target != "sa510m" and target != "sa510m.1g":
             deps += select({
                   "//build/kernel/kleaf:socrepo_true": [
                     "//vendor/qcom/opensource/securemsm-kernel:{}_smcinvoke_dlkm".format(tv),
@@ -138,7 +138,7 @@ def _define_modules_for_target_variant(target, variant):
                     "//build/kernel/kleaf:socrepo_false": [],
             })
 
-        if target != "x1e80100" and target != "sdxkova" and target != "sa510m":
+        if target != "x1e80100" and target != "sdxkova" and target != "sa510m" and target != "sa510m.1g":
             deps += select({
                   "//build/kernel/kleaf:socrepo_true": [
                     "//soc-repo:{}/kernel/trace/qcom_ipc_logging".format(tv),
@@ -188,6 +188,11 @@ def _define_modules_for_target_variant(target, variant):
                 "CONFIG_PCI_MSM": {
                     True: [
                         "cnss2/pci_qcom.c",
+                    ],
+                },
+                "CONFIG_CNSS2_SDIO": {
+                    True: [
+                        "cnss2/sdio.c",
                     ],
                 },
             },
@@ -249,7 +254,7 @@ def _define_modules_for_target_variant(target, variant):
     module = "cnss_genl"
     _define_platform_config_rule(module, target, variant)
     defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
-    if target != "sa510m":
+    if target != "sa510m" and target != "sa510m.1g":
         deps = select({
             "//build/kernel/kleaf:socrepo_true": ["//soc-repo:all_headers"],
             "//build/kernel/kleaf:socrepo_false": ["//msm-kernel:all_headers"],
@@ -294,7 +299,7 @@ def _define_modules_for_target_variant(target, variant):
         ":wlan-platform-headers",
     ]
 
-    if target != "sa510m":
+    if target != "sa510m" and target != "sa510m.1g":
         cnss_utils_dep_list += select({
             "//build/kernel/kleaf:socrepo_true": ["//soc-repo:all_headers"],
             "//build/kernel/kleaf:socrepo_false": ["//msm-kernel:all_headers"],
@@ -325,7 +330,7 @@ def _define_modules_for_target_variant(target, variant):
 
     module = "cnss_utils"
     defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
-    if target != "sa510m":
+    if target != "sa510m" and target != "sa510m.1g":
         deps = select({
             "//build/kernel/kleaf:socrepo_true": [
                 "//soc-repo:all_headers",
@@ -354,7 +359,7 @@ def _define_modules_for_target_variant(target, variant):
     defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
 
     if plat_ipc_qmi_svc_enabled:
-        if target != "sa510m":
+        if target != "sa510m" and target != "sa510m.1g":
             deps = select({
                 "//build/kernel/kleaf:socrepo_true": [
                     "//soc-repo:all_headers",
