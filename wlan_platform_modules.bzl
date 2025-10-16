@@ -9,7 +9,7 @@ _default_module_enablement_list = [
     "wlan_firmware_service",
 ]
 
-_cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot"]
+_cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art"]
 _icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina"]
 
 def _get_module_list(target, variant):
@@ -290,7 +290,7 @@ def _define_modules_for_target_variant(target, variant):
         "//build/qcom_build_extensions:qtisocrepo_false": ["//msm-kernel:all_headers"],
     })
 
-    if target == "sun" or target == "canoe":
+    if target == "sun" or target == "canoe" or target == "art":
         cnss_utils_dep_list = cnss_utils_dep_list + ["//vendor/qcom/opensource/data-kernel/drivers/smem-mailbox:{}_smem_mailbox".format(tv),]
     if target == "sdxkova":
         tgt = "target-aarch64_cortex-a53_musl"

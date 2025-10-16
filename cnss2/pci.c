@@ -577,7 +577,9 @@ static const struct mhi_controller_config cnss_mhi_config_genoa = {
 		CNSS_MHI_SATELLITE_EVT_COUNT,
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
+#if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 	.bhie_offset = 0x0324,
+#endif
 };
 
 static const struct mhi_controller_config cnss_mhi_config_no_satellite = {
@@ -945,6 +947,12 @@ static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev);
 static void cnss_pci_update_link_event(struct cnss_pci_data *pci_priv,
 				       enum cnss_bus_event_type type,
 				       void *data);
+
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+#define cnss_pci_domain_nr(dev) ((dev)->bus->domain_nr)
+#else
+#define cnss_pci_domain_nr(dev) (0)
+#endif
 
 static inline void
 __cnss_start_rddm_timer(struct cnss_pci_data *pci_priv,
@@ -8790,7 +8798,7 @@ cnss_pci_link_retrain_trigger(struct cnss_pci_data *pci_priv)
 static void cnss_pci_suspend_pwroff(struct pci_dev *pci_dev)
 {
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv;
 	int ret = 0;
 	bool suspend_pwroff = cnss_should_suspend_pwroff(pci_dev);
@@ -8816,7 +8824,7 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 	int ret = 0;
 	struct cnss_pci_data *pci_priv;
 	struct device *dev = &pci_dev->dev;
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv = cnss_get_plat_priv_by_rc_num(rc_num);
 
 	cnss_pr_dbg("PCI is probing, vendor ID: 0x%x, device ID: 0x%x rc_num %d\n",
