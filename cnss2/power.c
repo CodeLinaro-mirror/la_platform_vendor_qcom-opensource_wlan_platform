@@ -1157,7 +1157,6 @@ int cnss_get_input_gpio_value(struct cnss_plat_data *plat_priv, int gpio_num)
 	return gpio_get_value(gpio_num);
 }
 
-#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
 enum domains_t {
 	POWER_REGULATOR = 0,
 	POWER_GPIO = 1,
@@ -1269,6 +1268,7 @@ out:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
@@ -1285,6 +1285,8 @@ int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 	if (!plat_priv->pd_devs)
 		return -ENOMEM;
 
+	memset(plat_priv->pd_devs, 0,
+	       plat_priv->pd_count * sizeof(*plat_priv->pd_devs));
 	for (i = 0; i < plat_priv->pd_count; i++) {
 		plat_priv->pd_devs[i] = dev_pm_domain_attach_by_id(dev, i);
 		if (IS_ERR(plat_priv->pd_devs[i])) {
@@ -1315,34 +1317,6 @@ void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
 	}
 }
 #else
-void cnss_pm_notifier_init(struct cnss_plat_data *plat_priv)
-{
-	return;
-}
-
-void cnss_pm_notifier_deinit(struct cnss_plat_data *plat_priv)
-{
-	return;
-}
-
-static int cnss_scmi_pm_enable(struct cnss_plat_data *plat_priv)
-{
-	return -EOPNOTSUPP;
-}
-
-int
-cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
-{
-	return -EOPNOTSUPP;
-}
-
-int
-cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
-				bool enabled)
-{
-	return -EOPNOTSUPP;
-}
-
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	return -EOPNOTSUPP;
@@ -1373,8 +1347,10 @@ int cnss_power_on_device(struct cnss_plat_data *plat_priv, bool reset)
 
 	if (plat_priv->is_fw_managed_pwr) {
 		ret = cnss_scmi_pm_enable(plat_priv);
-		if (ret)
+		if (ret) {
+			cnss_pr_err("Failed to enable pd, err = %d\n", ret);
 			goto out;
+		}
 	} else {
 		ret = cnss_vreg_on_type(plat_priv, CNSS_VREG_PRIM);
 		if (ret) {
