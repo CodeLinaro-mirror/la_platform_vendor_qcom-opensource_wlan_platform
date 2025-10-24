@@ -3506,13 +3506,13 @@ int cnss_pci_call_driver_remove(struct cnss_pci_data *pci_priv)
 
 	cnss_pci_stop_time_sync_update(pci_priv);
 
-	if (test_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state) &&
+	if (test_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state)) {
+		pci_priv->driver_ops->remove(pci_priv->pci_dev);
+		clear_bit(CNSS_DRIVER_PROBED, &plat_priv->driver_state);
+	} else if (test_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state) &&
 	    test_bit(CNSS_DRIVER_PROBED, &plat_priv->driver_state)) {
 		complete(&plat_priv->rddm_complete);
 		pci_priv->driver_ops->shutdown(pci_priv->pci_dev);
-	} else if (test_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state)) {
-		pci_priv->driver_ops->remove(pci_priv->pci_dev);
-		clear_bit(CNSS_DRIVER_PROBED, &plat_priv->driver_state);
 	} else if (test_bit(CNSS_DRIVER_IDLE_SHUTDOWN,
 			    &plat_priv->driver_state)) {
 		ret = pci_priv->driver_ops->idle_shutdown(pci_priv->pci_dev);
