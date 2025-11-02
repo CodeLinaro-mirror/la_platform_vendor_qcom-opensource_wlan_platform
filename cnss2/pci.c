@@ -5101,6 +5101,7 @@ static int cnss_pci_runtime_suspend(struct device *dev)
 	}
 
 	cnss_pr_vdbg("Runtime suspend start\n");
+	cnss_set_pci_config_space(pci_priv, SAVE_PCI_CONFIG_SPACE);
 
 	driver_ops = pci_priv->driver_ops;
 	if (driver_ops && driver_ops->runtime_ops &&
@@ -5141,6 +5142,9 @@ static int cnss_pci_runtime_resume(struct device *dev)
 	}
 
 	cnss_pr_vdbg("Runtime resume start\n");
+	if (pci_priv->saved_state)
+		cnss_set_pci_config_space(pci_priv,
+					  RESTORE_PCI_CONFIG_SPACE);
 
 	driver_ops = pci_priv->driver_ops;
 	if (driver_ops && driver_ops->runtime_ops &&
