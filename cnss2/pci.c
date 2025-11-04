@@ -948,6 +948,12 @@ static void cnss_pci_update_link_event(struct cnss_pci_data *pci_priv,
 				       enum cnss_bus_event_type type,
 				       void *data);
 
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+#define cnss_pci_domain_nr(dev) ((dev)->bus->domain_nr)
+#else
+#define cnss_pci_domain_nr(dev) (0)
+#endif
+
 static inline void
 __cnss_start_rddm_timer(struct cnss_pci_data *pci_priv,
 			const char *func, int line)
@@ -2372,6 +2378,7 @@ static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 			return;
 		pbl_bootstrap_status_reg = FIG_PBL_BOOTSTRAP_STATUS;
 		sbl_log_max_size = FIG_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
+		sbl_log_def_end = FIG_SRAM_END;
 		break;
 	default:
 		return;
@@ -4009,6 +4016,7 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 	bool mhi_force_power_off = false;
 	int retry = 0, bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
 	int sw_ctrl_gpio = plat_priv->pinctrl_info.sw_ctrl_gpio;
+	int wlan_sw_ctrl_gpio = plat_priv->pinctrl_info.wlan_sw_ctrl_gpio;
 
 	if (!pci_priv->mhi_ctrl) {
 		cnss_pr_err("mhi not initiated, exit\n", ret);
@@ -4051,8 +4059,9 @@ retry:
 	ret = cnss_resume_pci_link(pci_priv);
 	if (ret) {
 		cnss_pr_err("Failed to resume PCI link, err = %d\n", ret);
-		cnss_pr_dbg("Value of SW_CTRL GPIO: %d\n",
-			    cnss_get_input_gpio_value(plat_priv, sw_ctrl_gpio));
+		cnss_pr_dbg("Values of SW_CTRL GPIO: %d WLAN_SW_CTRL_GPIO: %d \n",
+			    cnss_get_input_gpio_value(plat_priv, sw_ctrl_gpio),
+			    cnss_get_input_gpio_value(plat_priv, wlan_sw_ctrl_gpio));
 		if (test_bit(IGNORE_PCI_LINK_FAILURE,
 			     &plat_priv->ctrl_params.quirks)) {
 			cnss_pr_dbg("Ignore PCI link resume failure\n");
@@ -4897,12 +4906,6 @@ static int cnss_pci_suspend(struct device *dev)
 
 	cnss_pci_set_monitor_wake_intr(pci_priv, false);
 
-	if (plat_priv->device_id == FIG_DEVICE_ID) {
-		ret = cnss_set_cxpc(dev, CX_OFF);
-		if (ret < 0)
-			CNSS_ASSERT(0);
-	}
-
 	cnss_pr_info("WoW Entry. pcie_time_sync_offset = %llu",
 		     plat_priv->pcie_time_sync_offset);
 
@@ -4942,12 +4945,6 @@ static int cnss_pci_resume(struct device *dev)
 
 	if (!cnss_is_device_powered_on(pci_priv->plat_priv))
 		goto out;
-
-	if (plat_priv->device_id == FIG_DEVICE_ID) {
-		ret = cnss_set_cxpc(dev, CX_RET);
-		if (ret < 0)
-			CNSS_ASSERT(0);
-	}
 
 	if (!pci_priv->disable_pc) {
 		mutex_lock(&pci_priv->bus_lock);
@@ -5104,6 +5101,7 @@ static int cnss_pci_runtime_suspend(struct device *dev)
 	}
 
 	cnss_pr_vdbg("Runtime suspend start\n");
+	cnss_set_pci_config_space(pci_priv, SAVE_PCI_CONFIG_SPACE);
 
 	driver_ops = pci_priv->driver_ops;
 	if (driver_ops && driver_ops->runtime_ops &&
@@ -5114,12 +5112,6 @@ static int cnss_pci_runtime_suspend(struct device *dev)
 
 	if (ret)
 		pci_priv->drv_connected_last = 0;
-
-	if (!ret && (plat_priv->device_id == FIG_DEVICE_ID)) {
-		ret = cnss_set_cxpc(dev, CX_OFF);
-		if (ret < 0)
-			CNSS_ASSERT(0);
-	}
 
 	cnss_pr_vdbg("Runtime suspend status: %d\n", ret);
 
@@ -5150,12 +5142,9 @@ static int cnss_pci_runtime_resume(struct device *dev)
 	}
 
 	cnss_pr_vdbg("Runtime resume start\n");
-
-	if (plat_priv->device_id == FIG_DEVICE_ID) {
-		ret = cnss_set_cxpc(dev, CX_RET);
-		if (ret < 0)
-			CNSS_ASSERT(0);
-	}
+	if (pci_priv->saved_state)
+		cnss_set_pci_config_space(pci_priv,
+					  RESTORE_PCI_CONFIG_SPACE);
 
 	driver_ops = pci_priv->driver_ops;
 	if (driver_ops && driver_ops->runtime_ops &&
@@ -6071,31 +6060,21 @@ int cnss_pci_load_tme_opt_file(struct cnss_pci_data *pci_priv,
 	const struct firmware *fw_entry;
 	int ret = 0;
 
-	switch (pci_priv->device_id) {
-	case PEACH_DEVICE_ID:
-	case FIG_DEVICE_ID:
-	case COLOGNE_DEVICE_ID:
-		if (file == WLFW_TME_LITE_OEM_FUSE_FILE_V01) {
-			tme_opt_filename = TME_OEM_FUSE_FILE_NAME;
-			tme_lite_mem = &plat_priv->tme_opt_file_mem[0];
-		} else if (file == WLFW_TME_LITE_RPR_FILE_V01) {
-			tme_opt_filename = TME_RPR_FILE_NAME;
-			tme_lite_mem = &plat_priv->tme_opt_file_mem[1];
-		} else if (file == WLFW_TME_LITE_DPR_FILE_V01) {
-			tme_opt_filename = TME_DPR_FILE_NAME;
-			tme_lite_mem = &plat_priv->tme_opt_file_mem[2];
-		}
-		break;
-	case QCA6174_DEVICE_ID:
-	case QCA6290_DEVICE_ID:
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-	case KIWI_DEVICE_ID:
-	case MANGO_DEVICE_ID:
-	default:
-		cnss_pr_dbg("TME-L opt file: %s not supported for device ID: (0x%x)\n",
-			    tme_opt_filename, pci_priv->device_id);
+	if (pci_priv->device_id != FIG_DEVICE_ID) {
+		cnss_pr_dbg("TME-L not supported for device ID: (0x%x)\n",
+			    pci_priv->device_id);
 		return 0;
+	}
+
+	if (file == WLFW_TME_LITE_OEM_FUSE_FILE_V01) {
+		tme_opt_filename = TME_OEM_FUSE_FILE_NAME;
+		tme_lite_mem = &plat_priv->tme_opt_file_mem[0];
+	} else if (file == WLFW_TME_LITE_RPR_FILE_V01) {
+		tme_opt_filename = TME_RPR_FILE_NAME;
+		tme_lite_mem = &plat_priv->tme_opt_file_mem[1];
+	} else if (file == WLFW_TME_LITE_DPR_FILE_V01) {
+		tme_opt_filename = TME_DPR_FILE_NAME;
+		tme_lite_mem = &plat_priv->tme_opt_file_mem[2];
 	}
 
 	if (!tme_lite_mem)
@@ -8204,6 +8183,29 @@ static void cnss_pci_set_mhi_event_config_for_one_msi(void)
 }
 #endif
 
+#ifdef CONFIG_QLI_MHI
+static void cnss_set_standard_elf(struct cnss_pci_data *pci_priv)
+{
+	bool is_standard_elf;
+
+	switch (pci_priv->device_id) {
+	case PEACH_DEVICE_ID:
+	case COLOGNE_DEVICE_ID:
+	case FIG_DEVICE_ID:
+		is_standard_elf = true;
+		break;
+	default:
+		is_standard_elf = false;
+	}
+
+	pci_priv->mhi_ctrl->standard_elf_image = is_standard_elf;
+}
+#else
+static inline void cnss_set_standard_elf(struct cnss_pci_data *pci_priv)
+{
+}
+#endif
+
 #if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 static int cnss_mhi_pm_runtime_get_sync(struct mhi_controller *mhi_ctrl)
 {
@@ -8253,11 +8255,13 @@ static void cnss_mhi_misc_init(struct cnss_pci_data *pci_priv,
 	mhi_ctrl->runtime_get_sync = cnss_mhi_pm_runtime_get_sync;
 	mhi_ctrl->runtime_put_autosuspend = cnss_mhi_pm_runtime_put_autosuspend;
 	mhi_ctrl->tme_supported_image = cnss_is_tme_supported(pci_priv);
+	cnss_set_standard_elf(pci_priv);
 }
 #else
 static inline void cnss_mhi_misc_init(struct cnss_pci_data *pci_priv,
 				      struct mhi_controller *mhi_ctrl)
 {
+	cnss_set_standard_elf(pci_priv);
 }
 #endif
 
@@ -8792,7 +8796,7 @@ cnss_pci_link_retrain_trigger(struct cnss_pci_data *pci_priv)
 static void cnss_pci_suspend_pwroff(struct pci_dev *pci_dev)
 {
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv;
 	int ret = 0;
 	bool suspend_pwroff = cnss_should_suspend_pwroff(pci_dev);
@@ -8818,7 +8822,7 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 	int ret = 0;
 	struct cnss_pci_data *pci_priv;
 	struct device *dev = &pci_dev->dev;
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv = cnss_get_plat_priv_by_rc_num(rc_num);
 
 	cnss_pr_dbg("PCI is probing, vendor ID: 0x%x, device ID: 0x%x rc_num %d\n",
