@@ -91,8 +91,8 @@
 #define MAX_SYSFS_USER_COMMAND_SIZE_LENGTH (5)
 #define XDUMP_TIMEOUT_MS	20000
 #define NOM_VOLTAGE			0x37A /* 890mV */
-#define SVS_VOLTAGE			0x258 /* 600mV */
-#define SVS_L1_VOLTAGE			0x28A /* 650mV */
+#define SVS_VOLTAGE			0x276 /* 630mV */
+#define SVS_L1_VOLTAGE			0x2AD /* 685mV */
 #define RET_VOLTAGE			0x15E /* 350mV */
 
 #define TSF_SYNC_GPIO		"qcom,wlan-tsf-gpio"

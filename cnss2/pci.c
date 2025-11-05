@@ -2378,6 +2378,7 @@ static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 			return;
 		pbl_bootstrap_status_reg = FIG_PBL_BOOTSTRAP_STATUS;
 		sbl_log_max_size = FIG_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
+		sbl_log_def_end = FIG_SRAM_END;
 		break;
 	default:
 		return;
