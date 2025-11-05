@@ -3826,7 +3826,7 @@ put_device:
 #endif
 #endif /* CONFIG_MSM_SUBSYSTEM_RESTART */
 
-int cnss_register_ramdump_v0(struct cnss_plat_data *plat_priv)
+static int cnss_register_ramdump_v0(struct cnss_plat_data *plat_priv)
 {
 	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
 	struct cnss_dump_data *dump_data = dump_data = &info_v2->dump_data;
@@ -3863,7 +3863,7 @@ int cnss_register_ramdump_v0(struct cnss_plat_data *plat_priv)
 	return 0;
 }
 
-void cnss_unregister_ramdump_v0(struct cnss_plat_data *plat_priv)
+static void cnss_unregister_ramdump_v0(struct cnss_plat_data *plat_priv)
 {
 	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
 
