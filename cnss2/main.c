@@ -52,12 +52,6 @@
 #endif
 #endif
 
-#define CNSS_DUMP_FORMAT_VER		0x11
-#define CNSS_DUMP_FORMAT_VER_V2		0x22
-#define CNSS_DUMP_MAGIC_VER_V2		0x42445953
-#define CNSS_DUMP_NAME			"CNSS_WLAN"
-#define CNSS_DUMP_DESC_SIZE		0x1000
-#define CNSS_DUMP_SEG_VER		0x1
 #define FILE_SYSTEM_READY		1
 #define FW_READY_TIMEOUT		20000
 #define FW_ASSERT_TIMEOUT		5000
@@ -92,11 +86,6 @@ enum cnss_cal_db_op {
 	CNSS_CAL_DB_UPLOAD,
 	CNSS_CAL_DB_DOWNLOAD,
 	CNSS_CAL_DB_INVALID_OP,
-};
-
-enum cnss_recovery_type {
-	CNSS_WLAN_RECOVERY = 0x1,
-	CNSS_PCSS_RECOVERY = 0x2,
 };
 
 #ifdef CONFIG_CNSS2_SDIO
@@ -4950,7 +4939,7 @@ static void cnss_remove_sysfs_link(struct cnss_plat_data *plat_priv)
 	sysfs_remove_link(kernel_kobj, cnss_name);
 }
 
-static int cnss_create_sysfs(struct cnss_plat_data *plat_priv)
+int cnss_create_sysfs(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
 
