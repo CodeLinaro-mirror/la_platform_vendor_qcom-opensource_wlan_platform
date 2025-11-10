@@ -916,6 +916,7 @@ int icnss_power_on_chain1_reg(struct icnss_priv *priv)
 
 void icnss_put_resources(struct icnss_priv *priv)
 {
+	icnss_xo_trim_deinit(priv);
 	icnss_put_clk(priv);
 	icnss_put_vreg(priv);
 }

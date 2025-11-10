@@ -423,9 +423,7 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 		cnss_update_build_info(req);
 	}
 
-	if (plat_priv->device_id == FIG_DEVICE_ID ||
-	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-				  "fig-direct-cx")) {
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
 		ret = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
 					   "cx-mode", &cx_mode_dt);
 		if (ret) {
@@ -440,6 +438,23 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 			req->target_attachment = WLFW_PDC_V01;
 		else
 			req->target_attachment = WLFW_THIRD_PARTY_V01;
+
+		cnss_pr_info("Sending target attachment info: %d",
+			     req->target_attachment);
+		if (req->target_attachment) {
+			plat_priv->direct_cx_data_pin_mode =
+						req->target_attachment;
+
+			cnss_pr_info("Host cap request direct cx data pin mode: %d\n",
+				     plat_priv->direct_cx_data_pin_mode);
+			if (plat_priv->direct_cx_data_pin_mode) {
+				ret = cnss_set_cx_mode(plat_priv, CX_DATA_PIN);
+				if (ret < 0) {
+					cnss_pr_err("Failed to set to Data Pin Mode\n");
+					CNSS_ASSERT(0);
+				}
+			}
+		}
 	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
@@ -661,17 +676,17 @@ int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 			QMI_WLFW_MAX_BUILD_ID_LEN + 1);
 	}
 
-	cnss_pr_info("direct cx data pin mode: %d\n",
-		     resp->direct_cx_data_pin_mode_valid);
-	if (resp->direct_cx_data_pin_mode_valid) {
-		plat_priv->direct_cx_data_pin_mode =
-			resp->direct_cx_data_pin_mode;
-	}
+	cnss_pr_info("tgt cap response direct cx data pin mode status: %d\n",
+		     resp->direct_cx_data_pin_mode);
 
-	if (plat_priv->direct_cx_data_pin_mode) {
-		ret = cnss_set_cx_mode(plat_priv, CX_DATA_PIN);
-		if (ret < 0)
-			cnss_pr_err("Failed to set to Data Pin Mode\n");
+	if (plat_priv->direct_cx_data_pin_mode !=
+	    resp->direct_cx_data_pin_mode) {
+		cnss_pr_err("Host and FW data pin mode status out of sync\n");
+		cnss_pr_err("Host data pin mode: %d\n",
+			    plat_priv->direct_cx_data_pin_mode);
+		cnss_pr_err("FW data pin mode: %d\n",
+			    resp->direct_cx_data_pin_mode);
+		CNSS_ASSERT(0);
 	}
 
 	/* FW will send aop retention volatage for qca6490 */
@@ -730,9 +745,7 @@ int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 	if (resp->hwid_bitmap_valid)
 		plat_priv->hwid_bitmap = resp->hwid_bitmap;
 
-	if (plat_priv->device_id == FIG_DEVICE_ID ||
-	    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
-				  "fig-direct-cx")) {
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
 		cnss_pr_info("ol_cpr_cfg_ext is: %d\n",
 			     resp->ol_cpr_cfg_ext_valid);
 		if (plat_priv->direct_cx_data_pin_mode &&
@@ -999,15 +1012,20 @@ int cnss_wlfw_bdf_dnld_send_sync(struct cnss_plat_data *plat_priv,
 	release_firmware(fw_entry);
 
 	if (resp->host_bdf_data_valid) {
+		if (resp->host_bdf_data & QMI_WLFW_RADIO_OFF_V01) {
+			set_bit(CNSS_RADIO_OFF, &plat_priv->driver_state);
+		}
+
 		/* QCA6490 enable S3E regulator for IPA configuration only */
 		if (!(resp->host_bdf_data & QMI_WLFW_HW_XPA_V01))
 			cnss_enable_int_pow_amp_vreg(plat_priv);
 
 		plat_priv->cbc_file_download =
 			resp->host_bdf_data & QMI_WLFW_CBC_FILE_DOWNLOAD_V01;
-		cnss_pr_info("Host BDF config: HW_XPA: %d CalDB: %d\n",
+		cnss_pr_info("Host BDF config: HW_XPA: %d CalDB: %d Radio OFF: %d\n",
 			     resp->host_bdf_data & QMI_WLFW_HW_XPA_V01,
-			     plat_priv->cbc_file_download);
+			     plat_priv->cbc_file_download,
+			     resp->host_bdf_data & QMI_WLFW_RADIO_OFF_V01);
 	}
 	kfree(req);
 	kfree(resp);
@@ -1218,10 +1236,7 @@ int cnss_wlfw_tme_opt_file_dnld_send_sync(struct cnss_plat_data *plat_priv,
 
 	if (file == WLFW_TME_LITE_OEM_FUSE_FILE_V01) {
 		tme_opt_file_mem = &plat_priv->tme_opt_file_mem[0];
-		if (plat_priv->device_id == COLOGNE_DEVICE_ID)
-			file_name = CGN_TME_OEM_FUSE_FILE_NAME;
-		else
-			file_name = TME_OEM_FUSE_FILE_NAME;
+		file_name = TME_OEM_FUSE_FILE_NAME;
 	} else if (file == WLFW_TME_LITE_RPR_FILE_V01) {
 		tme_opt_file_mem = &plat_priv->tme_opt_file_mem[1];
 		file_name = TME_RPR_FILE_NAME;
@@ -3951,6 +3966,7 @@ int cnss_qmi_get_dms_mac(struct cnss_plat_data *plat_priv)
 	    resp.mac_address_len != QMI_WLFW_MAC_ADDR_SIZE_V01) {
 		cnss_pr_err("Invalid MAC address received from DMS\n");
 		plat_priv->dms.mac_valid = false;
+		ret = -EINVAL;
 		goto out;
 	}
 	plat_priv->dms.mac_valid = true;
