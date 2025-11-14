@@ -7,6 +7,7 @@ targets = [
     "gen3auto",
     "hamoa",
     "lahaina",
+    "bengal",
     "pineapple",
     "parrot",
     "seraph",

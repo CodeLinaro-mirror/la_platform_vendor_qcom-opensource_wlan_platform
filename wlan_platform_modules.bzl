@@ -10,7 +10,7 @@ _default_module_enablement_list = [
 ]
 
 _cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "hamoa", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art"]
-_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina", "chora", "art"]
+_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina", "chora", "art", "bengal"]
 
 def _get_module_list(target, variant):
     tv = "{}_{}".format(target, variant)
