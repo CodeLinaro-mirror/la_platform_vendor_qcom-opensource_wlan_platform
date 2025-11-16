@@ -53,6 +53,9 @@
 #include <linux/soc/qcom/slate_events_bridge_intf.h>
 #include <uapi/linux/slatecom_interface.h>
 #endif
+#include <linux/regulator/consumer.h>
+#include <linux/nvmem-consumer.h>
+
 #include <linux/qcom-iommu-util.h>
 #include <soc/qcom/of_common.h>
 #include "main.h"
@@ -282,6 +285,8 @@ char *icnss_driver_event_to_str(enum icnss_driver_event_type type)
 		return "QDSS_TRACE_REQ_DATA";
 	case ICNSS_DRIVER_EVENT_SUBSYS_RESTART_LEVEL:
 		return "SUBSYS_RESTART_LEVEL";
+	case ICNSS_DRIVER_EVENT_XO_TRIM_IND:
+		return "XO_TRIM_IND";
 	case ICNSS_DRIVER_EVENT_MAX:
 		return "EVENT_MAX";
 	}
@@ -2738,6 +2743,127 @@ static void icnss_wpss_self_recovery(struct work_struct *wpss_load_work)
 	}
 }
 
+/**
+ * icnss_xo_trim_init - Initialize configurations for XO trim
+ * @priv: Pointer to icnss platform data
+ *
+ * This function attempts to retrieve the register for inputting XO calibration
+ * data and the regulator to trigger the PBS from DTS.
+ *
+ * Return: None
+ */
+static void icnss_xo_trim_init(struct icnss_priv *priv)
+{
+	struct device *dev;
+	struct icnss_xo_trim_config *xo_trim_conf;
+
+	dev = &priv->pdev->dev;
+	xo_trim_conf = &priv->xo_trim_conf;
+
+	xo_trim_conf->xo_calib_reg = devm_nvmem_cell_get(dev, "xo_calib_reg");
+	if (IS_ERR(xo_trim_conf->xo_calib_reg)) {
+		icnss_pr_dbg("Invalid xo_calib_reg: %ld\n",
+			     PTR_ERR(xo_trim_conf->xo_calib_reg));
+		return;
+	}
+
+	xo_trim_conf->wcal_pbs = devm_regulator_get_optional(dev, "wcal-pbs");
+	if (IS_ERR(xo_trim_conf->wcal_pbs)) {
+		icnss_pr_dbg("Invalid wcal_pbs: %ld\n",
+			     PTR_ERR(xo_trim_conf->wcal_pbs));
+		return;
+	}
+
+	icnss_pr_dbg("XO trim initialized\n");
+}
+
+/**
+ * icnss_xo_trim_deinit - Deinitialize configurations for XO trim
+ * @priv: Pointer to icnss platform data
+ *
+ * Return: None
+ */
+void icnss_xo_trim_deinit(struct icnss_priv *priv)
+{
+	/* The resources allocated by devm_* functions will be automatically
+	 * freed by the resource manager when the device is released.
+	 */
+	icnss_pr_dbg("XO trim de-initialized\n");
+}
+
+/**
+ * icnss_xo_trim_perform - Perform the XO trim
+ * @xo_trim_conf: pointer to config for XO trim
+ *
+ * This function writes the new XO trim value to the NVMEM location exposed by
+ * PMIC. It then triggers PBS sequence using the WLAN_CAL regulator resource by
+ * calling regulator_enable(), followed by regulator_disable().
+ * This sequence causes PMIC PBS to apply the new trim value to PMIC XO trim
+ * settings, leading to an adjustment in the crystal oscillator frequency.
+ *
+ * Return: 0 on success, errno otherwise
+ */
+static int icnss_xo_trim_perform(struct icnss_xo_trim_config *xo_trim_conf)
+{
+	int ret;
+
+	if (IS_ERR_OR_NULL(xo_trim_conf->xo_calib_reg) ||
+	    IS_ERR_OR_NULL(xo_trim_conf->wcal_pbs)) {
+		icnss_pr_err("Invalid xo trim config\n");
+		return -EINVAL;
+	}
+
+	ret = nvmem_cell_write(xo_trim_conf->xo_calib_reg,
+			       &xo_trim_conf->trim_val,
+			       sizeof(xo_trim_conf->trim_val));
+	if (ret < 0) {
+		icnss_pr_err("Fail to write xo_calib_reg, ret = %d\n", ret);
+		return ret;
+	}
+
+	/* Enable/disable regulator to trigger PBS sequence */
+	ret = regulator_enable(xo_trim_conf->wcal_pbs);
+	if (ret) {
+		icnss_pr_err("Fail to enable wcal_pbs: %d\n", ret);
+		return ret;
+	}
+
+	ret = regulator_disable(xo_trim_conf->wcal_pbs);
+	if (ret) {
+		icnss_pr_err("Fail to disable wcal_pbs: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+/**
+ * icnss_set_xo_trim - API for XO trim operation.
+ * @priv: Pointer to platform driver context.
+ * @data: Pointer to event data that holds the trim value.
+ *
+ * This function performs XO trim and notifies target of the result.
+ *
+ * Return: 0 on success, errno othrewise
+ */
+static int icnss_set_xo_trim(struct icnss_priv *priv, void *data)
+{
+	int ret = -EINVAL;
+
+	if (!data)
+		goto out;
+
+	priv->xo_trim_conf.trim_val = *((u8 *)data);
+	kfree(data);
+
+	ret = icnss_xo_trim_perform(&priv->xo_trim_conf);
+	icnss_pr_dbg("XO trim result with value(%u): %d\n",
+		     priv->xo_trim_conf.trim_val, ret);
+
+out:
+	return icnss_wlfw_xo_trim_result_send_sync(priv, ret);
+}
+
 static void icnss_driver_event_work(struct work_struct *work)
 {
 	struct icnss_priv *priv =
@@ -2828,6 +2954,9 @@ static void icnss_driver_event_work(struct work_struct *work)
 		case ICNSS_DRIVER_EVENT_WLFW_TWT_CFG_IND:
 			ret = icnss_process_twt_cfg_ind_event(priv,
 							     event->data);
+			break;
+		case ICNSS_DRIVER_EVENT_XO_TRIM_IND:
+			ret = icnss_set_xo_trim(priv, event->data);
 			break;
 		default:
 			icnss_pr_err("Invalid Event type: %d", event->type);
@@ -5662,6 +5791,8 @@ static int icnss_resource_parse(struct icnss_priv *priv)
 		}
 	}
 
+	/* Non-fatal and continue if configuration is unavailable */
+	icnss_xo_trim_init(priv);
 	return 0;
 
 put_clk:
