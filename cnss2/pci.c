@@ -4086,6 +4086,12 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 		goto skip_power_off;
 	}
 
+	if (plat_priv->is_fw_managed_pwr &&
+	    test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state)) {
+		cnss_pr_dbg("Device is already idle shutdown, skip power off\n");
+		goto skip_power_off;
+	}
+
 	if (test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state))
 		do_force_wake = false;
 	cnss_pci_set_wlaon_pwr_ctrl(pci_priv, false, true, do_force_wake);
@@ -7354,6 +7360,12 @@ int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 
 	if (!cnss_is_device_powered_on(plat_priv)) {
 		cnss_pr_dbg("Device is already powered off, skip\n");
+		goto out;
+	}
+
+	if (plat_priv->is_fw_managed_pwr &&
+	    test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state)) {
+		cnss_pr_dbg("Device is already idle shutdown, skip\n");
 		goto out;
 	}
 
