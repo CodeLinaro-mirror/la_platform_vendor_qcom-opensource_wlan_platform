@@ -332,4 +332,6 @@ int cnss_pci_get_user_msi_assignment(struct cnss_pci_data *pci_priv,
 				     u32 *user_base_data,
 				     u32 *base_vector);
 void cnss_register_iommu_fault_handler_irq(struct cnss_pci_data *pci_priv);
+int cnss_pci_get_msi_address(struct cnss_pci_data *pci_priv, u32 *msi_addr_low,
+			     u32 *msi_addr_high);
 #endif /* _CNSS_PCI_H */
