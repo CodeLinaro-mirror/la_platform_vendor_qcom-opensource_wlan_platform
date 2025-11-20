@@ -11,6 +11,21 @@
 
 #define CNSS_SSR_DRIVER_DUMP_MAX_REGIONS 32
 
+#define CNSS_DUMP_FORMAT_VER		0x11
+#define CNSS_DUMP_FORMAT_VER_V2		0x22
+#define CNSS_DUMP_MAGIC_VER_V2		0x42445953
+#define CNSS_DUMP_NAME			"CNSS_WLAN"
+#define CNSS_DUMP_DESC_SIZE		0x1000
+#define CNSS_DUMP_SEG_VER		0x1
+
+#define CNSS_FS_NAME			"cnss"
+#define CNSS_FS_NAME_SIZE		15
+
+enum cnss_recovery_type {
+	CNSS_WLAN_RECOVERY = 0x1,
+	CNSS_PCSS_RECOVERY = 0x2,
+};
+
 struct device;
 
 enum cnss_utils_cc_src {
