@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _NET_CNSS2_H
@@ -9,6 +9,10 @@
 
 #include <linux/pci.h>
 #include "cnss_utils.h"
+#ifdef CONFIG_CNSS2_SDIO
+#include <linux/mmc/sdio_func.h>
+#include <linux/mmc/sdio_ids.h>
+#endif
 
 #define CNSS_MAX_FILE_NAME		20
 #define CNSS_MAX_TIMESTAMP_LEN		32
@@ -32,6 +36,19 @@ enum cnss_platform_cap_flag {
 	CNSS_HAS_DRV_SUPPORT = 0x04,
 };
 
+#ifdef CONFIG_CNSS2_SDIO
+struct cnss_sdio_wlan_driver {
+	const char *name;
+	const struct sdio_device_id *id_table;
+	int (*probe)(struct sdio_func *func, const struct sdio_device_id *id);
+	void (*remove)(struct sdio_func *func);
+	int (*reinit)(struct sdio_func *func, const struct sdio_device_id *id);
+	void (*shutdown)(struct sdio_func *func);
+	void (*crash_shutdown)(struct sdio_func *func);
+	int (*suspend)(struct device *dev);
+	int (*resume)(struct device *dev);
+};
+#endif
 struct cnss_platform_cap {
 	u32 cap_flag;
 };
@@ -350,4 +367,25 @@ extern void cnss_get_cpumask_for_wlan_rx_interrupts(struct device *dev,
 						    unsigned int *cpumask);
 extern void cnss_get_cpumask_for_wlan_tx_comp_interrupts(struct device *dev,
 							 unsigned int *cpumask);
+
+#ifdef CONFIG_CNSS2_SDIO
+extern int cnss_sdio_request_bus_bandwidth(int bandwidth);
+extern void cnss_sdio_device_crashed(void);
+extern void cnss_sdio_device_self_recovery(void);
+extern void *cnss_sdio_get_virt_ramdump_mem(unsigned long *size);
+extern void cnss_sdio_schedule_recovery_work(void);
+extern int cnss_sdio_set_wlan_mac_address(const u8 *in, u32 len);
+extern u8 *cnss_sdio_get_wlan_mac_address(u32 *num);
+extern int cnss_sdio_power_up(struct device *dev);
+extern int cnss_sdio_power_down(struct device *dev);
+extern const char *cnss_wlan_get_evicted_data_file(void);
+extern void *cnss_common_get_virt_ramdump_mem(struct device *dev, unsigned long *size);
+extern void cnss_common_device_crashed(struct device *dev);
+extern void cnss_common_device_self_recovery(struct device *dev);
+extern void cnss_common_schedule_recovery_work(struct device *dev);
+extern int cnss_sdio_wlan_register_driver(struct cnss_sdio_wlan_driver *driver);
+extern void cnss_sdio_wlan_unregister_driver(struct cnss_sdio_wlan_driver *driver);
+extern void cnss_get_qca9377_fw_files(struct cnss_fw_files *pfw_files,
+			       u32 size, u32 tufello_dual_fw);
+#endif
 #endif /* _NET_CNSS2_H */

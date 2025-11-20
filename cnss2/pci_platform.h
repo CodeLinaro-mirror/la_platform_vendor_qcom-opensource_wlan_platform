@@ -261,6 +261,9 @@ static inline bool cnss_pci_get_drv_supported(struct cnss_pci_data *pci_priv)
  *
  * Return: true for sync mode, false for unsync mode
  */
-bool cnss_pci_is_sync_probe(void);
+bool cnss_pci_is_sync_probe(struct cnss_plat_data *plat_priv);
+
+void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv);
+void cnss_pci_sw_reset(struct cnss_pci_data *pci_priv, bool power_on);
 
 #endif /* _CNSS_PCI_PLATFORM_H*/

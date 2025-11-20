@@ -374,8 +374,6 @@ enum cnss_driver_state {
 	CNSS_SHUTDOWN_DEVICE,
 	CNSS_POWERING_ON,
 	CNSS_SEC_DOWNLOAD,
-	CNSS_SOL_REGISTERED,
-
 };
 
 struct cnss_recovery_data {
@@ -521,6 +519,7 @@ struct cnss_thermal_cdev {
 
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
+	enum cnss_driver_mode driver_mode;
 	void *bus_priv;
 	enum cnss_dev_bus_type bus_type;
 	struct list_head vreg_list;
@@ -675,6 +674,7 @@ struct cnss_plat_data {
 	struct task_struct *cnss_event_work_task;
 	u64 pcie_time_sync_offset;
 	bool is_fw_managed_pwr;
+	bool is_gunyah;
 	struct device **pd_devs;
 	int pd_count;
 	bool pm_suspend_in_progress;
@@ -792,7 +792,6 @@ size_t cnss_get_platform_name(struct cnss_plat_data *plat_priv,
 			      char *buf, const size_t buf_len);
 int cnss_iommu_map(struct iommu_domain *domain, unsigned long iova,
 		   phys_addr_t paddr, size_t size, int prot);
-int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv);
 int cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
 				    bool enabled);
 int cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv,

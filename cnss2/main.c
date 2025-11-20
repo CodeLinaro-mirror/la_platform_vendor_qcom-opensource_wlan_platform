@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/delay.h>
@@ -99,6 +99,11 @@ enum cnss_recovery_type {
 	CNSS_PCSS_RECOVERY = 0x2,
 };
 
+#ifdef CONFIG_CNSS2_SDIO
+/* variable to hold the insmod parameters */
+int g_sdio_mode;
+#endif
+
 #ifdef CONFIG_CNSS_SUPPORT_DUAL_DEV
 #define CNSS_MAX_DEV_NUM		2
 static struct cnss_plat_data *plat_env[CNSS_MAX_DEV_NUM];
@@ -109,12 +114,12 @@ static struct cnss_plat_data *plat_env;
 
 static bool cnss_allow_driver_loading;
 
-static struct cnss_fw_files FW_FILES_QCA6174_FW_3_0 = {
+struct cnss_fw_files FW_FILES_QCA6174_FW_3_0 = {
 	"qwlan30.bin", "bdwlan30.bin", "otp30.bin", "utf30.bin",
 	"utfbd30.bin", "epping30.bin", "evicted30.bin"
 };
 
-static struct cnss_fw_files FW_FILES_DEFAULT = {
+struct cnss_fw_files FW_FILES_DEFAULT = {
 	"qwlan.bin", "bdwlan.bin", "otp.bin", "utf.bin",
 	"utfbd.bin", "epping.bin", "evicted.bin"
 };
@@ -1766,6 +1771,8 @@ static int cnss_get_resources(struct cnss_plat_data *plat_priv)
 
 	if (plat_priv->is_fw_managed_pwr) {
 		ret = cnss_fw_managed_domain_attach(plat_priv);
+		if (ret)
+			cnss_pr_err("Failed to attach pd, err = %d\n", ret);
 		goto out;
 	}
 
@@ -2108,7 +2115,7 @@ static void cnss_deinit_host_sol_gpio(struct cnss_plat_data *plat_priv)
 	gpio_free(sol_gpio->host_sol_gpio);
 }
 
-int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
+static int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
 {
 	int ret;
 
@@ -3819,6 +3826,53 @@ put_device:
 #endif
 #endif /* CONFIG_MSM_SUBSYSTEM_RESTART */
 
+static int cnss_register_ramdump_v0(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
+	struct cnss_dump_data *dump_data = dump_data = &info_v2->dump_data;
+	struct device *dev = &plat_priv->plat_dev->dev;
+	u32 ramdump_size = 0;
+	int ret = 0;
+
+	if (plat_priv->dt_type != CNSS_DTT_MULTIEXCHG)
+		ret = of_property_read_u32(dev->of_node,
+					   "qcom,wlan-ramdump-dynamic",
+					   &ramdump_size);
+	else
+		ret = of_property_read_u32(plat_priv->dev_node,
+					   "qcom,wlan-ramdump-dynamic",
+					   &ramdump_size);
+	if (ret == 0)
+		info_v2->ramdump_size = ramdump_size;
+
+	cnss_pr_dbg("Ramdump size 0x%lx\n", info_v2->ramdump_size);
+
+	info_v2->dump_data_vaddr = kzalloc(CNSS_DUMP_DESC_SIZE, GFP_KERNEL);
+	if (!info_v2->dump_data_vaddr)
+		return -ENOMEM;
+
+	dump_data->paddr = virt_to_phys(info_v2->dump_data_vaddr);
+	dump_data->version = CNSS_DUMP_FORMAT_VER_V2;
+	dump_data->magic = CNSS_DUMP_MAGIC_VER_V2;
+	dump_data->seg_version = CNSS_DUMP_SEG_VER;
+	strscpy(dump_data->name, CNSS_DUMP_NAME,
+		sizeof(dump_data->name));
+
+	info_v2->ramdump_dev = dev;
+
+	return 0;
+}
+
+static void cnss_unregister_ramdump_v0(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
+
+	info_v2->ramdump_dev = NULL;
+	kfree(info_v2->dump_data_vaddr);
+	info_v2->dump_data_vaddr = NULL;
+	info_v2->dump_data_valid = false;
+}
+
 #if IS_ENABLED(CONFIG_QCOM_MEMORY_DUMP_V2)
 static int cnss_init_dump_entry(struct cnss_plat_data *plat_priv)
 {
@@ -4012,6 +4066,11 @@ int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
 
+	if (plat_priv->is_gunyah) {
+		ret = cnss_register_ramdump_v0(plat_priv);
+		goto out;
+	}
+
 	switch (plat_priv->device_id) {
 	case QCA6174_DEVICE_ID:
 		ret = cnss_register_ramdump_v1(plat_priv);
@@ -4032,11 +4091,18 @@ int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 		ret = -ENODEV;
 		break;
 	}
+
+out:
 	return ret;
 }
 
 void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 {
+	if (plat_priv->is_gunyah) {
+		cnss_unregister_ramdump_v0(plat_priv);
+		return;
+	}
+
 	switch (plat_priv->device_id) {
 	case QCA6174_DEVICE_ID:
 		cnss_unregister_ramdump_v1(plat_priv);
@@ -4060,41 +4126,12 @@ void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 #else
 int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 {
-	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
-	struct cnss_dump_data *dump_data = dump_data = &info_v2->dump_data;
-	struct device *dev = &plat_priv->plat_dev->dev;
-	u32 ramdump_size = 0;
-
-	if (of_property_read_u32(dev->of_node, "qcom,wlan-ramdump-dynamic",
-				 &ramdump_size) == 0)
-		info_v2->ramdump_size = ramdump_size;
-
-	cnss_pr_dbg("Ramdump size 0x%lx\n", info_v2->ramdump_size);
-
-	info_v2->dump_data_vaddr = kzalloc(CNSS_DUMP_DESC_SIZE, GFP_KERNEL);
-	if (!info_v2->dump_data_vaddr)
-		return -ENOMEM;
-
-	dump_data->paddr = virt_to_phys(info_v2->dump_data_vaddr);
-	dump_data->version = CNSS_DUMP_FORMAT_VER_V2;
-	dump_data->magic = CNSS_DUMP_MAGIC_VER_V2;
-	dump_data->seg_version = CNSS_DUMP_SEG_VER;
-	strscpy(dump_data->name, CNSS_DUMP_NAME,
-		sizeof(dump_data->name));
-
-	info_v2->ramdump_dev = dev;
-
-	return 0;
+	return cnss_register_ramdump_v0(plat_priv);
 }
 
 void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 {
-	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
-
-	info_v2->ramdump_dev = NULL;
-	kfree(info_v2->dump_data_vaddr);
-	info_v2->dump_data_vaddr = NULL;
-	info_v2->dump_data_valid = false;
+	cnss_unregister_ramdump_v0(plat_priv);
 }
 #endif /* CONFIG_QCOM_MEMORY_DUMP_V2 */
 
@@ -5177,6 +5214,10 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 {
 	int ret;
 
+	ret = cnss_init_sol_gpio(plat_priv);
+	if (ret)
+		return ret;
+
 	timer_setup(&plat_priv->fw_boot_timer,
 		    cnss_bus_fw_boot_timeout_hdlr, 0);
 
@@ -5468,6 +5509,13 @@ cnss_resource_is_fw_managed(struct cnss_plat_data *plat_priv)
 {
 	return of_property_read_bool(plat_priv->plat_dev->dev.of_node,
 				     "firmware-managed-resources");
+}
+
+static inline bool
+cnss_is_gunyah_hypervisor(struct cnss_plat_data *plat_priv)
+{
+	return of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				     "gunyah-hypervisor");
 }
 
 static int cnss_wlan_device_init(struct cnss_plat_data *plat_priv)
@@ -5830,6 +5878,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 		cnss_use_fw_path_with_prefix(plat_priv);
 
 	plat_priv->is_fw_managed_pwr = cnss_resource_is_fw_managed(plat_priv);
+	plat_priv->is_gunyah = cnss_is_gunyah_hypervisor(plat_priv);
 
 	ret = cnss_get_dev_cfg_node(plat_priv);
 	if (ret) {
@@ -6077,6 +6126,39 @@ static bool cnss_is_valid_dt_node_found(void)
 	return false;
 }
 
+#ifdef CONFIG_CNSS2_SDIO
+extern struct platform_driver cnss_sdio_driver;
+static int cnss_register_platform_driver(void)
+{
+	int ret = 0;
+
+	if (g_sdio_mode)
+		ret = platform_driver_register(&cnss_sdio_driver);
+	else
+		ret = platform_driver_register(&cnss_platform_driver);
+
+	return ret;
+}
+
+static void cnss_unregister_platform_driver(void)
+{
+	if (g_sdio_mode)
+		platform_driver_unregister(&cnss_sdio_driver);
+	else
+		platform_driver_unregister(&cnss_platform_driver);
+}
+#else
+static int cnss_register_platform_driver(void)
+{
+	return platform_driver_register(&cnss_platform_driver);
+}
+
+static void cnss_unregister_platform_driver(void)
+{
+	platform_driver_unregister(&cnss_platform_driver);
+}
+#endif
+
 static int __init cnss_initialize(void)
 {
 	int ret = 0;
@@ -6088,7 +6170,8 @@ static int __init cnss_initialize(void)
 		return ret;
 
 	cnss_debug_init();
-	ret = platform_driver_register(&cnss_platform_driver);
+
+	ret = cnss_register_platform_driver();
 	if (ret)
 		cnss_debug_deinit();
 
@@ -6103,9 +6186,32 @@ static int __init cnss_initialize(void)
 static void __exit cnss_exit(void)
 {
 	cnss_genl_exit();
-	platform_driver_unregister(&cnss_platform_driver);
+	cnss_unregister_platform_driver();
 	cnss_debug_deinit();
 }
+
+#ifdef CONFIG_CNSS2_SDIO
+static int sdio_mode_handler(const char *kmessage, const struct kernel_param *kp)
+{
+	uint32_t sdio_mode = 0;
+
+	int ret = kstrtoint(kmessage, 10, &sdio_mode);
+	if (ret == 0) {
+		*(int *)kp->arg = sdio_mode;
+		g_sdio_mode = sdio_mode;
+		printk("%s:ygs:sdio mode is %d\n", __func__, g_sdio_mode);
+	}
+	return ret;
+}
+
+const struct kernel_param_ops sdio_mode_ops = {
+	.set = sdio_mode_handler,
+	.get = param_get_int,
+};
+
+module_param_cb(sdio_mode, &sdio_mode_ops, &g_sdio_mode,
+		S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+#endif
 
 module_init(cnss_initialize);
 module_exit(cnss_exit);
