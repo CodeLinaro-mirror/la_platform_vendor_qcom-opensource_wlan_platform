@@ -6066,6 +6066,12 @@ out:
 #endif
 }
 
+#ifdef CONFIG_CNSS_SHUTDOWN_CALLBACK
+static void cnss_shutdown(struct platform_device *plat_dev)
+{
+	cnss_remove(plat_dev);
+}
+#else
 static void cnss_shutdown(struct platform_device *plat_dev)
 {
 	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
@@ -6075,6 +6081,7 @@ static void cnss_shutdown(struct platform_device *plat_dev)
 		cnss_power_off_device(plat_priv);
 	}
 }
+#endif
 
 static struct platform_driver cnss_platform_driver = {
 	.probe  = cnss_probe,
