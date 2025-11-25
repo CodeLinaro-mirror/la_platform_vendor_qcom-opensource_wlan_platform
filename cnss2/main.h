@@ -674,6 +674,7 @@ struct cnss_plat_data {
 	struct task_struct *cnss_event_work_task;
 	u64 pcie_time_sync_offset;
 	bool is_fw_managed_pwr;
+	bool is_gunyah;
 	struct device **pd_devs;
 	int pd_count;
 	bool pm_suspend_in_progress;

@@ -16,24 +16,62 @@ static struct cnss_msi_config msi_config = {
 	},
 };
 
+/**
+ * cnss_pci_is_sync_probe(): check whether wlan device
+ * is powered with scmi way.
+ *
+ * For upstream PCIe ECAM driver, wlan powerup/PCIe enumeration
+ * is controlled by low level GearVM system with scmi way.
+ * This API is used to distinguish downstream/upstream PCIe
+ * driver case.
+ *
+ * Return: true for scmi way, false for non-scmi way
+ */
+static bool cnss_is_fw_managed_pwr(struct cnss_pci_data *pci_priv)
+{
+	struct cnss_plat_data *plat_priv;
+
+	if (!pci_priv) {
+		cnss_pr_err("pci_priv is NULL\n");
+		return false;
+	}
+
+	plat_priv = pci_priv->plat_priv;
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return false;
+	}
+
+	return plat_priv->is_fw_managed_pwr;
+}
+
 int _cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
 {
-	return msm_pcie_enumerate(rc_num);
+	if (plat_priv->is_fw_managed_pwr)
+		return 0;
+	else
+		return msm_pcie_enumerate(rc_num);
 }
 
 int cnss_pci_assert_perst(struct cnss_pci_data *pci_priv)
 {
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
 
-	return msm_pcie_pm_control(MSM_PCIE_HANDLE_LINKDOWN,
-				   pci_dev->bus->number, pci_dev, NULL,
-				   PM_OPTIONS_DEFAULT);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return -EOPNOTSUPP;
+	else
+		return msm_pcie_pm_control(MSM_PCIE_HANDLE_LINKDOWN,
+				pci_dev->bus->number, pci_dev, NULL,
+				PM_OPTIONS_DEFAULT);
 }
 
 #if IS_ENABLED(CONFIG_CNSS2_FMD_FEATURE_ENABLE)
 int cnss_pci_fmd_enable(struct cnss_pci_data *pci_priv)
 {
-	return msm_pcie_fmd_enable(pci_priv->pci_dev);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return -EOPNOTSUPP;
+	else
+		return msm_pcie_fmd_enable(pci_priv->pci_dev);
 }
 #else
 int cnss_pci_fmd_enable(struct cnss_pci_data *pci_priv)
@@ -46,23 +84,33 @@ int cnss_pci_disable_pc(struct cnss_pci_data *pci_priv, bool vote)
 {
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
 
-	return msm_pcie_pm_control(vote ? MSM_PCIE_DISABLE_PC :
-				   MSM_PCIE_ENABLE_PC,
-				   pci_dev->bus->number, pci_dev, NULL,
-				   PM_OPTIONS_DEFAULT);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_pm_control(vote ? MSM_PCIE_DISABLE_PC :
+					MSM_PCIE_ENABLE_PC,
+					pci_dev->bus->number, pci_dev, NULL,
+					PM_OPTIONS_DEFAULT);
 }
 
 int cnss_pci_set_link_bandwidth(struct cnss_pci_data *pci_priv,
 				u16 link_speed, u16 link_width)
 {
-	return msm_pcie_set_link_bandwidth(pci_priv->pci_dev,
-					   link_speed, link_width);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_set_link_bandwidth(pci_priv->pci_dev,
+						link_speed, link_width);
 }
 
 int cnss_pci_set_max_link_speed(struct cnss_pci_data *pci_priv,
 				u32 rc_num, u16 link_speed)
 {
-	return msm_pcie_set_target_link_speed(rc_num, link_speed, false);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_set_target_link_speed(rc_num,
+						link_speed, false);
 }
 
 /**
@@ -159,6 +207,11 @@ void cnss_pci_update_drv_supported(struct cnss_pci_data *pci_priv)
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	struct device_node *root_of_node;
 	bool drv_supported = false;
+
+	if (plat_priv && plat_priv->is_fw_managed_pwr) {
+		pci_priv->drv_supported = false;
+		return;
+	}
 
 	if (!root_port) {
 		cnss_pr_err("PCIe DRV is not supported as root port is null\n");
@@ -257,6 +310,9 @@ int cnss_reg_pci_event(struct cnss_pci_data *pci_priv)
 	int ret = 0;
 	struct msm_pcie_register_event *pci_event;
 
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return ret;
+
 	pci_event = &pci_priv->msm_pci_event;
 	pci_event->events = MSM_PCIE_EVENT_LINK_RECOVER |
 			    MSM_PCIE_EVENT_LINKDOWN |
@@ -282,7 +338,8 @@ int cnss_reg_pci_event(struct cnss_pci_data *pci_priv)
 
 void cnss_dereg_pci_event(struct cnss_pci_data *pci_priv)
 {
-	msm_pcie_deregister_event(&pci_priv->msm_pci_event);
+	if (!cnss_is_fw_managed_pwr(pci_priv))
+		msm_pcie_deregister_event(&pci_priv->msm_pci_event);
 }
 
 int cnss_wlan_adsp_pc_enable(struct cnss_pci_data *pci_priv,
@@ -292,6 +349,9 @@ int cnss_wlan_adsp_pc_enable(struct cnss_pci_data *pci_priv,
 	int ret = 0;
 	u32 pm_options = PM_OPTIONS_DEFAULT;
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+
+	if (plat_priv && plat_priv->is_fw_managed_pwr)
+		return ret;
 
 	if (!cnss_pci_get_drv_supported(pci_priv))
 		return 0;
@@ -367,6 +427,9 @@ int cnss_set_pci_link(struct cnss_pci_data *pci_priv, bool link_up)
 
 	cnss_pr_vdbg("%s PCI link\n", link_up ? "Resuming" : "Suspending");
 
+	if (plat_priv && plat_priv->is_fw_managed_pwr)
+		return ret;
+
 	if (link_up) {
 retry:
 		ret = cnss_pci_set_link_up(pci_priv);
@@ -403,12 +466,15 @@ int cnss_pci_prevent_l1(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int ret;
+	int ret = 0;
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
 	}
+
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return ret;
 
 	mutex_lock(&pci_priv->bus_lock);
 	ret = __cnss_pci_prevent_l1(dev);
@@ -422,12 +488,15 @@ int __cnss_pci_prevent_l1(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int ret;
+	int ret = 0;
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
 	}
+
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return ret;
 
 	if (pci_priv->pci_link_state == PCI_LINK_DOWN) {
 		cnss_pr_err("PCIe link is in suspend state\n");
@@ -458,6 +527,9 @@ void cnss_pci_allow_l1(struct device *dev)
 		return;
 	}
 
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return;
+
 	mutex_lock(&pci_priv->bus_lock);
 	__cnss_pci_allow_l1(dev);
 	mutex_unlock(&pci_priv->bus_lock);
@@ -474,6 +546,9 @@ void __cnss_pci_allow_l1(struct device *dev)
 		return;
 	}
 
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return;
+
 	if (pci_priv->pci_link_state == PCI_LINK_DOWN) {
 		cnss_pr_err("PCIe link is in suspend state\n");
 		return;
@@ -487,9 +562,12 @@ void __cnss_pci_allow_l1(struct device *dev)
 	_cnss_pci_allow_l1(pci_priv);
 }
 
-bool cnss_pci_is_sync_probe(void)
+bool cnss_pci_is_sync_probe(struct cnss_plat_data *plat_priv)
 {
-	return true;
+	if (plat_priv->is_fw_managed_pwr)
+		return false;
+	else
+		return true;
 }
 
 int cnss_pci_get_msi_assignment(struct cnss_pci_data *pci_priv)
@@ -691,5 +769,304 @@ int cnss_pci_init_smmu(struct cnss_pci_data *pci_priv)
 int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 			   u8 *buf, u32 len)
 {
-	return msm_pcie_reg_dump(pci_priv->pci_dev, buf, len);
+	if (cnss_is_fw_managed_pwr(pci_priv))
+		return 0;
+	else
+		return msm_pcie_reg_dump(pci_priv->pci_dev, buf, len);
+}
+
+struct cnss_sw_reset_reg_params reset_reg_params = {
+	.pcie_txvecdb = 0x360,
+	.pcie_txvecstatus = 0x368,
+	.pcie_rxvecdb = 0x394,
+	.pcie_rxvecstatus = 0x39c,
+	.pcie_parf_ltssm = 0x1e081b0,
+	.ltssm_value = 0x111,
+	.pcie_int_all_clear = 0x1e08228,
+	.pcie_int_clear_all = 0xffffffff,
+	.wlaon_qfprom_pwr_ctrl_reg = 0x01f8031c,
+	.qfprom_pwr_ctrl_vdd4blow_mask = 0x4,
+	.wlaon_warm_sw_entry = 0x1f80504,
+	.wlaon_soc_reset_cause_reg = 0x01f8060c,
+	.pcie_q6_cookie_addr = 0x01f80500,
+	.pcie_soc_global_reset = 0x3008,
+	.pcie_soc_global_reset_v = 0x1,
+	.mhistatus = 0x48,
+	.mhictrl = 0x38,
+	.mhictrl_reset_mask = 0x2,
+};
+
+void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv)
+{
+	if (!cnss_is_fw_managed_pwr(pci_priv))
+		return;
+
+	switch (pci_priv->pci_dev->device) {
+	case QCA6390_DEVICE_ID:
+	case QCA6490_DEVICE_ID:
+	case KIWI_DEVICE_ID:
+		pci_priv->reset_regs = &reset_reg_params;
+		break;
+	default:
+		cnss_pr_err("Not support get device 0x%x reset reg params",
+			    pci_priv->pci_dev->device);
+		pci_priv->reset_regs = NULL;
+		return;
+	}
+
+	cnss_pr_info("init reset regs for device 0x%x\n",
+		     pci_priv->pci_dev->device);
+
+	return;
+}
+
+static void cnss_mhi_reset_txvecdb(struct cnss_pci_data *pci_priv)
+{
+	int ret;
+	unsigned int offset;
+
+	offset = pci_priv->reset_regs->pcie_txvecdb;
+	ret = cnss_pci_reg_write(pci_priv, offset, 0);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register 0x%x, err %d\n",
+			    0, offset, ret);
+		return;
+	}
+}
+
+static void cnss_mhi_reset_txvecstatus(struct cnss_pci_data *pci_priv)
+{
+	int ret;
+	unsigned int offset;
+
+	offset = pci_priv->reset_regs->pcie_txvecstatus;
+	ret = cnss_pci_reg_write(pci_priv, offset, 0);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register 0x%x, err %d\n",
+			    0, offset, ret);
+		return;
+	}
+}
+
+static void cnss_mhi_reset_rxvecdb(struct cnss_pci_data *pci_priv)
+{
+	int ret;
+	unsigned int offset;
+
+	offset = pci_priv->reset_regs->pcie_rxvecdb;
+	ret = cnss_pci_reg_write(pci_priv, offset, 0);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register 0x%x, err %d\n",
+			    0, offset, ret);
+		return;
+	}
+}
+
+static void cnss_mhi_reset_rxvecstatus(struct cnss_pci_data *pci_priv)
+{
+	int ret;
+	unsigned int offset;
+
+	offset = pci_priv->reset_regs->pcie_rxvecstatus;
+	ret = cnss_pci_reg_write(pci_priv, offset, 0);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register 0x%x, err %d\n",
+			    0, offset, ret);
+		return;
+	}
+}
+
+static void cnss_mhi_clear_vector(struct cnss_pci_data *pci_priv)
+{
+	cnss_mhi_reset_txvecdb(pci_priv);
+	cnss_mhi_reset_txvecstatus(pci_priv);
+	cnss_mhi_reset_rxvecdb(pci_priv);
+	cnss_mhi_reset_rxvecstatus(pci_priv);
+}
+
+static void cnss_pci_enable_ltssm(struct cnss_pci_data *pci_priv)
+{
+	unsigned int val;
+	int i, ret;
+	unsigned int ltssm_offset, ltssm_val;
+
+	ltssm_offset = pci_priv->reset_regs->pcie_parf_ltssm;
+	ltssm_val = pci_priv->reset_regs->ltssm_value;
+
+	cnss_pci_reg_read(pci_priv, ltssm_offset, &val);
+
+	/* PCIE link seems very unstable after the Hot Reset*/
+	for (i = 0; val != ltssm_val && i < 5; i++) {
+		if (val == 0xffffffff)
+			mdelay(5);
+
+		ret = cnss_pci_reg_write(pci_priv, ltssm_offset, ltssm_val);
+		if (ret) {
+			cnss_pr_err("Failed to write 0x%x to register 0x%x, err %d\n",
+				    ltssm_val,
+				    ltssm_offset, ret);
+			return;
+		}
+		cnss_pci_reg_read(pci_priv, ltssm_offset, &val);
+	}
+	cnss_pr_dbg("ltssm val 0x%x\n", val);
+}
+
+static void cnss_pci_clear_all_intrs(struct cnss_pci_data *pci_priv)
+{
+	int ret;
+	unsigned int offset, val;
+
+	offset = pci_priv->reset_regs->pcie_int_all_clear;
+	val = pci_priv->reset_regs->pcie_int_clear_all;
+
+	ret = cnss_pci_reg_write(pci_priv, offset, val);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register 0x%x, err %d\n",
+			    val, offset, ret);
+		return;
+	}
+}
+
+static void cnss_pci_reset_wlaon_pwr_ctrl(struct cnss_pci_data *pci_priv)
+{
+	unsigned int val;
+	int ret;
+	unsigned int offset, vdd4blow_mask;
+
+	offset = pci_priv->reset_regs->wlaon_qfprom_pwr_ctrl_reg;
+	vdd4blow_mask = pci_priv->reset_regs->qfprom_pwr_ctrl_vdd4blow_mask;
+
+	cnss_pci_reg_read(pci_priv, offset, &val);
+	cnss_pr_dbg("wlaon_qfprom_pwr_ctrl_reg val 0x%x\n", val);
+
+	val &= ~vdd4blow_mask;
+	ret = cnss_pci_reg_write(pci_priv, offset, val);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register 0x%x, err %d\n",
+			    val, offset, ret);
+		return;
+	}
+}
+
+static void cnss_pci_clear_dbg_registers(struct cnss_pci_data *pci_priv)
+{
+	unsigned int val;
+	int ret = 0;
+	unsigned int warm_sw_entry, soc_reset_cause_reg, q6_cookie;
+
+	warm_sw_entry = pci_priv->reset_regs->wlaon_warm_sw_entry;
+	soc_reset_cause_reg = pci_priv->reset_regs->wlaon_soc_reset_cause_reg;
+	q6_cookie = pci_priv->reset_regs->pcie_q6_cookie_addr;
+
+	cnss_pci_reg_read(pci_priv, q6_cookie, &val);
+	cnss_pr_dbg("pcie_q6_cookie val 0x%x\n", val);
+
+	cnss_pci_reg_read(pci_priv, warm_sw_entry, &val);
+	cnss_pr_dbg("wlaon_warm_sw_entry val 0x%x\n", val);
+
+	/* write 0 to WLAON_WARM_SW_ENTRY to prevent Q6 from
+	 * continuing warm path and entering dead loop.
+	 */
+	ret = cnss_pci_reg_write(pci_priv, warm_sw_entry, 0);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register offset 0x%x, err %d\n",
+			    0, warm_sw_entry, ret);
+		return;
+	}
+	mdelay(10);
+
+	cnss_pci_reg_read(pci_priv, warm_sw_entry, &val);
+	cnss_pr_dbg("wlaon_warm_sw_entry val 0x%x\n", val);
+
+	/* A read clear register. clear the register to prevent
+	 * Q6 from entering wrong code path.
+	 */
+	cnss_pci_reg_read(pci_priv, soc_reset_cause_reg, &val);
+	cnss_pr_dbg("soc_reset_cause_reg val %d\n", val);
+}
+
+static void cnss_pci_soc_global_reset(struct cnss_pci_data *pci_priv)
+{
+	unsigned int val;
+	int ret = 0;
+	unsigned int soc_global_reset, soc_global_reset_v;
+
+	soc_global_reset = pci_priv->reset_regs->pcie_soc_global_reset;
+	soc_global_reset_v = pci_priv->reset_regs->pcie_soc_global_reset_v;
+
+	cnss_pci_reg_read(pci_priv, soc_global_reset, &val);
+	cnss_pr_dbg("soc_global_reset val 0x%x\n", val);
+	val |= soc_global_reset_v;
+
+	ret = cnss_pci_reg_write(pci_priv, soc_global_reset, val);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register offset 0x%x, err %d\n",
+			    val, soc_global_reset, ret);
+		return;
+	}
+
+	mdelay(10);
+
+	val &= ~soc_global_reset_v;
+
+	ret = cnss_pci_reg_write(pci_priv, soc_global_reset, val);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register offset 0x%x, err %d\n",
+			    val, soc_global_reset, ret);
+		return;
+	}
+	mdelay(10);
+
+	cnss_pci_reg_read(pci_priv, soc_global_reset, &val);
+	if (val == 0xffffffff)
+		cnss_pr_err("link down error during global reset\n");
+
+	cnss_pr_dbg("soc_global_reset final val 0x%x\n", val);
+}
+
+static void cnss_mhi_set_mhictrl_reset(struct cnss_pci_data *pci_priv)
+{
+	unsigned int val;
+	int ret = 0;
+	unsigned int mhistatus, mhictrl, reset_mask;
+
+	mhistatus = pci_priv->reset_regs->mhistatus;
+	mhictrl = pci_priv->reset_regs->mhictrl;
+	reset_mask = pci_priv->reset_regs->mhictrl_reset_mask;
+
+	cnss_pci_reg_read(pci_priv, mhistatus, &val);
+	cnss_pr_dbg("mhistatus val 0x%x\n", val);
+
+	ret = cnss_pci_reg_write(pci_priv, mhictrl, reset_mask);
+	if (ret) {
+		cnss_pr_err("Failed to write 0x%x to register offset 0x%x, err = %d\n",
+			    reset_mask, mhictrl, ret);
+		return;
+	}
+	mdelay(10);
+}
+
+void cnss_pci_sw_reset(struct cnss_pci_data *pci_priv, bool power_on)
+{
+	if (!cnss_is_fw_managed_pwr(pci_priv))
+		return;
+
+	if (pci_priv->reset_regs == NULL) {
+		cnss_pr_err("Device 0x%x reset_regs NULL\n",
+			    pci_priv->pci_dev->device);
+		return;
+	}
+
+	if (power_on) {
+		cnss_pci_enable_ltssm(pci_priv);
+		cnss_pci_clear_all_intrs(pci_priv);
+		cnss_pci_reset_wlaon_pwr_ctrl(pci_priv);
+	}
+
+	cnss_mhi_clear_vector(pci_priv);
+	cnss_pci_clear_dbg_registers(pci_priv);
+	cnss_pci_soc_global_reset(pci_priv);
+	cnss_mhi_set_mhictrl_reset(pci_priv);
+	return;
 }

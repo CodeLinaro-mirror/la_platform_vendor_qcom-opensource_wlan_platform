@@ -1771,6 +1771,8 @@ static int cnss_get_resources(struct cnss_plat_data *plat_priv)
 
 	if (plat_priv->is_fw_managed_pwr) {
 		ret = cnss_fw_managed_domain_attach(plat_priv);
+		if (ret)
+			cnss_pr_err("Failed to attach pd, err = %d\n", ret);
 		goto out;
 	}
 
@@ -3824,6 +3826,53 @@ put_device:
 #endif
 #endif /* CONFIG_MSM_SUBSYSTEM_RESTART */
 
+static int cnss_register_ramdump_v0(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
+	struct cnss_dump_data *dump_data = dump_data = &info_v2->dump_data;
+	struct device *dev = &plat_priv->plat_dev->dev;
+	u32 ramdump_size = 0;
+	int ret = 0;
+
+	if (plat_priv->dt_type != CNSS_DTT_MULTIEXCHG)
+		ret = of_property_read_u32(dev->of_node,
+					   "qcom,wlan-ramdump-dynamic",
+					   &ramdump_size);
+	else
+		ret = of_property_read_u32(plat_priv->dev_node,
+					   "qcom,wlan-ramdump-dynamic",
+					   &ramdump_size);
+	if (ret == 0)
+		info_v2->ramdump_size = ramdump_size;
+
+	cnss_pr_dbg("Ramdump size 0x%lx\n", info_v2->ramdump_size);
+
+	info_v2->dump_data_vaddr = kzalloc(CNSS_DUMP_DESC_SIZE, GFP_KERNEL);
+	if (!info_v2->dump_data_vaddr)
+		return -ENOMEM;
+
+	dump_data->paddr = virt_to_phys(info_v2->dump_data_vaddr);
+	dump_data->version = CNSS_DUMP_FORMAT_VER_V2;
+	dump_data->magic = CNSS_DUMP_MAGIC_VER_V2;
+	dump_data->seg_version = CNSS_DUMP_SEG_VER;
+	strscpy(dump_data->name, CNSS_DUMP_NAME,
+		sizeof(dump_data->name));
+
+	info_v2->ramdump_dev = dev;
+
+	return 0;
+}
+
+static void cnss_unregister_ramdump_v0(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
+
+	info_v2->ramdump_dev = NULL;
+	kfree(info_v2->dump_data_vaddr);
+	info_v2->dump_data_vaddr = NULL;
+	info_v2->dump_data_valid = false;
+}
+
 #if IS_ENABLED(CONFIG_QCOM_MEMORY_DUMP_V2)
 static int cnss_init_dump_entry(struct cnss_plat_data *plat_priv)
 {
@@ -4017,6 +4066,11 @@ int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
 
+	if (plat_priv->is_gunyah) {
+		ret = cnss_register_ramdump_v0(plat_priv);
+		goto out;
+	}
+
 	switch (plat_priv->device_id) {
 	case QCA6174_DEVICE_ID:
 		ret = cnss_register_ramdump_v1(plat_priv);
@@ -4037,11 +4091,18 @@ int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 		ret = -ENODEV;
 		break;
 	}
+
+out:
 	return ret;
 }
 
 void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 {
+	if (plat_priv->is_gunyah) {
+		cnss_unregister_ramdump_v0(plat_priv);
+		return;
+	}
+
 	switch (plat_priv->device_id) {
 	case QCA6174_DEVICE_ID:
 		cnss_unregister_ramdump_v1(plat_priv);
@@ -4065,41 +4126,12 @@ void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 #else
 int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 {
-	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
-	struct cnss_dump_data *dump_data = dump_data = &info_v2->dump_data;
-	struct device *dev = &plat_priv->plat_dev->dev;
-	u32 ramdump_size = 0;
-
-	if (of_property_read_u32(dev->of_node, "qcom,wlan-ramdump-dynamic",
-				 &ramdump_size) == 0)
-		info_v2->ramdump_size = ramdump_size;
-
-	cnss_pr_dbg("Ramdump size 0x%lx\n", info_v2->ramdump_size);
-
-	info_v2->dump_data_vaddr = kzalloc(CNSS_DUMP_DESC_SIZE, GFP_KERNEL);
-	if (!info_v2->dump_data_vaddr)
-		return -ENOMEM;
-
-	dump_data->paddr = virt_to_phys(info_v2->dump_data_vaddr);
-	dump_data->version = CNSS_DUMP_FORMAT_VER_V2;
-	dump_data->magic = CNSS_DUMP_MAGIC_VER_V2;
-	dump_data->seg_version = CNSS_DUMP_SEG_VER;
-	strscpy(dump_data->name, CNSS_DUMP_NAME,
-		sizeof(dump_data->name));
-
-	info_v2->ramdump_dev = dev;
-
-	return 0;
+	return cnss_register_ramdump_v0(plat_priv);
 }
 
 void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 {
-	struct cnss_ramdump_info_v2 *info_v2 = &plat_priv->ramdump_info_v2;
-
-	info_v2->ramdump_dev = NULL;
-	kfree(info_v2->dump_data_vaddr);
-	info_v2->dump_data_vaddr = NULL;
-	info_v2->dump_data_valid = false;
+	cnss_unregister_ramdump_v0(plat_priv);
 }
 #endif /* CONFIG_QCOM_MEMORY_DUMP_V2 */
 
@@ -5479,6 +5511,13 @@ cnss_resource_is_fw_managed(struct cnss_plat_data *plat_priv)
 				     "firmware-managed-resources");
 }
 
+static inline bool
+cnss_is_gunyah_hypervisor(struct cnss_plat_data *plat_priv)
+{
+	return of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				     "gunyah-hypervisor");
+}
+
 static int cnss_wlan_device_init(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
@@ -5839,6 +5878,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 		cnss_use_fw_path_with_prefix(plat_priv);
 
 	plat_priv->is_fw_managed_pwr = cnss_resource_is_fw_managed(plat_priv);
+	plat_priv->is_gunyah = cnss_is_gunyah_hypervisor(plat_priv);
 
 	ret = cnss_get_dev_cfg_node(plat_priv);
 	if (ret) {

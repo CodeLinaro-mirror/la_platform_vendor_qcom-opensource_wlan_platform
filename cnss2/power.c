@@ -1157,7 +1157,6 @@ int cnss_get_input_gpio_value(struct cnss_plat_data *plat_priv, int gpio_num)
 	return gpio_get_value(gpio_num);
 }
 
-#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
 enum domains_t {
 	POWER_REGULATOR = 0,
 	POWER_GPIO = 1,
@@ -1211,10 +1210,13 @@ cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
 	struct device *dev = plat_priv->pd_devs[POWER_REGULATOR];
 	int ret;
 
-	if (enabled)
+	if (enabled) {
 		ret = pm_runtime_resume_and_get(dev);
-	else
+	} else {
+		if (!plat_priv->pm_suspend_in_progress)
+			atomic_set(&dev->power.usage_count, 1);
 		ret = pm_runtime_put_sync(dev);
+	}
 
 	if (ret < 0)
 		cnss_pr_err("regulator operation failed with err=%d\n", ret);
@@ -1228,10 +1230,13 @@ cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
 	struct device *dev = plat_priv->pd_devs[POWER_GPIO];
 	int ret;
 
-	if (enabled)
+	if (enabled) {
 		ret = pm_runtime_resume_and_get(dev);
-	else
+	} else {
+		if (!plat_priv->pm_suspend_in_progress)
+			atomic_set(&dev->power.usage_count, 1);
 		ret = pm_runtime_put_sync(dev);
+	}
 
 	if (ret < 0)
 		cnss_pr_err("gpio operation failed with err=%d\n", ret);
@@ -1263,15 +1268,16 @@ out:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_PCIE_QCOM_ECAM)
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
-	int i;
+	int i, ret = 0;
 
 	plat_priv->pd_count = of_count_phandle_with_args(
 		dev->of_node, "power-domains", "#power-domain-cells");
 	if (plat_priv->pd_count <= 1)
-		return 0;
+		goto out;
 
 	plat_priv->pd_devs = devm_kcalloc(dev, plat_priv->pd_count,
 					  sizeof(*plat_priv->pd_devs),
@@ -1279,15 +1285,19 @@ int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 	if (!plat_priv->pd_devs)
 		return -ENOMEM;
 
+	memset(plat_priv->pd_devs, 0,
+	       plat_priv->pd_count * sizeof(*plat_priv->pd_devs));
 	for (i = 0; i < plat_priv->pd_count; i++) {
 		plat_priv->pd_devs[i] = dev_pm_domain_attach_by_id(dev, i);
 		if (IS_ERR(plat_priv->pd_devs[i])) {
+			ret = PTR_ERR(plat_priv->pd_devs[i]);
 			cnss_fw_managed_domain_detach(plat_priv);
-			return PTR_ERR(plat_priv->pd_devs[i]);
+			goto out;
 		}
 	}
 
-	return 0;
+out:
+	return ret;
 }
 
 void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
@@ -1309,34 +1319,6 @@ void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
 	}
 }
 #else
-void cnss_pm_notifier_init(struct cnss_plat_data *plat_priv)
-{
-	return;
-}
-
-void cnss_pm_notifier_deinit(struct cnss_plat_data *plat_priv)
-{
-	return;
-}
-
-static int cnss_scmi_pm_enable(struct cnss_plat_data *plat_priv)
-{
-	return -EOPNOTSUPP;
-}
-
-int
-cnss_fw_managed_power_gpio(struct cnss_plat_data *plat_priv, bool enabled)
-{
-	return -EOPNOTSUPP;
-}
-
-int
-cnss_fw_managed_power_regulator(struct cnss_plat_data *plat_priv,
-				bool enabled)
-{
-	return -EOPNOTSUPP;
-}
-
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	return -EOPNOTSUPP;
@@ -1367,8 +1349,10 @@ int cnss_power_on_device(struct cnss_plat_data *plat_priv, bool reset)
 
 	if (plat_priv->is_fw_managed_pwr) {
 		ret = cnss_scmi_pm_enable(plat_priv);
-		if (ret)
+		if (ret) {
+			cnss_pr_err("Failed to enable pd, err = %d\n", ret);
 			goto out;
+		}
 	} else {
 		ret = cnss_vreg_on_type(plat_priv, CNSS_VREG_PRIM);
 		if (ret) {
