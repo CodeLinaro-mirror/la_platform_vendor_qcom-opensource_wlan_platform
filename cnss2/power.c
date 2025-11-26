@@ -1313,12 +1313,12 @@ out:
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
-	int i;
+	int i, ret = 0;
 
 	plat_priv->pd_count = of_count_phandle_with_args(
 		dev->of_node, "power-domains", "#power-domain-cells");
 	if (plat_priv->pd_count <= 1)
-		return 0;
+		goto out;
 
 	plat_priv->pd_devs = devm_kcalloc(dev, plat_priv->pd_count,
 					  sizeof(*plat_priv->pd_devs),
@@ -1329,12 +1329,14 @@ int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 	for (i = 0; i < plat_priv->pd_count; i++) {
 		plat_priv->pd_devs[i] = dev_pm_domain_attach_by_id(dev, i);
 		if (IS_ERR(plat_priv->pd_devs[i])) {
+			ret = PTR_ERR(plat_priv->pd_devs[i]);
 			cnss_fw_managed_domain_detach(plat_priv);
-			return PTR_ERR(plat_priv->pd_devs[i]);
+			goto out;
 		}
 	}
 
-	return 0;
+out:
+	return ret;
 }
 
 void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
