@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved. */
 
+#include <linux/iommu.h>
 #include "pci_platform.h"
 #include "debug.h"
 
@@ -548,12 +549,25 @@ static int cnss_pci_smmu_fault_handler(struct iommu_domain *domain,
 				       int flags, void *handler_token)
 {
 	struct cnss_pci_data *pci_priv = handler_token;
-
-	cnss_fatal_err("SMMU fault happened with IOVA 0x%lx\n", iova);
+	int f_mask = IOMMU_FAULT_TRANSLATION | IOMMU_FAULT_READ;
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
+	}
+
+	cnss_pr_err("SMMU fault happened with IOVA 0x%lx, flags: 0x%x\n",
+		    iova, flags);
+
+	switch (pci_priv->device_id) {
+	case QCA6174_DEVICE_ID:
+	case QCN7605_DEVICE_ID:
+		/* return 0 if and only if [TF R ] is set */
+		if ((flags & f_mask) && !(flags & ~f_mask))
+			return 0;
+		break;
+	default:
+		break;
 	}
 
 	pci_priv->is_smmu_fault = true;
