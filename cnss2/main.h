@@ -481,6 +481,12 @@ struct cnss_tcs_info {
 	void __iomem *cmd_base_addr_io;
 };
 
+struct cnss_irq_ts_info {
+	bool is_valid_addr;
+	resource_size_t cmd_ts_addr;
+	void __iomem *cmd_ts_addr_io;
+};
+
 struct cnss_cpr_info {
 	resource_size_t tcs_cmd_data_addr;
 	void __iomem *tcs_cmd_data_addr_io;
@@ -587,6 +593,15 @@ struct cnss_xdump_helper {
 	struct completion wl_over_bt_complete;
 };
 
+struct cnss_wlan_tsf_info {
+	int wlan_tsf_gpio;
+	int irq_num;
+	void *context;
+	uint64_t host_time_us;
+	wlan_tsf_handler_t wlan_tsf_handler;
+	struct cnss_irq_ts_info irq_ts_info;
+};
+
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
 	void *bus_priv;
@@ -595,7 +610,6 @@ struct cnss_plat_data {
 	struct list_head clk_list;
 	struct cnss_pinctrl_info pinctrl_info;
 	struct cnss_sol_gpio sol_gpio;
-	int wlan_tsf_gpio;
 #if IS_ENABLED(CONFIG_MSM_SUBSYSTEM_RESTART)
 	struct cnss_subsys_info subsys_info;
 #endif
@@ -764,7 +778,12 @@ struct cnss_plat_data {
 	struct regulator *cngo_pbs;
 #endif
 	struct cnss_wlan_host_param *host_param;
+	struct cnss_wlan_tsf_info tsf_info;
 };
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
+#define from_timer timer_container_of
+#endif
 
 #if IS_ENABLED(CONFIG_ARCH_QCOM)
 static inline u64 cnss_get_host_timestamp(struct cnss_plat_data *plat_priv)
@@ -841,7 +860,6 @@ int cnss_do_host_ramdump(struct cnss_plat_data *plat_priv,
 			 size_t num_entries_loaded);
 void cnss_set_pin_connect_status(struct cnss_plat_data *plat_priv);
 int cnss_get_cpr_info(struct cnss_plat_data *plat_priv);
-void cnss_get_wlan_tsf_gpio_info(struct cnss_plat_data *plat_priv);
 int cnss_update_cpr_info(struct cnss_plat_data *plat_priv);
 int cnss_va_to_pa(struct device *dev, size_t size, void *va, dma_addr_t dma,
 		  phys_addr_t *pa, unsigned long attrs);

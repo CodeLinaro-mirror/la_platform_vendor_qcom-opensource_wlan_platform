@@ -948,6 +948,12 @@ static void cnss_pci_update_link_event(struct cnss_pci_data *pci_priv,
 				       enum cnss_bus_event_type type,
 				       void *data);
 
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+#define cnss_pci_domain_nr(dev) ((dev)->bus->domain_nr)
+#else
+#define cnss_pci_domain_nr(dev) (0)
+#endif
+
 static inline void
 __cnss_start_rddm_timer(struct cnss_pci_data *pci_priv,
 			const char *func, int line)
@@ -2372,6 +2378,7 @@ static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 			return;
 		pbl_bootstrap_status_reg = FIG_PBL_BOOTSTRAP_STATUS;
 		sbl_log_max_size = FIG_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
+		sbl_log_def_end = FIG_SRAM_END;
 		break;
 	default:
 		return;
@@ -8792,7 +8799,7 @@ cnss_pci_link_retrain_trigger(struct cnss_pci_data *pci_priv)
 static void cnss_pci_suspend_pwroff(struct pci_dev *pci_dev)
 {
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv;
 	int ret = 0;
 	bool suspend_pwroff = cnss_should_suspend_pwroff(pci_dev);
@@ -8818,7 +8825,7 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 	int ret = 0;
 	struct cnss_pci_data *pci_priv;
 	struct device *dev = &pci_dev->dev;
-	int rc_num = pci_dev->bus->domain_nr;
+	int rc_num = cnss_pci_domain_nr(pci_dev);
 	struct cnss_plat_data *plat_priv = cnss_get_plat_priv_by_rc_num(rc_num);
 
 	cnss_pr_dbg("PCI is probing, vendor ID: 0x%x, device ID: 0x%x rc_num %d\n",
