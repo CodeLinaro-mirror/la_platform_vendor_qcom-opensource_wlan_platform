@@ -963,6 +963,12 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 	}
 
 	if (of_find_property(dev->of_node, WLAN_SW_CTRL_GPIO, NULL)) {
+		pinctrl_info->wlan_sw_ctrl_gpio = of_get_named_gpio(dev->of_node,
+								    WLAN_SW_CTRL_GPIO,
+								    0);
+		cnss_pr_dbg("WLAN Switch control GPIO: %d\n",
+			    pinctrl_info->wlan_sw_ctrl_gpio);
+
 		pinctrl_info->sw_ctrl_wl_cx =
 			pinctrl_lookup_state(pinctrl_info->pinctrl,
 					     "sw_ctrl_wl_cx");
@@ -978,6 +984,8 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 				cnss_pr_err("Failed to select sw_ctrl_wl_cx state, err = %d\n",
 					    ret);
 		}
+	} else {
+		pinctrl_info->wlan_sw_ctrl_gpio = -EINVAL;
 	}
 
 	cnss_set_wakeup_cap_for_gpios(dev);
@@ -1305,12 +1313,12 @@ out:
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
-	int i;
+	int i, ret = 0;
 
 	plat_priv->pd_count = of_count_phandle_with_args(
 		dev->of_node, "power-domains", "#power-domain-cells");
 	if (plat_priv->pd_count <= 1)
-		return 0;
+		goto out;
 
 	plat_priv->pd_devs = devm_kcalloc(dev, plat_priv->pd_count,
 					  sizeof(*plat_priv->pd_devs),
@@ -1321,12 +1329,14 @@ int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 	for (i = 0; i < plat_priv->pd_count; i++) {
 		plat_priv->pd_devs[i] = dev_pm_domain_attach_by_id(dev, i);
 		if (IS_ERR(plat_priv->pd_devs[i])) {
+			ret = PTR_ERR(plat_priv->pd_devs[i]);
 			cnss_fw_managed_domain_detach(plat_priv);
-			return PTR_ERR(plat_priv->pd_devs[i]);
+			goto out;
 		}
 	}
 
-	return 0;
+out:
+	return ret;
 }
 
 void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
@@ -1410,9 +1420,10 @@ int cnss_power_on_device(struct cnss_plat_data *plat_priv, bool reset)
 			goto out;
 		}
 
-		ret = cnss_set_cxpc_power_on_off(plat_priv, CX_RET);
+		cnss_pr_info("setting CX to OFF by default\n");
+		ret = cnss_set_cxpc_power_on_off(plat_priv, CX_OFF);
 		if (ret < 0) {
-			cnss_pr_err("failed to set cx to CX_RET\n");
+			cnss_pr_err("failed to set CX to CX_OFF\n");
 			goto out;
 		}
 	}
@@ -2362,8 +2373,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 	for (i = 0; i <= plat_vreg_param_len; i++) {
 		if (plat_vreg_param[i].wake_volt > 0) {
 			if (strcmp(plat_vreg_param[i].vreg,
-				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0 &&
-			    cx_mode_dt == CX_DATA_PIN_PMIC) {
+				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_NOM,
 								 plat_vreg_param[i].wake_volt);
@@ -2378,8 +2388,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 		}
 		if (plat_vreg_param[i].sleep_volt > 0) {
 			if (strcmp(plat_vreg_param[i].vreg,
-				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0 &&
-			    cx_mode_dt == CX_DATA_PIN_PMIC) {
+				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_RET_V,
 								 plat_vreg_param[i].sleep_volt);
@@ -2394,8 +2403,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 		}
 		if (plat_vreg_param[i].svs_v > 0) {
 			if (strcmp(plat_vreg_param[i].vreg,
-				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0 &&
-			    cx_mode_dt == CX_DATA_PIN_PMIC) {
+				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_SVS,
 								 plat_vreg_param[i].svs_v);
@@ -2410,8 +2418,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 		}
 		if (plat_vreg_param[i].svsL1_v > 0) {
 			if (strcmp(plat_vreg_param[i].vreg,
-				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0 &&
-			    cx_mode_dt == CX_DATA_PIN_PMIC) {
+				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_SVSL1,
 								 plat_vreg_param[i].svsL1_v);
