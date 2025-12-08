@@ -118,6 +118,8 @@ static struct cnss_fw_files FW_FILES_DEFAULT = {
 	"utfbd.bin", "epping.bin", "evicted.bin"
 };
 
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv);
+
 struct cnss_driver_event {
 	struct list_head list;
 	enum cnss_driver_event_type type;
@@ -5242,6 +5244,9 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 	if (plat_priv->device_id == PEACH_DEVICE_ID)
 		cnss_set_feature_list(plat_priv, CNSS_AUX_UC_SUPPORT_V01);
 
+	ret = cnss_get_bdf_filename_from_dt(plat_priv);
+	if (ret)
+		cnss_pr_err("Get customer bdf filename error!\n");
 	return 0;
 }
 
@@ -5749,6 +5754,36 @@ int cnss_get_curr_therm_cdev_state(struct device *dev,
 	return -EINVAL;
 }
 EXPORT_SYMBOL(cnss_get_curr_therm_cdev_state);
+
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv)
+{
+	const char *tmp_str = NULL;
+	int ret = 0;
+	size_t bdf_len;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return -EINVAL;
+
+	memset(plat_priv->bdfname_dt, 0, sizeof(plat_priv->bdfname_dt));
+	ret = of_property_read_string_index(plat_priv->plat_dev->dev.of_node,
+					    "bdf-names", 0,
+					     &tmp_str);
+
+	if (ret == 0 && tmp_str) {
+		bdf_len = strnlen(tmp_str, MAX_FIRMWARE_NAME_LEN + 1);
+		if (bdf_len == 0 ||  bdf_len >= MAX_FIRMWARE_NAME_LEN) {
+			cnss_pr_err("BDF filename invalid size (%zu bytes), max allowed: %zu\n",
+				bdf_len, MAX_FIRMWARE_NAME_LEN - 1);
+			return -EINVAL;
+		}
+
+		strlcpy(plat_priv->bdfname_dt, tmp_str,
+			sizeof(plat_priv->bdfname_dt));
+
+	}
+
+	return ret;
+}
 
 static int cnss_probe(struct platform_device *plat_dev)
 {

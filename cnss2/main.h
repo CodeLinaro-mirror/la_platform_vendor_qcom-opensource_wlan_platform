@@ -682,6 +682,7 @@ struct cnss_plat_data {
 	bool is_fw_managed_pwr;
 	struct device **pd_devs;
 	int pd_count;
+	char bdfname_dt[MAX_FIRMWARE_NAME_LEN];
 	struct cnss_xo_trim_config xo_trim_conf;
 };
 
