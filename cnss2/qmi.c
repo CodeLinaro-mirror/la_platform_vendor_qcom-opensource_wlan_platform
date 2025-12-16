@@ -3656,7 +3656,8 @@ int cnss_wlfw_server_exit(struct cnss_plat_data *plat_priv)
 {
 	int ret;
 
-	if (!plat_priv)
+	if (!plat_priv ||
+	    !test_bit(CNSS_QMI_WLFW_CONNECTED, &plat_priv->driver_state))
 		return -ENODEV;
 
 	clear_bit(CNSS_QMI_WLFW_CONNECTED, &plat_priv->driver_state);
