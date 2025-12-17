@@ -72,8 +72,7 @@
 #define POWER_ON_RETRY_MAX_TIMES        4
 #endif
 #define POWER_ON_RETRY_DELAY_MS         500
-#define CNSS_FS_NAME			"cnss"
-#define CNSS_FS_NAME_SIZE		15
+
 #define CNSS_DEVICE_NAME_SIZE		16
 #define QRTR_NODE_FW_ID_BASE		7
 
