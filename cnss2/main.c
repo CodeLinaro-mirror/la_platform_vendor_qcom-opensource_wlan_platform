@@ -4939,7 +4939,7 @@ static void cnss_remove_sysfs_link(struct cnss_plat_data *plat_priv)
 	sysfs_remove_link(kernel_kobj, cnss_name);
 }
 
-int cnss_create_sysfs(struct cnss_plat_data *plat_priv)
+static int cnss_create_sysfs(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
 
