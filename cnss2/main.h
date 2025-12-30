@@ -94,6 +94,11 @@
 #define TME_RPR_FILE_NAME		"%s_rpr.bin"
 #define TME_DPR_FILE_NAME		"%s_dpr.bin"
 
+enum ack_gen_mode {
+	ACK_GEN_DISABLED = 0,
+	ACK_GEN_ENABLED,
+};
+
 enum cx_modes {
 	CX_LEGACY = 0,
 	CX_DATA_PIN,
@@ -604,6 +609,7 @@ struct cnss_wlan_tsf_info {
 
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
+	enum cnss_driver_mode driver_mode;
 	void *bus_priv;
 	enum cnss_dev_bus_type bus_type;
 	struct list_head vreg_list;
@@ -779,6 +785,8 @@ struct cnss_plat_data {
 #endif
 	struct cnss_wlan_host_param *host_param;
 	struct cnss_wlan_tsf_info tsf_info;
+	bool rc_pm_control;
+	enum cx_modes cx_mode;
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
@@ -922,8 +930,11 @@ int cnss_set_cxpc_power_on_off(struct cnss_plat_data *plat_priv,
 int cnss_get_cxpc(struct cnss_plat_data *plat_priv);
 int cnss_set_cx_voltage_corner(struct cnss_plat_data *plat_priv,
 			       enum cx_voltage_corners vc, u16 arg);
+int cnss_set_bidirectional_ack_pdc(struct cnss_plat_data *plat_priv,
+				   enum ack_gen_mode arg);
 u8 *cnss_debug_direct_cx(struct cnss_plat_data *plat_priv);
 int cnss_cx_voltage_corners_init(struct cnss_plat_data *plat_priv);
+int cnss_xo_trim_perform(struct cnss_xo_trim_config *conf);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
 static inline int cnss_timer_delete(struct timer_list *timer)
