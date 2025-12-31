@@ -728,6 +728,7 @@ struct icnss_priv {
 	u64 fw_caps;
 	u32 ddr_type;
 	u32 gpio_config_arr[GPIO_TYPE_MAX_V01][WLFW_GPIO_PARAMS_MAX_V01];
+	bool legacy_ipc_transport;
 };
 
 struct icnss_reg_info {
