@@ -256,7 +256,7 @@ cnss_get_qrtr_node_id(struct cnss_plat_data *plat_priv)
 
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 {
-	int ret = 0;
+	int ret = 0, qrtr_id_base = 0;
 
 	ret = cnss_get_qrtr_node_id(plat_priv);
 	if (ret) {
@@ -264,8 +264,20 @@ void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 		plat_priv->qrtr_node_id = 0;
 		plat_priv->wlfw_service_instance_id = 0;
 	} else {
+		switch (plat_priv->device_id) {
+		case QCA6390_DEVICE_ID:
+		case QCA6490_DEVICE_ID:
+			qrtr_id_base = QRTR_NODE_FW_ID_BASE;
+			break;
+		case KIWI_DEVICE_ID:
+			qrtr_id_base = QRTR_NODE_KIWI_FW_ID_BASE;
+			break;
+		default:
+			cnss_pr_warn("Not support now, need check base id with FW\n");
+		}
+
 		plat_priv->wlfw_service_instance_id = plat_priv->qrtr_node_id +
-						      QRTR_NODE_FW_ID_BASE;
+						      qrtr_id_base;
 		cnss_pr_dbg("service_instance_id=0x%x\n",
 			    plat_priv->wlfw_service_instance_id);
 	}
