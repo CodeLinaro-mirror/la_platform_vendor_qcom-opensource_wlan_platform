@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/completion.h>
@@ -5026,6 +5026,21 @@ err:
 }
 EXPORT_SYMBOL(cnss_reset_afcmem);
 
+#if IS_ENABLED(CONFIG_MEM_ALLOC_FALLBACK)
+static bool cnss_is_mem_fallback_smaller(struct  cnss_plat_data *plat_priv)
+{
+	if (plat_priv->device_id != QCA6490_DEVICE_ID)
+		return true;
+
+	return plat_priv->smaller_size_mem_req;
+}
+#else
+static bool cnss_is_mem_fallback_smaller(struct cnss_plat_data *plat_priv)
+{
+	return true;
+}
+#endif
+
 int cnss_pci_alloc_fw_mem(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
@@ -5042,18 +5057,22 @@ retry:
 						fw_mem[i].attrs);
 
 			if (!fw_mem[i].va) {
-				if ((fw_mem[i].attrs &
-				    DMA_ATTR_FORCE_CONTIGUOUS)) {
-					fw_mem[i].attrs &=
-						~DMA_ATTR_FORCE_CONTIGUOUS;
+				if (cnss_is_mem_fallback_smaller(plat_priv)) {
+					if ((fw_mem[i].attrs &
+					    DMA_ATTR_FORCE_CONTIGUOUS)) {
+						fw_mem[i].attrs &=
+							~DMA_ATTR_FORCE_CONTIGUOUS;
 
-					cnss_pr_dbg("Fallback to non-contiguous memory for FW, Mem type: %u\n",
-						    fw_mem[i].type);
-					goto retry;
+						cnss_pr_dbg("Fallback to non-contiguous memory for FW, Mem type: %u\n",
+							    fw_mem[i].type);
+						goto retry;
+					}
+					cnss_pr_err("Failed to allocate non-contiguous memory for FW, size: 0x%zx, type: %u\n",
+						    fw_mem[i].size, fw_mem[i].type);
+					CNSS_ASSERT(0);
 				}
 				cnss_pr_err("Failed to allocate memory for FW, size: 0x%zx, type: %u\n",
 					    fw_mem[i].size, fw_mem[i].type);
-				CNSS_ASSERT(0);
 				return -ENOMEM;
 			}
 		}
@@ -5062,12 +5081,20 @@ retry:
 	return 0;
 }
 
-static void cnss_pci_free_fw_mem(struct cnss_pci_data *pci_priv)
+void cnss_pci_free_fw_mem(struct cnss_pci_data *pci_priv, int k)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	struct cnss_fw_mem *fw_mem = plat_priv->fw_mem;
 	struct device *dev = &pci_priv->pci_dev->dev;
 	int i;
+
+	if (k < 0 || k > QMI_WLFW_MAX_NUM_MEM_SEG_V01) {
+		cnss_pr_err("invalid index %d", k);
+		return;
+	}
+
+	if (k != QMI_WLFW_MAX_NUM_MEM_SEG_V01)
+		goto single_free;
 
 	for (i = 0; i < plat_priv->fw_mem_seg_len; i++) {
 		if (fw_mem[i].va && fw_mem[i].size) {
@@ -5081,10 +5108,27 @@ static void cnss_pci_free_fw_mem(struct cnss_pci_data *pci_priv)
 			fw_mem[i].pa = 0;
 			fw_mem[i].size = 0;
 			fw_mem[i].type = 0;
+			fw_mem[i].attrs = 0;
 		}
 	}
 
 	plat_priv->fw_mem_seg_len = 0;
+	return;
+
+single_free:
+	if (fw_mem[k].va && fw_mem[k].size) {
+		cnss_pr_dbg("Freeing %d memory for FW, va: 0x%pK, pa: %pa, size: 0x%zx, type: %u\n",
+			    k, fw_mem[k].va, &fw_mem[k].pa,
+			    fw_mem[k].size, fw_mem[k].type);
+		dma_free_attrs(dev, fw_mem[k].size,
+			       fw_mem[k].va, fw_mem[k].pa,
+			       fw_mem[k].attrs);
+		fw_mem[k].va = NULL;
+		fw_mem[k].pa = 0;
+		fw_mem[k].size = 0;
+		fw_mem[k].type = 0;
+		fw_mem[k].attrs = 0;
+	}
 }
 
 int cnss_pci_alloc_qdss_mem(struct cnss_pci_data *pci_priv)
@@ -6179,6 +6223,49 @@ static void cnss_pci_mhi_reg_dump(struct cnss_pci_data *pci_priv)
 	cnss_pci_dump_shadow_reg(pci_priv);
 }
 
+int cnss_pci_recover_link_post_sol(struct cnss_pci_data *pci_priv)
+{
+	int ret = 0;
+	int retry = 0;
+	enum mhi_ee_type mhi_ee;
+
+	mutex_lock(&pci_priv->bus_lock);
+	ret = cnss_resume_pci_link(pci_priv);
+	if (ret) {
+		cnss_pr_err("Failed to resume PCI link post host sol, err= %d\n",
+			    ret);
+		mutex_unlock(&pci_priv->bus_lock);
+		return ret;
+	}
+	mutex_unlock(&pci_priv->bus_lock);
+
+retry:
+	/*
+	 * After PCIe link resumes, 20 to 400 ms delay is observerved
+	 * before device moves to RDDM.
+	 */
+	msleep(RDDM_LINK_RECOVERY_RETRY_DELAY_MS);
+	mhi_ee = mhi_get_exec_env(pci_priv->mhi_ctrl);
+	if (mhi_ee == MHI_EE_RDDM) {
+		del_timer(&pci_priv->dev_rddm_timer);
+		cnss_pr_info("Device in RDDM after link recovery, try to collect dump\n");
+		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
+				       CNSS_REASON_RDDM);
+		return 0;
+	} else if (retry++ < RDDM_LINK_RECOVERY_RETRY) {
+		cnss_pr_dbg("Wait for RDDM after link recovery, retry #%d, Device EE: %d\n",
+			    retry, mhi_ee);
+		goto retry;
+	}
+
+	cnss_mhi_debug_reg_dump(pci_priv);
+	cnss_pci_bhi_debug_reg_dump(pci_priv);
+	cnss_pci_soc_scratch_reg_dump(pci_priv);
+	cnss_schedule_recovery(&pci_priv->pci_dev->dev,
+			       CNSS_REASON_TIMEOUT);
+
+	return 0;
+}
 int cnss_pci_recover_link_down(struct cnss_pci_data *pci_priv)
 {
 	int ret;
@@ -6212,6 +6299,11 @@ int cnss_pci_recover_link_down(struct cnss_pci_data *pci_priv)
 	if (ret) {
 		cnss_pr_err("Failed to resume PCI link, err = %d\n", ret);
 		del_timer(&pci_priv->dev_rddm_timer);
+		if (!cnss_pci_assert_host_sol(pci_priv)) {
+			mutex_unlock(&pci_priv->bus_lock);
+			return 0;
+		}
+		mutex_unlock(&pci_priv->bus_lock);
 		return ret;
 	}
 
@@ -6911,6 +7003,14 @@ static void cnss_dev_rddm_timeout_hdlr(struct timer_list *t)
 		return;
 
 	cnss_fatal_err("Timeout waiting for RDDM notification\n");
+
+	if (cnss_pci_check_link_status(pci_priv)) {
+		if (cnss_get_host_sol_value(pci_priv->plat_priv) == 1)
+			cnss_driver_event_post(pci_priv->plat_priv,
+					       CNSS_DRIVER_EVENT_RESUME_POST_SOL,
+				0, NULL);
+		return;
+	}
 
 	mhi_ee = mhi_get_exec_env(pci_priv->mhi_ctrl);
 	if (mhi_ee == MHI_EE_PBL)
@@ -8002,7 +8102,7 @@ static void cnss_pci_remove(struct pci_dev *pci_dev)
 	cnss_pci_free_tme_lite_mem(pci_priv);
 	cnss_pci_free_tme_opt_file_mem(pci_priv);
 	cnss_pci_free_m3_mem(pci_priv);
-	cnss_pci_free_fw_mem(pci_priv);
+	cnss_pci_free_fw_mem(pci_priv, QMI_WLFW_MAX_NUM_MEM_SEG_V01);
 	cnss_pci_free_qdss_mem(pci_priv);
 
 	switch (pci_dev->device) {

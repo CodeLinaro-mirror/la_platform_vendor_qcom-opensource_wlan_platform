@@ -879,7 +879,7 @@ static struct qmi_elem_info wlfw_pmu_cfg_ext_v01_ei[] = {
 	},
 	{
 		.data_type      = QMI_STRUCT,
-		.elem_len       = QMI_WLFW_PMU_PARAMS_MAX_EXT_V01,
+		.elem_len       = QMI_WLFW_PMU_PARAMS_MAX_V01,
 		.elem_size      = sizeof(struct wlfw_pmu_param_ext_v01),
 		.array_type       = VAR_LEN_ARRAY,
 		.tlv_type       = 0,
@@ -1693,6 +1693,26 @@ struct qmi_elem_info wlfw_ind_register_req_msg_v01_ei[] = {
 					   dump_ddr_region_enable),
 	},
 	{
+		.data_type      = QMI_OPT_FLAG,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x27,
+		.offset         = offsetof(struct
+					   wlfw_ind_register_req_msg_v01,
+					   xo_trim_enable_valid),
+	},
+	{
+		.data_type      = QMI_UNSIGNED_1_BYTE,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x27,
+		.offset         = offsetof(struct
+					   wlfw_ind_register_req_msg_v01,
+					   xo_trim_enable),
+	},
+	{
 		.data_type      = QMI_EOTI,
 		.array_type       = NO_ARRAY,
 		.tlv_type       = QMI_COMMON_TLV_TYPE,
@@ -2264,6 +2284,68 @@ struct qmi_elem_info wlfw_wlan_cfg_req_msg_v01_ei[] = {
 		.offset         = offsetof(struct
 					   wlfw_wlan_cfg_req_msg_v01,
 					   chip_name),
+	},
+	{
+		.data_type      = QMI_OPT_FLAG,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x1A,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   ext_tgt_cfg_valid),
+	},
+	{
+		.data_type      = QMI_DATA_LEN,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x1A,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   ext_tgt_cfg_len),
+	},
+	{
+		.data_type      = QMI_STRUCT,
+		.elem_len       = QMI_WLFW_MAX_EXT_NUM_CE_V01,
+		.elem_size      = sizeof(struct wlfw_ce_tgt_pipe_cfg_s_v01),
+		.array_type       = VAR_LEN_ARRAY,
+		.tlv_type       = 0x1A,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   ext_tgt_cfg),
+		.ei_array      = wlfw_ce_tgt_pipe_cfg_s_v01_ei,
+	},
+	{
+		.data_type      = QMI_OPT_FLAG,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x1B,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   ext_svc_cfg_valid),
+	},
+	{
+		.data_type      = QMI_DATA_LEN,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x1B,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   ext_svc_cfg_len),
+	},
+	{
+		.data_type      = QMI_STRUCT,
+		.elem_len       = QMI_WLFW_MAX_EXT_NUM_SVC_V01,
+		.elem_size      = sizeof(struct wlfw_ce_svc_pipe_cfg_s_v01),
+		.array_type       = VAR_LEN_ARRAY,
+		.tlv_type       = 0x1B,
+		.offset         = offsetof(struct
+					   wlfw_wlan_cfg_req_msg_v01,
+					   ext_svc_cfg),
+		.ei_array      = wlfw_ce_svc_pipe_cfg_s_v01_ei,
 	},
 	{
 		.data_type      = QMI_EOTI,
@@ -7796,6 +7878,25 @@ struct qmi_elem_info wlfw_misc_resp_msg_v01_ei[] = {
 	},
 };
 EXPORT_SYMBOL(wlfw_misc_resp_msg_v01_ei);
+
+struct qmi_elem_info wlfw_xo_trim_ind_msg_v01_ei[] = {
+	{
+		.data_type      = QMI_UNSIGNED_1_BYTE,
+		.elem_len       = 1,
+		.elem_size      = sizeof(u8),
+		.array_type       = NO_ARRAY,
+		.tlv_type       = 0x01,
+		.offset         = offsetof(struct
+					   wlfw_xo_trim_ind_msg_v01,
+					   trim_val),
+	},
+	{
+		.data_type      = QMI_EOTI,
+		.array_type       = NO_ARRAY,
+		.tlv_type       = QMI_COMMON_TLV_TYPE,
+	},
+};
+EXPORT_SYMBOL(wlfw_xo_trim_ind_msg_v01_ei);
 
 /**
  * wlfw_is_valid_dt_node_found - Check if valid device tree node present
