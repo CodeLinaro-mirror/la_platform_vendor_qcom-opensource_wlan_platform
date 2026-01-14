@@ -967,13 +967,13 @@ int cnss_wlfw_bdf_dnld_send_sync(struct cnss_plat_data *plat_priv,
 	cnss_pr_dbg("Sending QMI_WLFW_BDF_DOWNLOAD_REQ_V01 message for bdf_type: %d (%s), state: 0x%lx\n",
 		    bdf_type, cnss_bdf_type_to_str(bdf_type), plat_priv->driver_state);
 
-	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	req = vzalloc(sizeof(*req));
 	if (!req)
 		return -ENOMEM;
 
 	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
 	if (!resp) {
-		kfree(req);
+		vfree(req);
 		return -ENOMEM;
 	}
 
@@ -1097,7 +1097,7 @@ int cnss_wlfw_bdf_dnld_send_sync(struct cnss_plat_data *plat_priv,
 				xo_ret);
 	}
 
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return 0;
 
@@ -1108,7 +1108,7 @@ err_req_fw:
 	      test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state) ||
 	      ret == -EAGAIN))
 		CNSS_QMI_ASSERT();
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return ret;
 }
@@ -1606,7 +1606,7 @@ int cnss_wlfw_qdss_data_send_sync(struct cnss_plat_data *plat_priv, char *file_n
 		return -ENOMEM;
 	}
 
-	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
+	resp = vzalloc(sizeof(*resp));
 	if (!resp) {
 		cnss_pr_err("%s: failed to allocate resp mem: %zu\n",
 			    __func__, sizeof(*resp));
@@ -1720,7 +1720,7 @@ fail:
 
 end:
 	kfree(req);
-	kfree(resp);
+	vfree(resp);
 	return ret;
 }
 
@@ -1758,13 +1758,13 @@ int cnss_wlfw_qdss_dnld_send_sync(struct cnss_plat_data *plat_priv)
 	cnss_pr_dbg("Sending QDSS config download message, state: 0x%lx\n",
 		    plat_priv->driver_state);
 
-	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	req = vzalloc(sizeof(*req));
 	if (!req)
 		return -ENOMEM;
 
 	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
 	if (!resp) {
-		kfree(req);
+		vfree(req);
 		return -ENOMEM;
 	}
 
@@ -1856,7 +1856,7 @@ int cnss_wlfw_qdss_dnld_send_sync(struct cnss_plat_data *plat_priv)
 	}
 
 	release_firmware(fw_entry);
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return 0;
 
@@ -1864,7 +1864,7 @@ err_send:
 	release_firmware(fw_entry);
 err_req_fw:
 
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return ret;
 }
@@ -2338,7 +2338,7 @@ int cnss_wlfw_athdiag_read_send_sync(struct cnss_plat_data *plat_priv,
 	if (!req)
 		return -ENOMEM;
 
-	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
+	resp = vzalloc(sizeof(*resp));
 	if (!resp) {
 		kfree(req);
 		return -ENOMEM;
@@ -2391,12 +2391,12 @@ int cnss_wlfw_athdiag_read_send_sync(struct cnss_plat_data *plat_priv,
 	memcpy(data, resp->data, resp->data_len);
 
 	kfree(req);
-	kfree(resp);
+	vfree(resp);
 	return 0;
 
 out:
 	kfree(req);
-	kfree(resp);
+	vfree(resp);
 	return ret;
 }
 
@@ -2421,13 +2421,13 @@ int cnss_wlfw_athdiag_write_send_sync(struct cnss_plat_data *plat_priv,
 	cnss_pr_dbg("athdiag write: state 0x%lx, offset %x, mem_type %x, data_len %u, data %pK\n",
 		    plat_priv->driver_state, offset, mem_type, data_len, data);
 
-	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	req = vzalloc(sizeof(*req));
 	if (!req)
 		return -ENOMEM;
 
 	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
 	if (!resp) {
-		kfree(req);
+		vfree(req);
 		return -ENOMEM;
 	}
 
@@ -2469,12 +2469,12 @@ int cnss_wlfw_athdiag_write_send_sync(struct cnss_plat_data *plat_priv,
 		goto out;
 	}
 
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return 0;
 
 out:
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return ret;
 }
@@ -3066,13 +3066,13 @@ int cnss_wlfw_get_info_send_sync(struct cnss_plat_data *plat_priv, int type,
 	if (cmd_len > QMI_WLFW_MAX_DATA_SIZE_V01)
 		return -EINVAL;
 
-	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	req = vzalloc(sizeof(*req));
 	if (!req)
 		return -ENOMEM;
 
 	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
 	if (!resp) {
-		kfree(req);
+		vfree(req);
 		return -ENOMEM;
 	}
 
@@ -3113,12 +3113,12 @@ int cnss_wlfw_get_info_send_sync(struct cnss_plat_data *plat_priv, int type,
 		goto out;
 	}
 
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return 0;
 
 out:
-	kfree(req);
+	vfree(req);
 	kfree(resp);
 	return ret;
 }

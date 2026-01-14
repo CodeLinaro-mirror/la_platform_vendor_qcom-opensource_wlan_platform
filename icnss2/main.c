@@ -3815,7 +3815,7 @@ static void *icnss_create_ramdump_device(struct icnss_priv *priv, const char *de
 
 	snprintf(ramdump_info->name, ARRAY_SIZE(ramdump_info->name), "icnss_%s", dev_name);
 
-	ramdump_info->minor = ida_simple_get(&rd_minor_id, 0, RAMDUMP_NUM_DEVICES, GFP_KERNEL);
+	ramdump_info->minor = ida_alloc_max(&rd_minor_id, RAMDUMP_NUM_DEVICES - 1, GFP_KERNEL);
 	if (ramdump_info->minor < 0) {
 		icnss_pr_err("%s: No more minor numbers left! rc:%d\n", __func__,
 			     ramdump_info->minor);
@@ -3836,7 +3836,7 @@ static void *icnss_create_ramdump_device(struct icnss_priv *priv, const char *de
 	return (void *)ramdump_info;
 
 fail_device_create:
-	ida_simple_remove(&rd_minor_id, ramdump_info->minor);
+	ida_free(&rd_minor_id, ramdump_info->minor);
 fail_out_of_minors:
 	kfree(ramdump_info);
 	return ERR_PTR(ret);
@@ -6664,7 +6664,7 @@ static void icnss_destroy_ramdump_device(struct icnss_ramdump_info *ramdump_info
 
 	device_unregister(ramdump_info->dev);
 
-	ida_simple_remove(&rd_minor_id, ramdump_info->minor);
+	ida_free(&rd_minor_id, ramdump_info->minor);
 
 	kfree(ramdump_info);
 }
