@@ -1,6 +1,7 @@
-load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
 load(":target_variants.bzl", "get_all_variants")
+load("@rules_pkg//pkg:install.bzl", "pkg_install")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
 
 _default_module_enablement_list = [
     "cnss_nl",
@@ -10,7 +11,7 @@ _default_module_enablement_list = [
 ]
 
 _cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "hamoa", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art", "sa510m", "sa510m.1g"]
-_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina", "chora", "art"]
+_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina", "chora", "alor-le", "art", "bengal", "malabar"]
 
 def _get_module_list(target, variant):
     tv = "{}_{}".format(target, variant)
@@ -384,15 +385,18 @@ def _define_modules_for_target_variant(target, variant):
         deps = deps,
     )
     tv = "{}_{}".format(target, variant)
-    copy_to_dist_dir(
+
+    pkg_files(
+        name = tv + "_dist_files",
+        srcs = _get_module_list(target, variant),
+        visibility = ["//visibility:private"],
+        strip_prefix = strip_prefix.files_only(),
+    )
+
+    pkg_install(
         name = "{}_modules_dist".format(tv),
-        data = _get_module_list(target, variant),
-        dist_dir = "out/target/product/{}/dlkm/lib/modules/".format(target),
-        flat = True,
-        wipe_dist_dir = False,
-        allow_duplicate_filenames = False,
-        mode_overrides = {"**/*": "644"},
-        log = "info",
+        srcs = [":{}_dist_files".format(tv)],
+        destdir = "out/target/product/{}/dlkm/lib/modules/".format(target),
     )
 
 def define_modules():
