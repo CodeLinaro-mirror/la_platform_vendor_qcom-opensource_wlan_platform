@@ -88,12 +88,23 @@
 #define CNSS_CAL_START_PROBE_WAIT_MS	500
 #define CNSS_TIME_SYNC_PERIOD_INVALID	0xFFFFFFFF
 #define CPUMASK_ARRAY_SIZE		2
-#define MAX_SYSFS_USER_COMMAND_SIZE_LENGTH (5)
+#define MAX_SYSFS_USER_COMMAND_SIZE_LENGTH 5
 #define XDUMP_TIMEOUT_MS	20000
+#if IS_ENABLED(CONFIG_CNSS2_DIRECT_CX_SDAM)
 #define NOM_VOLTAGE			0x37A /* 890mV */
-#define SVS_VOLTAGE			0x258 /* 600mV */
-#define SVS_L1_VOLTAGE			0x28A /* 650mV */
+#define SVS_VOLTAGE			0x276 /* 630mV */
+#define SVS_L1_VOLTAGE			0x2AD /* 685mV */
 #define RET_VOLTAGE			0x15E /* 350mV */
+#else
+#define NOM_VOLTAGE			0x37C /* 892mV */
+#define SVS_VOLTAGE			0x2B4 /* 692mV */
+#define SVS_L1_VOLTAGE			0x318 /* 792mV */
+#define RET_VOLTAGE			0x19C /* 412mV */
+#endif
+#define RAIL_VOLTAGE_LEVEL_RET		0x10   // 16
+#define RAIL_VOLTAGE_LEVEL_SVS		0x80   // 128
+#define RAIL_VOLTAGE_LEVEL_SVS_L1	0xC0   // 192
+#define RAIL_VOLTAGE_LEVEL_NOM		0x100  // 256
 
 #define TSF_SYNC_GPIO		"qcom,wlan-tsf-gpio"
 #define TSF_IRQ_TS		"tsf_irq_ts"
@@ -1199,20 +1210,25 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 	if (ret)
 		goto out;
 
-	cnss_bus_load_tme_patch(plat_priv);
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
 
-	cnss_wlfw_tme_patch_dnld_send_sync(plat_priv,
-					   WLFW_TME_LITE_PATCH_FILE_V01);
+		ret = cnss_bus_load_tme_patch(plat_priv);
+		if (!ret)
+		    cnss_wlfw_tme_patch_dnld_send_sync(plat_priv,
+				WLFW_TME_LITE_PATCH_FILE_V01);
 
-	if (test_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state)) {
-		cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
-		cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+		if (test_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state)) {
 
-		clear_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state);
+			cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+			cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+
+			clear_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state);
+		}
+
+		ret = cnss_bus_load_sku_license(plat_priv);
+		if (!ret)
+		    cnss_wlfw_soft_sku_dnld_send_sync(plat_priv);
 	}
-	ret = cnss_bus_load_sku_license(plat_priv);
-	if (!ret)
-		cnss_wlfw_soft_sku_dnld_send_sync(plat_priv);
 
 	if (plat_priv->hds_enabled)
 		cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_HDS);
@@ -2252,6 +2268,12 @@ int cnss_set_host_sol_value(struct cnss_plat_data *plat_priv, int value)
 {
 	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
 
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		cnss_pr_info("Normal host sol not supported for: 0x%lx\n",
+			     plat_priv->device_id);
+		return -EINVAL;
+	}
+
 	if (sol_gpio->host_sol_gpio < 0)
 		return -EINVAL;
 
@@ -2265,6 +2287,12 @@ int cnss_set_host_sol_value(struct cnss_plat_data *plat_priv, int value)
 int cnss_get_host_sol_value(struct cnss_plat_data *plat_priv)
 {
 	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		cnss_pr_info("Reject setting normal host sol for: 0x%lx\n",
+			     plat_priv->device_id);
+		return -EINVAL;
+	}
 
 	if (sol_gpio->host_sol_gpio < 0)
 		return -EINVAL;
@@ -2426,7 +2454,6 @@ static void cnss_deinit_direct_cx_host_sol_gpio(struct cnss_plat_data *plat_priv
 }
 #endif
 
-#if IS_ENABLED(CONFIG_CNSS2_DIRECT_CX_SDAM)
 static char *cnss_get_cx_voltage_corner(enum cx_voltage_corners vc)
 {
 	switch (vc) {
@@ -2445,6 +2472,7 @@ static char *cnss_get_cx_voltage_corner(enum cx_voltage_corners vc)
 	return "Invalid";
 }
 
+#if IS_ENABLED(CONFIG_CNSS2_DIRECT_CX_SDAM)
 static int cnss_get_cx_mode_sdam(struct cnss_plat_data *plat_priv)
 {
 	size_t len;
@@ -2846,6 +2874,55 @@ static int cnss_get_nvmem_cells(struct cnss_plat_data *plat_priv)
 	return 0;
 }
 #endif
+static int cnss_set_cx_mode_pdc(struct cnss_plat_data *plat_priv,
+				enum cx_modes arg)
+{
+	char pdc_mode[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
+	int ret = 0;
+	int enable_scaling = 0;
+
+	cnss_pr_info("Entering cnss_set_cx_mode_pdc\n");
+
+	/* Determine scaling enable/disable based on cx_modes arg input */
+	switch (arg) {
+	case CX_LEGACY:
+		/* Legacy mode - disable scaling */
+		enable_scaling = 0;
+		cnss_pr_info("CX Legacy mode - disabling scaling\n");
+		break;
+	case CX_DATA_PIN:
+		/* Data pin mode - enable scaling */
+		enable_scaling = 1;
+		cnss_pr_info("CX Data pin mode - enabling scaling\n");
+		break;
+	default:
+		cnss_pr_err("Invalid CX mode: %d\n", arg);
+		return -EINVAL;
+	}
+
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		cnss_pr_info("%s PDC control of WLAN CX on device: %d, mode: %d\n",
+			     enable_scaling ? "Enabling" : "Disabling",
+			     plat_priv->device_id, arg);
+
+		snprintf(pdc_mode, CNSS_MBOX_MSG_MAX_LEN,
+			 "{class: wlan_pdc, ss: bb, res: scaling, enable: %d}",
+			 enable_scaling);
+		ret = cnss_aop_send_msg(plat_priv, pdc_mode);
+		if (ret < 0) {
+			cnss_pr_err("Failed to send PDC mode message: %d\n", ret);
+			return ret;
+		}
+
+		cnss_pr_dbg("PDC scaling %s successfully for mode %d\n",
+			    enable_scaling ? "enabled" : "disabled", arg);
+	} else {
+		cnss_pr_dbg("PDC scaling control not supported for device: %d\n",
+			    plat_priv->device_id);
+	}
+
+	return 0;
+}
 
 int cnss_set_cx_mode(struct cnss_plat_data *plat_priv, enum cx_modes arg)
 {
@@ -2869,8 +2946,7 @@ int cnss_set_cx_mode(struct cnss_plat_data *plat_priv, enum cx_modes arg)
 	if (cx_mode_dt == CX_DATA_PIN_PMIC)
 		return cnss_set_cx_mode_sdam(plat_priv, arg);
 	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
-		//TODO: Add Hawi implementation
-		return -EOPNOTSUPP;
+		return cnss_set_cx_mode_pdc(plat_priv, arg);
 	}
 
 	return 0;
@@ -2905,6 +2981,59 @@ int cnss_get_cx_mode(struct cnss_plat_data *plat_priv)
 	return 0;
 }
 
+static int cnss_set_cxpc_pdc(struct cnss_plat_data *plat_priv,
+			      enum cxpc_status arg)
+{
+	char pdc_mode[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
+	int ret = 0;
+	int enable_collapse = 0;
+
+	cnss_pr_info("Entering cnss_set_cxpc_pdc\n");
+
+	/* Determine CX collapse enable/disable
+	 * based on cxpc_status arg input
+	 */
+	switch (arg) {
+	case CX_RET:
+		/* Active mode - disable collapse */
+		enable_collapse = 0;
+		cnss_pr_info("CX Active mode - disabling collapse\n");
+		break;
+	case CX_OFF:
+		/* Suspend mode - enable collapse */
+		enable_collapse = 1;
+		cnss_pr_info("CX Suspend mode - enabling collapse\n");
+		break;
+	default:
+		cnss_pr_err("Invalid CX Power mode: %d\n", arg);
+		return -EINVAL;
+	}
+
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		cnss_pr_info("Enabling %s for WLAN CX on device: %d, mode: %d\n",
+			     enable_collapse ? "collapse" : "retention",
+			     plat_priv->device_id, arg);
+
+		snprintf(pdc_mode, CNSS_MBOX_MSG_MAX_LEN,
+			 "{class: wlan_pdc, ss: bb, res: s1j1.e, enable: %d, vlvl: %d}",
+			 enable_collapse, RAIL_VOLTAGE_LEVEL_RET);
+		ret = cnss_aop_send_msg(plat_priv, pdc_mode);
+		if (ret < 0) {
+			cnss_pr_err("Failed to send PDC mode message: %d\n", ret);
+			return ret;
+		}
+
+		cnss_pr_dbg("%s enabled successfully for mode %d\n",
+			    enable_collapse ? "Collapse" : "Retention",
+			    arg);
+	} else {
+		cnss_pr_dbg("CXPC/ret control not supported for device: %d\n",
+			    plat_priv->device_id);
+	}
+
+	return 0;
+}
+
 int cnss_set_cxpc_power_on_off(struct cnss_plat_data *plat_priv,
 			       enum cxpc_status arg)
 {
@@ -2928,8 +3057,7 @@ int cnss_set_cxpc_power_on_off(struct cnss_plat_data *plat_priv,
 	if (cx_mode_dt == CX_DATA_PIN_PMIC)
 		return cnss_set_cxpc_sdam(plat_priv, arg);
 	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
-		//TODO: Add Hawi implementation
-		return -EOPNOTSUPP;
+		return cnss_set_cxpc_pdc(plat_priv, arg);
 	}
 
 	return 0;
@@ -2961,8 +3089,7 @@ int cnss_set_cxpc(struct device *dev, enum cxpc_status arg)
 	if (cx_mode_dt == CX_DATA_PIN_PMIC)
 		return cnss_set_cxpc_sdam(plat_priv, arg);
 	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
-		//TODO: Add Hawi implementation
-		return -EOPNOTSUPP;
+		return cnss_set_cxpc_pdc(plat_priv, arg);
 	}
 
 out:
@@ -2999,6 +3126,67 @@ int cnss_get_cxpc(struct cnss_plat_data *plat_priv)
 	return 0;
 }
 
+static int cnss_set_cx_voltage_corner_pdc(struct cnss_plat_data *plat_priv,
+					  enum cx_voltage_corners vc, u16 arg)
+{
+	char pdc_voltage[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
+	int ret = 0;
+	int voltage_level = 0;
+
+	cnss_pr_info("Entering cnss_set_cx_voltage_corner_pdc\n");
+
+	/* Determine CX voltage corner to update
+	 * based on vc input
+	 */
+	switch (vc) {
+	case CX_NOM:
+		/* CX Nominal voltage corner */
+		voltage_level = RAIL_VOLTAGE_LEVEL_NOM;
+		cnss_pr_info("CX Active mode - disabling collapse\n");
+		break;
+	case CX_SVSL1:
+		/* CX SVS L1 voltage corner */
+		voltage_level = RAIL_VOLTAGE_LEVEL_SVS_L1;
+		cnss_pr_info("CX Suspend mode - enabling collapse\n");
+		break;
+	case CX_SVS:
+		/* CX SVS voltage corner */
+		voltage_level = RAIL_VOLTAGE_LEVEL_SVS;
+		cnss_pr_info("CX Active mode - disabling collapse\n");
+		break;
+	case CX_RET_V:
+		/* CX Retention voltage corner */
+		voltage_level = RAIL_VOLTAGE_LEVEL_RET;
+		cnss_pr_info("CX Suspend mode - enabling collapse\n");
+		break;
+	default:
+		cnss_pr_err("Invalid CX voltage corner: %d\n", vc);
+		return -EINVAL;
+	}
+
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		cnss_pr_info("Updating CX %s voltage corner to 0.%dV\n",
+			     cnss_get_cx_voltage_corner(vc), arg);
+
+		snprintf(pdc_voltage, CNSS_MBOX_MSG_MAX_LEN,
+			 "{class: wlan_pdc, ss: bb, res: s1j1.v, upval: %d, vlvl: %d}",
+			 arg, voltage_level);
+		ret = cnss_aop_send_msg(plat_priv, pdc_voltage);
+		if (ret < 0) {
+			cnss_pr_err("Failed to send PDC mode message: %d\n", ret);
+			return ret;
+		}
+
+		cnss_pr_info("Successfully wrote val 0.%dV into %s voltage corners\n",
+			     arg, cnss_get_cx_voltage_corner(vc));
+	} else {
+		cnss_pr_dbg("CX voltage corner control not supported for device: %d\n",
+			    plat_priv->device_id);
+	}
+
+	return 0;
+}
+
 int cnss_set_cx_voltage_corner(struct cnss_plat_data *plat_priv,
 			       enum cx_voltage_corners vc, u16 arg)
 {
@@ -3022,8 +3210,7 @@ int cnss_set_cx_voltage_corner(struct cnss_plat_data *plat_priv,
 	if (cx_mode_dt == CX_DATA_PIN_PMIC)
 		return cnss_set_cx_voltage_corner_sdam(plat_priv, vc, arg);
 	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
-		//TODO: Add Hawi implementation
-		return -EOPNOTSUPP;
+		return cnss_set_cx_voltage_corner_pdc(plat_priv, vc, arg);
 	}
 
 	return 0;
@@ -6090,7 +6277,7 @@ static ssize_t tme_opt_file_download_store(struct device *dev,
 					const char *buf, size_t count)
 {
 	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
-	char cmd[MAX_SYSFS_USER_COMMAND_SIZE_LENGTH];
+	char cmd[MAX_SYSFS_USER_COMMAND_SIZE_LENGTH + 1];
 
 	if (count > MAX_SYSFS_USER_COMMAND_SIZE_LENGTH) {
 		cnss_pr_err("Cmd length is larger than %zu bytes, count: %zu ",
@@ -6098,7 +6285,7 @@ static ssize_t tme_opt_file_download_store(struct device *dev,
 
 		return -EINVAL;
 	}
-	if (sscanf(buf, "%s", cmd) != 1)
+	if (sscanf(buf, "%" __stringify(MAX_SYSFS_USER_COMMAND_SIZE_LENGTH) "s", cmd) != 1)
 		return -EINVAL;
 
 	if (!test_bit(CNSS_FW_READY, &plat_priv->driver_state)) {
@@ -6549,7 +6736,7 @@ static void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
 	cnss_pr_dbg("FMD status update: %d\n", status);
 	if (status) {
 		set_bit(CNSS_IN_REBOOT, &plat_priv->driver_state);
-		cnss_bus_update_status(plat_priv, CNSS_SYS_REBOOT);
+		cnss_bus_update_status(plat_priv, CNSS_BUS_EVENT);
 		cnss_bus_fmd_status(plat_priv, status);
 	}
 }
@@ -6626,8 +6813,15 @@ static void cnss_read_tsf_irq_ts(struct cnss_wlan_tsf_info *tsf_info)
 	if (!data_val)
 		return;
 
+	if (data_val * 10 < data_val) {
+		do_div(data_val, TIME_CLOCK_FREQ_HZ / 100000);
+		tsf_info->host_time_us = data_val * 10;
+		return;
+	}
+
+	data_val = data_val * 10;
 	do_div(data_val, TIME_CLOCK_FREQ_HZ / 100000);
-	tsf_info->host_time_us = data_val * 10;
+	tsf_info->host_time_us = data_val;
 }
 
 static irqreturn_t cnss_wlan_tsf_capture_threaded_handler(int irq, void *ctx)

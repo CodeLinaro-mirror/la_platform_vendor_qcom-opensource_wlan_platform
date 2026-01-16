@@ -330,16 +330,55 @@ static void cnss_update_build_info(struct wlfw_host_cap_req_msg_v01 *req)
 {}
 #endif
 
+static int cnss_add_ddr_range(struct wlfw_host_ddr_range_s_v01 *arr,
+			      u32 arr_size, int *count, u64 start, u64 size)
+{
+	u64 end = start + size;
+	u64 cur_start, cur_end, new_start, new_end;
+	int i;
+
+	for (i = 0; i < *count; i++) {
+		cur_start = arr[i].start;
+		cur_end = arr[i].start + arr[i].size;
+
+		if (end >= cur_start && start <= cur_end) {
+			new_start = min(cur_start, start);
+			new_end = max(cur_end, end);
+			if (new_start == cur_start && new_end == cur_end)
+				return 0;
+
+			arr[i].start = new_start;
+			arr[i].size = new_end - new_start;
+			cnss_pr_dbg("Update ddr range[%d]: start 0x%llx, size 0x%llx\n",
+				    i, arr[i].start, arr[i].size);
+			return 0;
+		}
+	}
+
+	if (*count >= arr_size) {
+		cnss_pr_dbg("No space for new item: cur %d, size %u\n",
+			    *count, arr_size);
+		return -ERANGE;
+	}
+
+	arr[*count].start = start;
+	arr[*count].size = size;
+	cnss_pr_dbg("Add ddr range[%d]: start 0x%llx, size 0x%llx\n",
+		    *count, start, size);
+	(*count)++;
+	return 0;
+}
+
 static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 {
 	struct wlfw_host_cap_req_msg_v01 *req;
 	struct wlfw_host_cap_resp_msg_v01 *resp;
 	struct qmi_txn txn;
-	int ret = 0;
+	int ret = 0, i = 0;
 	u64 iova_start = 0, iova_size = 0,
 	    iova_ipa_start = 0, iova_ipa_size = 0;
-	u64 feature_list = 0;
-	u32 cx_mode_dt;
+	u64 feature_list = 0, msi_addr, msi_size;
+	u32 cx_mode_dt, msi_addr_low = 0, msi_addr_high = 0;
 
 	cnss_pr_dbg("Sending host capability message, state: 0x%lx\n",
 		    plat_priv->driver_state);
@@ -397,11 +436,23 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	    !cnss_bus_get_iova(plat_priv, &iova_start, &iova_size) &&
 	    !cnss_bus_get_iova_ipa(plat_priv, &iova_ipa_start,
 				   &iova_ipa_size)) {
+		iova_size += iova_ipa_size;
 		req->ddr_range_valid = 1;
-		req->ddr_range[0].start = iova_start;
-		req->ddr_range[0].size = iova_size + iova_ipa_size;
-		cnss_pr_dbg("Sending iova starting 0x%llx with size 0x%llx\n",
-			    req->ddr_range[0].start, req->ddr_range[0].size);
+		ret = cnss_add_ddr_range(req->ddr_range,
+					 QMI_WLFW_MAX_HOST_DDR_RANGE_SIZE_V01,
+					 &i, iova_start, iova_size);
+
+		if (!ret &&
+		    !cnss_bus_get_msi_address(plat_priv,
+					      &msi_addr_low, &msi_addr_high)) {
+			/* FW requires 4KB alignment (mask lower 12 bits) */
+			msi_addr = ((u64)msi_addr_high << 32 |
+				    (msi_addr_low & 0xFFFFF000));
+			msi_size = 0x1000;
+			cnss_add_ddr_range(req->ddr_range,
+					   QMI_WLFW_MAX_HOST_DDR_RANGE_SIZE_V01,
+					   &i, msi_addr, msi_size);
+		}
 	}
 
 	req->host_build_type_valid = 1;
