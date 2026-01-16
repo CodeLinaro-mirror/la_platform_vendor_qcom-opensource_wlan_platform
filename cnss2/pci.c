@@ -3929,6 +3929,11 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 	if (plat_priv->is_fw_managed_pwr &&
 	    cnss_is_device_powered_on(plat_priv) &&
 	    pci_priv->pci_link_state == PCI_LINK_UP) {
+		if (test_bit(CNSS_SHUTDOWN_DEVICE,
+			     &plat_priv->driver_state))
+			clear_bit(CNSS_SHUTDOWN_DEVICE,
+				  &plat_priv->driver_state);
+
 		ret = cnss_enable_pcie_device(pci_priv);
 		if (ret) {
 			goto out;
@@ -4066,6 +4071,12 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 
 	if (!cnss_is_device_powered_on(plat_priv)) {
 		cnss_pr_dbg("Device is already powered off, ignore\n");
+		goto skip_power_off;
+	}
+
+	if (plat_priv->is_fw_managed_pwr &&
+	    test_bit(CNSS_SHUTDOWN_DEVICE, &plat_priv->driver_state)) {
+		cnss_pr_dbg("Device is already idle shutdown, skip power off\n");
 		goto skip_power_off;
 	}
 
@@ -6230,6 +6241,15 @@ bool cnss_pci_is_smmu_s1_enabled(struct cnss_pci_data *pci_priv)
 
 	return false;
 }
+
+bool cnss_smmu_s1_enabled(struct device *dev)
+{
+	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(to_pci_dev(dev));
+
+	return cnss_pci_is_smmu_s1_enabled(pci_priv);
+}
+EXPORT_SYMBOL(cnss_smmu_s1_enabled);
+
 struct iommu_domain *cnss_smmu_get_domain(struct device *dev)
 {
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(to_pci_dev(dev));
@@ -7344,6 +7364,12 @@ int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 
 	if (!cnss_is_device_powered_on(plat_priv)) {
 		cnss_pr_dbg("Device is already powered off, skip\n");
+		goto out;
+	}
+
+	if (plat_priv->is_fw_managed_pwr &&
+	    test_bit(CNSS_SHUTDOWN_DEVICE, &plat_priv->driver_state)) {
+		cnss_pr_dbg("Device is already idle shutdown, skip\n");
 		goto out;
 	}
 

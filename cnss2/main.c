@@ -52,12 +52,6 @@
 #endif
 #endif
 
-#define CNSS_DUMP_FORMAT_VER		0x11
-#define CNSS_DUMP_FORMAT_VER_V2		0x22
-#define CNSS_DUMP_MAGIC_VER_V2		0x42445953
-#define CNSS_DUMP_NAME			"CNSS_WLAN"
-#define CNSS_DUMP_DESC_SIZE		0x1000
-#define CNSS_DUMP_SEG_VER		0x1
 #define FILE_SYSTEM_READY		1
 #define FW_READY_TIMEOUT		20000
 #define FW_ASSERT_TIMEOUT		5000
@@ -92,11 +86,6 @@ enum cnss_cal_db_op {
 	CNSS_CAL_DB_UPLOAD,
 	CNSS_CAL_DB_DOWNLOAD,
 	CNSS_CAL_DB_INVALID_OP,
-};
-
-enum cnss_recovery_type {
-	CNSS_WLAN_RECOVERY = 0x1,
-	CNSS_PCSS_RECOVERY = 0x2,
 };
 
 #ifdef CONFIG_CNSS2_SDIO
@@ -4969,39 +4958,10 @@ out:
 	return ret;
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0))
-union cnss_device_group_devres {
-	const struct attribute_group *group;
-};
-
-static void devm_cnss_group_remove(struct device *dev, void *res)
-{
-	union cnss_device_group_devres *devres = res;
-	const struct attribute_group *group = devres->group;
-
-	cnss_pr_dbg("%s: removing group %p\n", __func__, group);
-	sysfs_remove_group(&dev->kobj, group);
-}
-
-static int devm_cnss_group_match(struct device *dev, void *res, void *data)
-{
-	return ((union cnss_device_group_devres *)res) == data;
-}
-
 static void cnss_remove_sysfs(struct cnss_plat_data *plat_priv)
 {
 	cnss_remove_sysfs_link(plat_priv);
-	WARN_ON(devres_release(&plat_priv->plat_dev->dev,
-			       devm_cnss_group_remove, devm_cnss_group_match,
-			       (void *)&cnss_attr_group));
 }
-#else
-static void cnss_remove_sysfs(struct cnss_plat_data *plat_priv)
-{
-	cnss_remove_sysfs_link(plat_priv);
-	devm_device_remove_group(&plat_priv->plat_dev->dev, &cnss_attr_group);
-}
-#endif
 
 static int cnss_event_work_init(struct cnss_plat_data *plat_priv)
 {
@@ -6066,6 +6026,12 @@ out:
 #endif
 }
 
+#ifdef CONFIG_CNSS_SHUTDOWN_CALLBACK
+static void cnss_shutdown(struct platform_device *plat_dev)
+{
+	cnss_remove(plat_dev);
+}
+#else
 static void cnss_shutdown(struct platform_device *plat_dev)
 {
 	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
@@ -6075,6 +6041,7 @@ static void cnss_shutdown(struct platform_device *plat_dev)
 		cnss_power_off_device(plat_priv);
 	}
 }
+#endif
 
 static struct platform_driver cnss_platform_driver = {
 	.probe  = cnss_probe,
