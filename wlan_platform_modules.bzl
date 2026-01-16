@@ -1,6 +1,7 @@
-load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
 load(":target_variants.bzl", "get_all_variants")
+load("@rules_pkg//pkg:install.bzl", "pkg_install")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
 
 _default_module_enablement_list = [
     "cnss_nl",
@@ -44,6 +45,14 @@ def _define_platform_config_rule(module, target, variant):
     native.genrule(
         name = "{}/{}_defconfig_generate_perf-defconfig".format(module, tv),
         outs = ["{}/{}_defconfig.generated_perf-defconfig".format(module, tv)],
+        srcs = [
+            "{}/{}_gki_defconfig".format(module, target),
+        ],
+        cmd = "cat $(SRCS) > $@",
+    )
+    native.genrule(
+        name = "{}/{}_defconfig_generate_defconfig".format(module, tv),
+        outs = ["{}/{}_defconfig.generated_defconfig".format(module, tv)],
         srcs = [
             "{}/{}_gki_defconfig".format(module, target),
         ],
@@ -384,15 +393,18 @@ def _define_modules_for_target_variant(target, variant):
         deps = deps,
     )
     tv = "{}_{}".format(target, variant)
-    copy_to_dist_dir(
+
+    pkg_files(
+        name = tv + "_dist_files",
+        srcs = _get_module_list(target, variant),
+        visibility = ["//visibility:private"],
+        strip_prefix = strip_prefix.files_only(),
+    )
+
+    pkg_install(
         name = "{}_modules_dist".format(tv),
-        data = _get_module_list(target, variant),
-        dist_dir = "out/target/product/{}/dlkm/lib/modules/".format(target),
-        flat = True,
-        wipe_dist_dir = False,
-        allow_duplicate_filenames = False,
-        mode_overrides = {"**/*": "644"},
-        log = "info",
+        srcs = [":{}_dist_files".format(tv)],
+        destdir = "out/target/product/{}/dlkm/lib/modules/".format(target),
     )
 
 def define_modules():

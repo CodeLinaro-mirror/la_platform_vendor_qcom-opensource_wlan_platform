@@ -750,6 +750,8 @@ struct icnss_priv {
 	u32 gpio_config_arr[GPIO_TYPE_MAX_V01][WLFW_GPIO_PARAMS_MAX_V01];
 	uint32_t soc_wake_req_fail;
 	struct icnss_xo_trim_config xo_trim_conf;
+	struct nvmem_cell *wcn_ktb_info_reg;
+	u8 *wcn_ktb_info_buf;
 };
 
 struct icnss_reg_info {

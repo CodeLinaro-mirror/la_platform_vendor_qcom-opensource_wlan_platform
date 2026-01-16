@@ -3815,7 +3815,7 @@ static void *icnss_create_ramdump_device(struct icnss_priv *priv, const char *de
 
 	snprintf(ramdump_info->name, ARRAY_SIZE(ramdump_info->name), "icnss_%s", dev_name);
 
-	ramdump_info->minor = ida_simple_get(&rd_minor_id, 0, RAMDUMP_NUM_DEVICES, GFP_KERNEL);
+	ramdump_info->minor = ida_alloc_max(&rd_minor_id, RAMDUMP_NUM_DEVICES - 1, GFP_KERNEL);
 	if (ramdump_info->minor < 0) {
 		icnss_pr_err("%s: No more minor numbers left! rc:%d\n", __func__,
 			     ramdump_info->minor);
@@ -3836,7 +3836,7 @@ static void *icnss_create_ramdump_device(struct icnss_priv *priv, const char *de
 	return (void *)ramdump_info;
 
 fail_device_create:
-	ida_simple_remove(&rd_minor_id, ramdump_info->minor);
+	ida_free(&rd_minor_id, ramdump_info->minor);
 fail_out_of_minors:
 	kfree(ramdump_info);
 	return ERR_PTR(ret);
@@ -5653,6 +5653,42 @@ static void icnss_sysfs_destroy(struct icnss_priv *priv)
 	icnss_devm_device_remove_group(priv);
 }
 
+static int icnss_get_wcn_ktb_info(struct icnss_priv *priv)
+{
+	int ret = 0;
+	struct platform_device *pdev = priv->pdev;
+	struct device *dev = &pdev->dev;
+	u8 *buf;
+	size_t len = 0;
+
+	priv->wcn_ktb_info_reg = devm_nvmem_cell_get(dev, "wcn_info_reg");
+	if (IS_ERR(priv->wcn_ktb_info_reg)) {
+		ret = PTR_ERR(priv->wcn_ktb_info_reg);
+		icnss_pr_dbg(" WCN_KTB_rail not supported \n");
+		priv->wcn_ktb_info_reg = NULL;
+		priv->wcn_ktb_info_buf = NULL;
+	} else {
+		buf = nvmem_cell_read(priv->wcn_ktb_info_reg, &len);
+		if (IS_ERR(buf)) {
+			ret = PTR_ERR(buf);
+			icnss_pr_err("Failed to read wcn_ktb_info cell, ret=%d\n", ret);
+			priv->wcn_ktb_info_reg = NULL;
+			priv->wcn_ktb_info_buf = NULL;
+			return ret;
+		}
+		if (len < 1) {
+			icnss_pr_err("Invalid wcn_ktb_info length: %zu\n", len);
+			kfree(buf);
+			priv->wcn_ktb_info_reg = NULL;
+			priv->wcn_ktb_info_buf = NULL;
+			return -EINVAL;
+		}
+		priv->wcn_ktb_info_buf = buf;
+	}
+
+	return 0;
+}
+
 static int icnss_resource_parse(struct icnss_priv *priv)
 {
 	int ret = 0, i = 0, irq = 0;
@@ -5661,10 +5697,16 @@ static int icnss_resource_parse(struct icnss_priv *priv)
 	struct resource *res;
 	u32 int_prop;
 
+	if (priv->device_id == WCN7750_DEVICE_ID) {
+		ret = icnss_get_wcn_ktb_info(priv);
+		if (ret)
+			goto out;
+	}
+
 	ret = icnss_get_vreg(priv);
 	if (ret) {
 		icnss_pr_err("Failed to get vreg, err = %d\n", ret);
-		goto out;
+		goto cleanup_ktb_info;
 	}
 
 	ret = icnss_get_clk(priv);
@@ -5799,6 +5841,11 @@ put_clk:
 	icnss_put_clk(priv);
 put_vreg:
 	icnss_put_vreg(priv);
+cleanup_ktb_info:
+	if (priv->wcn_ktb_info_buf) {
+		kfree(priv->wcn_ktb_info_buf);
+		priv->wcn_ktb_info_buf = NULL;
+	}
 out:
 	return ret;
 }
@@ -6617,7 +6664,7 @@ static void icnss_destroy_ramdump_device(struct icnss_ramdump_info *ramdump_info
 
 	device_unregister(ramdump_info->dev);
 
-	ida_simple_remove(&rd_minor_id, ramdump_info->minor);
+	ida_free(&rd_minor_id, ramdump_info->minor);
 
 	kfree(ramdump_info);
 }
@@ -6709,6 +6756,9 @@ static void icnss_remove(struct platform_device *pdev)
 	priv->iommu_domain = NULL;
 
 	icnss_hw_power_off(priv);
+
+	if (priv->wcn_ktb_info_buf)
+		kfree(priv->wcn_ktb_info_buf);
 
 	icnss_put_resources(priv);
 
