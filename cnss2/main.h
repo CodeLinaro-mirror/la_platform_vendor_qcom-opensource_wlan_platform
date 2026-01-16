@@ -638,6 +638,7 @@ struct cnss_plat_data {
 	u8 use_pm_domain;
 	u8 use_nv_mac;
 	u8 set_wlaon_pwr_ctrl;
+	u8 wlaon_pwr_ctrl_otp_supported;
 	struct cnss_tcs_info tcs_info;
 	bool fw_pcie_gen_switch;
 	bool fw_aux_uc_support;
