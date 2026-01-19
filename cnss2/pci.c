@@ -1869,6 +1869,7 @@ static void cnss_pci_bhi_debug_reg_dump(struct cnss_pci_data *pci_priv)
 	switch (pci_priv->device_id) {
 	case PEACH_DEVICE_ID:
 	case FIG_DEVICE_ID:
+	case COLOGNE_DEVICE_ID:
 		break;
 	default:
 		return;
@@ -1919,7 +1920,7 @@ int cnss_suspend_pci_link(struct cnss_pci_data *pci_priv)
 
 	ret = cnss_set_pci_link(pci_priv, PCI_LINK_DOWN);
 	if (ret)
-		goto out;
+		cnss_pr_err("Failed to set pci link down, ret = %d\n", ret);
 
 	pci_priv->pci_link_state = PCI_LINK_DOWN;
 
@@ -2006,6 +2007,18 @@ static inline void cnss_mhi_report_error(struct cnss_pci_data *pci_priv)
 static inline void cnss_mhi_report_error(struct cnss_pci_data *pci_priv) {}
 #endif
 
+void cnss_pci_notify_mhi_error(struct cnss_pci_data *pci_priv)
+{
+	if (!pci_priv)
+		return;
+
+	if (pci_priv->pci_link_down_ind) {
+		cnss_pr_dbg("Notifying MHI about link down\n");
+		/* Notify MHI about link down*/
+		cnss_mhi_report_error(pci_priv);
+	}
+}
+
 void cnss_pci_handle_linkdown(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
@@ -2024,9 +2037,6 @@ void cnss_pci_handle_linkdown(struct cnss_pci_data *pci_priv)
 	}
 	pci_priv->pci_link_down_ind = true;
 	spin_unlock_irqrestore(&pci_link_down_lock, flags);
-
-	/* Notify MHI about link down*/
-	cnss_mhi_report_error(pci_priv);
 
 	if (pci_dev->device == QCA6174_DEVICE_ID)
 		disable_irq_nosync(pci_dev->irq);
@@ -6419,6 +6429,15 @@ bool cnss_pci_is_smmu_s1_enabled(struct cnss_pci_data *pci_priv)
 
 	return false;
 }
+
+bool cnss_smmu_s1_enabled(struct device *dev)
+{
+	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(to_pci_dev(dev));
+
+	return cnss_pci_is_smmu_s1_enabled(pci_priv);
+}
+EXPORT_SYMBOL(cnss_smmu_s1_enabled);
+
 struct iommu_domain *cnss_smmu_get_domain(struct device *dev)
 {
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(to_pci_dev(dev));
@@ -6763,19 +6782,18 @@ bool cnss_is_one_msi(struct device *dev)
 }
 EXPORT_SYMBOL(cnss_is_one_msi);
 
-void cnss_get_msi_address(struct device *dev, u32 *msi_addr_low,
-			  u32 *msi_addr_high)
+int cnss_pci_get_msi_address(struct cnss_pci_data *pci_priv,
+			     u32 *msi_addr_low, u32 *msi_addr_high)
 {
-	struct pci_dev *pci_dev = to_pci_dev(dev);
-	struct cnss_pci_data *pci_priv;
+	struct pci_dev *pci_dev;
 	u16 control;
 
-	if (!pci_dev)
-		return;
+	if (!pci_priv || !pci_priv->msi_config)
+		return -EINVAL;
 
-	pci_priv = cnss_get_pci_priv(pci_dev);
-	if (!pci_priv)
-		return;
+	pci_dev = pci_priv->pci_dev;
+	if (!pci_dev)
+		return -ENODEV;
 
 	if (pci_dev->msix_enabled) {
 		*msi_addr_low = pci_priv->msix_addr;
@@ -6783,7 +6801,7 @@ void cnss_get_msi_address(struct device *dev, u32 *msi_addr_low,
 		if (!print_optimize.msi_addr_chk++)
 			cnss_pr_dbg("Get MSI low addr = 0x%x, high addr = 0x%x\n",
 				    *msi_addr_low, *msi_addr_high);
-		return;
+		return 0;
 	}
 
 	pci_read_config_word(pci_dev, pci_dev->msi_cap + PCI_MSI_FLAGS,
@@ -6797,10 +6815,28 @@ void cnss_get_msi_address(struct device *dev, u32 *msi_addr_low,
 				      msi_addr_high);
 	else
 		*msi_addr_high = 0;
-	 /*Add only single print as the address is constant*/
-	 if (!print_optimize.msi_addr_chk++)
+	/*Add only single print as the address is constant*/
+	if (!print_optimize.msi_addr_chk++)
 		cnss_pr_dbg("Get MSI low addr = 0x%x, high addr = 0x%x\n",
 			    *msi_addr_low, *msi_addr_high);
+
+	return 0;
+}
+
+void cnss_get_msi_address(struct device *dev, u32 *msi_addr_low,
+			  u32 *msi_addr_high)
+{
+	struct pci_dev *pci_dev = to_pci_dev(dev);
+	struct cnss_pci_data *pci_priv;
+
+	if (!pci_dev)
+		return;
+
+	pci_priv = cnss_get_pci_priv(pci_dev);
+	if (!pci_priv)
+		return;
+
+	cnss_pci_get_msi_address(pci_priv, msi_addr_low, msi_addr_high);
 }
 EXPORT_SYMBOL(cnss_get_msi_address);
 
