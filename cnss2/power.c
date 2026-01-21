@@ -1671,15 +1671,6 @@ static int cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
 	cnss_clk_off(plat_priv, &plat_priv->clk_list);
 	cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
 
-	if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
-		ret = cnss_set_bidirectional_ack_pdc(plat_priv,
-						     ACK_GEN_DISABLED);
-		if (ret < 0) {
-			cnss_pr_err("Failed to set bi-d ack mode\n");
-			return ret;
-		}
-	}
-
 	return ret;
 }
 
