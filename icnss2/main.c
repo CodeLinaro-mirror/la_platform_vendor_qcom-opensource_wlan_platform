@@ -1138,19 +1138,19 @@ static void icnss_parse_gpio_config(struct icnss_priv *priv)
 			icnss_pr_dbg("Parse %s config property through DT\n", gpio_config_names[i]);
 			icnss_pr_dbg("GPIO_NUM: %d, GPIO_NAME: %s, PMIC_INDEX: %d, GPIO_TYPE: %s\n",
 				     priv->gpio_config_arr[i][WLFW_GPIO_NUM_V01],
-				     icnss_gpio_name_str[priv->gpio_config_arr[i][WLFW_GPIO_NAME_V01]],
+				     icnss_gpio_name_str(priv->gpio_config_arr[i][WLFW_GPIO_NAME_V01]),
 				     priv->gpio_config_arr[i][WLFW_PMIC_INDEX_V01],
-				     icnss_gpio_type_str[priv->gpio_config_arr[i][WLFW_GPIO_TYPE_V01]]);
+				     icnss_gpio_type_str(priv->gpio_config_arr[i][WLFW_GPIO_TYPE_V01]));
 			icnss_pr_dbg("OUTPUT_VALUE: %s, FUNC_SELECT: %d, GPIO_DIRECTION: %s, DRIVE_STRENGTH: %d\n",
-				     icnss_gpio_output_str[priv->gpio_config_arr[i][WLFW_OUTPUT_VALUE_V01]],
+				     icnss_gpio_output_str(priv->gpio_config_arr[i][WLFW_OUTPUT_VALUE_V01]),
 				     priv->gpio_config_arr[i][WLFW_FUNC_V01],
-				     icnss_gpio_direction_str[priv->gpio_config_arr[i][WLFW_DIRECTION_V01]],
+				     icnss_gpio_direction_str(priv->gpio_config_arr[i][WLFW_DIRECTION_V01]),
 				     priv->gpio_config_arr[i][WLFW_DRIVE_V01]);
 			icnss_pr_dbg("BIAS_TYPE: %s, IS_CLK: %d, IS_WAKE: %d, INTRPT_TRIGGER_TYPE: %s\n",
-				     icnss_gpio_bias_str[priv->gpio_config_arr[i][WLFW_BIAS_V01]],
+				     icnss_gpio_bias_str(priv->gpio_config_arr[i][WLFW_BIAS_V01]),
 				     priv->gpio_config_arr[i][WLFW_IS_CLK_V01],
 				     priv->gpio_config_arr[i][WLFW_IS_WAKE_V01],
-				     icnss_gpio_intr_trigger_str[priv->gpio_config_arr[i][WLFW_INTRPT_TRIGGER_TYPE_V01]]);
+				     icnss_gpio_intr_trigger_str(priv->gpio_config_arr[i][WLFW_INTRPT_TRIGGER_TYPE_V01]));
 			icnss_pr_dbg("PRIORITY: %d, GPIO_BITRESERVED: %d, GPIO_ARRAY_VALID: %d, GPIO_OWNER: %d\n",
 				     priv->gpio_config_arr[i][WLFW_PRIORITY_V01],
 				     priv->gpio_config_arr[i][WLFW_GPIO_BITRESERVED_V01],
