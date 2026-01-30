@@ -858,7 +858,13 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 	pinctrl_info->pinctrl = devm_pinctrl_get(dev);
 	if (IS_ERR_OR_NULL(pinctrl_info->pinctrl)) {
 		ret = PTR_ERR(pinctrl_info->pinctrl);
-		cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		if (ret == -ENODEV) {
+			cnss_pr_info("pinctrl is NOT configured\n");
+			ret = 0;
+		} else {
+			cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		}
+
 		goto out;
 	}
 
@@ -1313,12 +1319,12 @@ out:
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
-	int i;
+	int i, ret = 0;
 
 	plat_priv->pd_count = of_count_phandle_with_args(
 		dev->of_node, "power-domains", "#power-domain-cells");
 	if (plat_priv->pd_count <= 1)
-		return 0;
+		goto out;
 
 	plat_priv->pd_devs = devm_kcalloc(dev, plat_priv->pd_count,
 					  sizeof(*plat_priv->pd_devs),
@@ -1329,12 +1335,14 @@ int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 	for (i = 0; i < plat_priv->pd_count; i++) {
 		plat_priv->pd_devs[i] = dev_pm_domain_attach_by_id(dev, i);
 		if (IS_ERR(plat_priv->pd_devs[i])) {
+			ret = PTR_ERR(plat_priv->pd_devs[i]);
 			cnss_fw_managed_domain_detach(plat_priv);
-			return PTR_ERR(plat_priv->pd_devs[i]);
+			goto out;
 		}
 	}
 
-	return 0;
+out:
+	return ret;
 }
 
 void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
@@ -1609,6 +1617,16 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 		cnss_select_pinctrl_state(plat_priv, false);
 		cnss_clk_off(plat_priv, &plat_priv->clk_list);
 		cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
+
+		if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
+			ret = cnss_set_bidirectional_ack_pdc(plat_priv,
+							     ACK_GEN_DISABLED);
+			if (ret < 0) {
+				cnss_pr_err("Failed to set bi-d ack mode\n");
+				return;
+			}
+		}
+
 	}
 	plat_priv->powered_on = false;
 }
@@ -2234,14 +2252,6 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 	} plat_vreg_param[QMI_WLFW_PMU_PARAMS_MAX_V01] = {0};
 	static bool config_done;
 	int cx_pin_idx = 0;
-	u32 cx_mode_dt;
-
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
 
 	if (config_done)
 		return 0;

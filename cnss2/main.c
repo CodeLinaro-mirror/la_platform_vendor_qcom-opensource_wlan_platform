@@ -28,6 +28,7 @@
 #endif
 #include <linux/regulator/consumer.h>
 #include <linux/nvmem-consumer.h>
+#include <linux/component.h>
 
 #include "cnss_plat_ipc_qmi.h"
 #include "cnss_utils.h"
@@ -1926,7 +1927,7 @@ static void cnss_xo_trim_deinit(struct cnss_plat_data *plat_priv)
  *
  * Return: 0 on success, errno otherwise
  */
-static int cnss_xo_trim_perform(struct cnss_xo_trim_config *xo_trim_conf)
+int cnss_xo_trim_perform(struct cnss_xo_trim_config *xo_trim_conf)
 {
 	int ret;
 
@@ -2901,7 +2902,7 @@ static int cnss_set_cx_mode_pdc(struct cnss_plat_data *plat_priv,
 	}
 
 	if (plat_priv->device_id == FIG_DEVICE_ID) {
-		cnss_pr_info("%s PDC control of WLAN CX on device: %d, mode: %d\n",
+		cnss_pr_info("%s PDC scaling for WLAN CX on device: %d, mode: %d\n",
 			     enable_scaling ? "Enabling" : "Disabling",
 			     plat_priv->device_id, arg);
 
@@ -2926,9 +2927,6 @@ static int cnss_set_cx_mode_pdc(struct cnss_plat_data *plat_priv,
 
 int cnss_set_cx_mode(struct cnss_plat_data *plat_priv, enum cx_modes arg)
 {
-	u32 cx_mode_dt;
-	int ret;
-
 	cnss_pr_info("Entering cnss_set_cx_mode\n");
 
 	if (!plat_priv) {
@@ -2936,16 +2934,9 @@ int cnss_set_cx_mode(struct cnss_plat_data *plat_priv, enum cx_modes arg)
 		return -ENODEV;
 	}
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
-
-	if (cx_mode_dt == CX_DATA_PIN_PMIC)
+	if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
 		return cnss_set_cx_mode_sdam(plat_priv, arg);
-	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
+	else if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
 		return cnss_set_cx_mode_pdc(plat_priv, arg);
 	}
 
@@ -2954,9 +2945,6 @@ int cnss_set_cx_mode(struct cnss_plat_data *plat_priv, enum cx_modes arg)
 
 int cnss_get_cx_mode(struct cnss_plat_data *plat_priv)
 {
-	u32 cx_mode_dt;
-	int ret;
-
 	cnss_pr_info("Entering cnss_get_cx_mode\n");
 
 	if (!plat_priv) {
@@ -2964,17 +2952,9 @@ int cnss_get_cx_mode(struct cnss_plat_data *plat_priv)
 		return -ENODEV;
 	}
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
-
-	if (cx_mode_dt == CX_DATA_PIN_PMIC)
+	if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
 		return cnss_get_cx_mode_sdam(plat_priv);
-	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
-		//TODO: Add Hawi implementation
+	else if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
 		return -EOPNOTSUPP;
 	}
 
@@ -3037,9 +3017,6 @@ static int cnss_set_cxpc_pdc(struct cnss_plat_data *plat_priv,
 int cnss_set_cxpc_power_on_off(struct cnss_plat_data *plat_priv,
 			       enum cxpc_status arg)
 {
-	u32 cx_mode_dt;
-	int ret;
-
 	cnss_pr_info("Entering cnss_set_cxpc_power_on_off\n");
 
 	if (!plat_priv) {
@@ -3047,16 +3024,9 @@ int cnss_set_cxpc_power_on_off(struct cnss_plat_data *plat_priv,
 		return -ENODEV;
 	}
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
-
-	if (cx_mode_dt == CX_DATA_PIN_PMIC)
+	if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
 		return cnss_set_cxpc_sdam(plat_priv, arg);
-	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
+	else if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
 		return cnss_set_cxpc_pdc(plat_priv, arg);
 	}
 
@@ -3066,8 +3036,6 @@ int cnss_set_cxpc_power_on_off(struct cnss_plat_data *plat_priv,
 int cnss_set_cxpc(struct device *dev, enum cxpc_status arg)
 {
 	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
-	u32 cx_mode_dt;
-	int ret;
 
 	cnss_pr_info("Entering cnss_set_cxpc\n");
 
@@ -3076,32 +3044,18 @@ int cnss_set_cxpc(struct device *dev, enum cxpc_status arg)
 		return -ENODEV;
 	}
 
-	if (plat_priv->device_id == FIG_DEVICE_ID)
-		goto out;
-
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
-
-	if (cx_mode_dt == CX_DATA_PIN_PMIC)
+	if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
 		return cnss_set_cxpc_sdam(plat_priv, arg);
-	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
+	else if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
 		return cnss_set_cxpc_pdc(plat_priv, arg);
 	}
 
-out:
 	return 0;
 }
 EXPORT_SYMBOL(cnss_set_cxpc);
 
 int cnss_get_cxpc(struct cnss_plat_data *plat_priv)
 {
-	u32 cx_mode_dt;
-	int ret;
-
 	cnss_pr_info("Entering cnss_get_cxpc\n");
 
 	if (!plat_priv) {
@@ -3109,17 +3063,9 @@ int cnss_get_cxpc(struct cnss_plat_data *plat_priv)
 		return -ENODEV;
 	}
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
-
-	if (cx_mode_dt == CX_DATA_PIN_PMIC)
+	if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
 		return cnss_get_cxpc_sdam(plat_priv);
-	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
-		//TODO: Add Hawi implementation
+	else if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
 		return -EOPNOTSUPP;
 	}
 
@@ -3187,12 +3133,67 @@ static int cnss_set_cx_voltage_corner_pdc(struct cnss_plat_data *plat_priv,
 	return 0;
 }
 
+int cnss_set_bidirectional_ack_pdc(struct cnss_plat_data *plat_priv,
+				   enum ack_gen_mode arg)
+{
+	char pdc_mode[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
+	int ret = 0;
+	int enable_ack = 0;
+
+	if (plat_priv->cx_mode != CX_DATA_PIN_PDC) {
+		cnss_pr_err("Bi-directional ACK not supported for mode %d\n",
+			    plat_priv->cx_mode);
+		return -EINVAL;
+	}
+
+	cnss_pr_info("Entering cnss_set_gen_ack_pdc\n");
+
+	/* Determine Bi-directional ACK mode enablement
+	 * based on ack_gen_mode arg input
+	 */
+	switch (arg) {
+	case ACK_GEN_DISABLED:
+		/* Non-ACK Gen Mode - disable ack generation */
+		enable_ack = 0;
+		cnss_pr_info("Non-ACK Gen Mode - disabling ack generation\n");
+		break;
+	case ACK_GEN_ENABLED:
+		/* ACK Gen Mode - enable ack generation */
+		enable_ack = 1;
+		cnss_pr_info("ACK Gen Mode - enabling ack generation\n");
+		break;
+	default:
+		cnss_pr_err("Invalid ACK Gen mode: %d\n", arg);
+		return -EINVAL;
+	}
+
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		cnss_pr_info("%s Bi-Directional ACK on device: %d, mode: %d\n",
+			     enable_ack ? "Enabling" : "Disabling",
+			     plat_priv->device_id, arg);
+
+		snprintf(pdc_mode, CNSS_MBOX_MSG_MAX_LEN,
+			 "{class: wlan_pdc, ss: bb, res: gen_ack, enable: %d}",
+			 enable_ack);
+		ret = cnss_aop_send_msg(plat_priv, pdc_mode);
+		if (ret < 0) {
+			cnss_pr_err("Failed to send PDC mode message: %d\n", ret);
+			return ret;
+		}
+
+		cnss_pr_dbg("Bi-Directional ACK %s successfully for mode %d\n",
+			    enable_ack ? "enabled" : "disabled", arg);
+	} else {
+		cnss_pr_dbg("Bi-Directional ACK not supported for device: %d\n",
+			    plat_priv->device_id);
+	}
+
+	return 0;
+}
+
 int cnss_set_cx_voltage_corner(struct cnss_plat_data *plat_priv,
 			       enum cx_voltage_corners vc, u16 arg)
 {
-	u32 cx_mode_dt;
-	int ret;
-
 	cnss_pr_info("Entering cnss_set_cx_voltage_corner\n");
 
 	if (!plat_priv) {
@@ -3200,16 +3201,9 @@ int cnss_set_cx_voltage_corner(struct cnss_plat_data *plat_priv,
 		return -EINVAL;
 	}
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
-
-	if (cx_mode_dt == CX_DATA_PIN_PMIC)
+	if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
 		return cnss_set_cx_voltage_corner_sdam(plat_priv, vc, arg);
-	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
+	else if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
 		return cnss_set_cx_voltage_corner_pdc(plat_priv, vc, arg);
 	}
 
@@ -3218,9 +3212,6 @@ int cnss_set_cx_voltage_corner(struct cnss_plat_data *plat_priv,
 
 u8 *cnss_debug_direct_cx(struct cnss_plat_data *plat_priv)
 {
-	u32 cx_mode_dt;
-	int ret;
-
 	cnss_pr_info("Entering cnss_debug_direct_cx\n");
 
 	if (!plat_priv) {
@@ -3228,17 +3219,9 @@ u8 *cnss_debug_direct_cx(struct cnss_plat_data *plat_priv)
 		return NULL;
 	}
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return NULL;
-	}
-
-	if (cx_mode_dt == CX_DATA_PIN_PMIC)
+	if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
 		return cnss_read_debug_register(plat_priv);
-	else if (cx_mode_dt == CX_DATA_PIN_PDC) {
-		//TODO: Add Hawi implementation
+	else if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
 		return NULL;
 	}
 
@@ -3602,6 +3585,9 @@ static int cnss_do_recovery(struct cnss_plat_data *plat_priv,
 			cnss_pr_dbg("Skip link down recovery as link is already up\n");
 			return 0;
 		}
+
+		cnss_bus_notify_mhi_error(plat_priv);
+
 		if (test_bit(LINK_DOWN_SELF_RECOVERY,
 			     &plat_priv->ctrl_params.quirks))
 			goto self_recovery;
@@ -6736,7 +6722,7 @@ static void cnss_fmd_status_update_cb(void *cb_ctx, bool status)
 	cnss_pr_dbg("FMD status update: %d\n", status);
 	if (status) {
 		set_bit(CNSS_IN_REBOOT, &plat_priv->driver_state);
-		cnss_bus_update_status(plat_priv, CNSS_SYS_REBOOT);
+		cnss_bus_update_status(plat_priv, CNSS_BUS_EVENT);
 		cnss_bus_fmd_status(plat_priv, status);
 	}
 }
@@ -6813,8 +6799,15 @@ static void cnss_read_tsf_irq_ts(struct cnss_wlan_tsf_info *tsf_info)
 	if (!data_val)
 		return;
 
+	if (data_val * 10 < data_val) {
+		do_div(data_val, TIME_CLOCK_FREQ_HZ / 100000);
+		tsf_info->host_time_us = data_val * 10;
+		return;
+	}
+
+	data_val = data_val * 10;
 	do_div(data_val, TIME_CLOCK_FREQ_HZ / 100000);
-	tsf_info->host_time_us = data_val * 10;
+	tsf_info->host_time_us = data_val;
 }
 
 static irqreturn_t cnss_wlan_tsf_capture_threaded_handler(int irq, void *ctx)
@@ -7106,6 +7099,8 @@ static const struct platform_device_id cnss_platform_id_table[] = {
 	{ .name = "qcaconv", .driver_data = 0, },
 	{ .name = "direct-link", .driver_data = DIRECT_LINK_DEVICE_ID, },
 	{ .name = "fig", .driver_data = FIG_DEVICE_ID, },
+	{ .name = "vendor-wlan-wonder",
+	  .driver_data = WONDER_VENDOR_DEVICE_ID, },
 	{ },
 };
 
@@ -7143,6 +7138,9 @@ static const struct of_device_id cnss_of_match_table[] = {
 	{
 		.compatible = "qcom,cnss-fig",
 		.data = (void *)&cnss_platform_id_table[10]},
+	{
+		.compatible = "qcom,cnss-vendor-wlan-wonder",
+		.data = (void *)&cnss_platform_id_table[11]},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, cnss_of_match_table);
@@ -7152,6 +7150,14 @@ cnss_use_nv_mac(struct cnss_plat_data *plat_priv)
 {
 	return of_property_read_bool(plat_priv->plat_dev->dev.of_node,
 				     "use-nv-mac");
+}
+
+static void cnss_get_rc_pm_control_info(struct cnss_plat_data *plat_priv)
+{
+	plat_priv->rc_pm_control =
+		of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				      "wlan-rc-pm-control");
+	cnss_pr_dbg("rc_pm_control: %d\n", plat_priv->rc_pm_control);
 }
 
 static int cnss_get_dev_cfg_node(struct cnss_plat_data *plat_priv)
@@ -7573,6 +7579,105 @@ static void cnss_xdump_init(struct cnss_plat_data *plat_priv)
 	init_completion(&plat_priv->xdump_helper.wl_over_bt_complete);
 }
 
+/**
+ * cnss_vendor_wonder_comp_bind - vendor wonder device component bind
+ *  callback
+ * @comp: vendor wonder device
+ * @master: master device
+ * @master_data: master data
+ *
+ * Return: 0 on success else errno
+ */
+static
+int cnss_vendor_wonder_comp_bind(struct device *comp, struct device *master,
+				 void *master_data)
+{
+	cnss_pr_info("vendor wonder bound to master device %s\n",
+		     dev_name(master));
+	return 0;
+}
+
+/**
+ * cnss_vendor_wonder_comp_unbind - vendor wonder device component unbind
+ *  callback
+ * @comp: vendor wonder device
+ * @master: master device
+ * @master_data: master data
+ *
+ * Return: None
+ */
+static
+void cnss_vendor_wonder_comp_unbind(struct device *comp, struct device *master,
+				    void *master_data)
+{
+	cnss_pr_info("vendor wonder unbound to master device\n");
+}
+
+static struct platform_device *wonder_plat_dev;
+static const void *wonder_priv_data;
+
+static const struct component_ops wonder_comp_ops = {
+	.bind = cnss_vendor_wonder_comp_bind,
+	.unbind = cnss_vendor_wonder_comp_unbind,
+};
+
+static inline int cnss_add_vendor_wonder_component(void)
+{
+	platform_set_drvdata(wonder_plat_dev, (void *)wonder_priv_data);
+
+	return component_add(&wonder_plat_dev->dev, &wonder_comp_ops);
+}
+
+static inline void cnss_del_vendor_wonder_component(void)
+{
+	component_del(&wonder_plat_dev->dev, &wonder_comp_ops);
+	platform_set_drvdata(wonder_plat_dev, NULL);
+}
+
+int cnss_set_vendor_wonder_priv_data(const void *priv_data)
+{
+	wonder_priv_data = priv_data;
+
+	if (!wonder_plat_dev) {
+		cnss_pr_info("vendor wonder plat device not available\n");
+		return 0;
+	}
+
+	if (wonder_priv_data)
+		cnss_add_vendor_wonder_component();
+	else
+		cnss_del_vendor_wonder_component();
+
+	return 0;
+}
+EXPORT_SYMBOL(cnss_set_vendor_wonder_priv_data);
+
+static int cnss_vendor_wonder_dev_probe(struct platform_device *plat_dev)
+{
+	if (!wonder_plat_dev) {
+		cnss_pr_info("wlan vendor wonder device probed!\n");
+		wonder_plat_dev = plat_dev;
+
+		if (wonder_priv_data)
+			return cnss_add_vendor_wonder_component();
+
+		return 0;
+	} else {
+		cnss_pr_info("wlan vendor wonder device already exists!\n");
+		return -EEXIST;
+	}
+}
+
+static void cnss_vendor_wonder_dev_remove(void)
+{
+	if (wonder_plat_dev && wonder_priv_data)
+		cnss_del_vendor_wonder_component();
+
+	cnss_pr_info("wlan vendor wonder device removed!\n");
+	wonder_plat_dev = NULL;
+	wonder_priv_data = NULL;
+}
+
 static int cnss_probe(struct platform_device *plat_dev)
 {
 	int ret = 0;
@@ -7580,6 +7685,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 	const struct of_device_id *of_id;
 	const struct platform_device_id *device_id;
 	static bool prealloc_initialized;
+	u32 cx_mode_dt;
 
 	of_id = of_match_device(cnss_of_match_table, &plat_dev->dev);
 	if (!of_id || !of_id->data) {
@@ -7592,6 +7698,8 @@ static int cnss_probe(struct platform_device *plat_dev)
 	if (device_id->driver_data == DIRECT_LINK_DEVICE_ID) {
 		cnss_pr_info("cnss direct link device probed!\n");
 		return 0;
+	} else if (device_id->driver_data == WONDER_VENDOR_DEVICE_ID) {
+		return cnss_vendor_wonder_dev_probe(plat_dev);
 	}
 
 	if (cnss_get_plat_priv(plat_dev)) {
@@ -7618,6 +7726,28 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_pr_info("Device id: 0x%lx\n", plat_priv->device_id);
 	cnss_pr_dbg("Probing platform driver from dt type: %d\n",
 		    plat_priv->dt_type);
+
+	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
+				    "cx-mode", &cx_mode_dt);
+	if (ret) {
+		cnss_pr_err("could not find cx mode\n");
+		plat_priv->cx_mode = CX_LEGACY; /* Set to invalid/default value */
+	} else {
+		/* Validate the cx_mode_dt value and set plat_priv->cx_mode */
+		switch (cx_mode_dt) {
+		case CX_LEGACY:
+		case CX_DATA_PIN:
+		case CX_DATA_PIN_PDC:
+		case CX_DATA_PIN_PMIC:
+			plat_priv->cx_mode = (enum cx_modes)cx_mode_dt;
+			cnss_pr_dbg("CX mode set to %d\n", plat_priv->cx_mode);
+			break;
+		default:
+			cnss_pr_err("Invalid cx-mode value %d, setting to CX_LEGACY\n", cx_mode_dt);
+			plat_priv->cx_mode = CX_LEGACY;
+			break;
+		}
+	}
 
 	cnss_xdump_init(plat_priv);
 	plat_priv->use_fw_path_with_prefix =
@@ -7650,6 +7780,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 
 	plat_priv->bus_type = cnss_get_bus_type(plat_priv);
 	plat_priv->use_nv_mac = cnss_use_nv_mac(plat_priv);
+	cnss_get_rc_pm_control_info(plat_priv);
 	cnss_set_plat_priv(plat_dev, plat_priv);
 	cnss_set_device_name(plat_priv);
 	platform_set_drvdata(plat_dev, plat_priv);
@@ -7793,6 +7924,9 @@ static void cnss_remove(struct platform_device *plat_dev)
 	if (device_id->driver_data == DIRECT_LINK_DEVICE_ID) {
 		cnss_pr_info("cnss direct link device removed!\n");
 		goto out;
+	} else if (device_id->driver_data == WONDER_VENDOR_DEVICE_ID) {
+		cnss_vendor_wonder_dev_remove();
+		goto out;
 	}
 
 	plat_priv->audio_iommu_domain = NULL;
@@ -7828,9 +7962,23 @@ out:
 static void cnss_shutdown(struct platform_device *plat_dev)
 {
 	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
+	const struct of_device_id *of_id;
+	const struct platform_device_id *device_id;
 
 	if (!plat_priv) {
 		cnss_pr_err("plat priv is null\n");
+		return;
+	}
+
+	of_id = of_match_device(cnss_of_match_table, &plat_dev->dev);
+	if (!of_id || !of_id->data) {
+		cnss_pr_err("cnss shutdown failed to find of match device!\n");
+		return;
+	}
+
+	device_id = of_id->data;
+	if (device_id->driver_data == WONDER_VENDOR_DEVICE_ID) {
+		cnss_pr_info("wlan vendor wonder device shutdown!\n");
 		return;
 	}
 
