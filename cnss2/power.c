@@ -858,7 +858,13 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 	pinctrl_info->pinctrl = devm_pinctrl_get(dev);
 	if (IS_ERR_OR_NULL(pinctrl_info->pinctrl)) {
 		ret = PTR_ERR(pinctrl_info->pinctrl);
-		cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		if (ret == -ENODEV) {
+			cnss_pr_info("pinctrl is NOT configured\n");
+			ret = 0;
+		} else {
+			cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		}
+
 		goto out;
 	}
 
