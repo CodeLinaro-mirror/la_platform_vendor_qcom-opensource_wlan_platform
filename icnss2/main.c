@@ -178,7 +178,8 @@ static ssize_t icnss_sysfs_store(struct kobject *kobj,
 	atomic_set(&priv->is_shutdown, true);
 	if (((priv->wpss_supported || priv->rproc_fw_download) &&
 	      priv->device_id == ADRASTEA_DEVICE_ID) ||
-	      priv->device_id == WCN7750_DEVICE_ID)
+	      priv->device_id == WCN7750_DEVICE_ID ||
+	      priv->device_id == WCN6450_DEVICE_ID)
 		icnss_wpss_unload(priv);
 	return count;
 }
@@ -3271,7 +3272,8 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 		      priv->state, notif->crashed);
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID ||
-	    priv->device_id == WCN7750_DEVICE_ID)
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN6450_DEVICE_ID)
 		icnss_update_shutdown_state_to_fw(priv, data);
 
 	set_bit(ICNSS_FW_DOWN, &priv->state);
@@ -6627,7 +6629,8 @@ static int icnss_probe(struct platform_device *pdev)
 		register_rproc_restart_level_notifier();
 	}
 
-	if (priv->device_id == WCN7750_DEVICE_ID) {
+	if (priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN6450_DEVICE_ID) {
 		icnss_reboot_register_notifier(priv);
 	}
 
