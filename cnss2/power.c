@@ -1471,12 +1471,6 @@ cnss_power_on_device_host(struct cnss_plat_data *plat_priv, bool reset)
 			goto out;
 		}
 
-		ret = cnss_cx_voltage_corners_init(plat_priv);
-		if (ret < 0) {
-			cnss_pr_err("Failed to set CX voltage corners\n");
-			goto out;
-		}
-
 		cnss_pr_info("setting CX to OFF by default\n");
 		ret = cnss_set_cxpc_power_on_off(plat_priv, CX_OFF);
 		if (ret < 0) {
@@ -2334,6 +2328,10 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 		u32 svsL1_v;
 	} plat_vreg_param[QMI_WLFW_PMU_PARAMS_MAX_V01] = {0};
 	int cx_pin_idx = 0;
+	static bool config_done;
+
+	if (config_done)
+		return 0;
 
 	if (plat_priv->pmu_vreg_map_len <= 0 ||
 	    !plat_priv->pmu_vreg_map ||
@@ -2362,11 +2360,15 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			    fw_pmu_param_ext[i].svsL1_valid,
 			    fw_pmu_param_ext[i].svsL1_v);
 
-		if (!fw_pmu_param_ext[i].wake_volt_valid &&
-		    !fw_pmu_param_ext[i].sleep_volt_valid &&
-		    !fw_pmu_param_ext[i].svs_v_valid &&
-		    !fw_pmu_param_ext[i].lsvs_valid &&
-		    !fw_pmu_param_ext[i].svsL1_valid)
+		/* Always process wake_volt and sleep_volt for aggregation,
+		 * regardless of valid bits. Only skip if other voltage types
+		 * are also invalid.
+		 */
+		if (fw_pmu_param_ext[i].wake_volt <= 0 &&
+		    fw_pmu_param_ext[i].sleep_volt <= 0 &&
+		    fw_pmu_param_ext[i].svs_v <= 0 &&
+		    fw_pmu_param_ext[i].lsvs <= 0 &&
+		    fw_pmu_param_ext[i].svsL1_v <= 0)
 			continue;
 
 		vreg = NULL;
@@ -2399,7 +2401,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 					  strlen(plat_vreg_param[j].vreg)))
 				continue;
 
-			if (fw_pmu_param_ext[i].wake_volt_valid) {
+			if (fw_pmu_param_ext[i].wake_volt > 0) {
 				wake_volt = roundup(fw_pmu_param_ext[i].wake_volt,
 						    CNSS_PMIC_VOLTAGE_STEP) -
 						    CNSS_PMIC_AUTO_HEADROOM;
@@ -2409,7 +2411,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 					wake_volt += CNSS_IR_DROP_WAKE;
 				}
 			}
-			if (fw_pmu_param_ext[i].sleep_volt_valid) {
+			if (fw_pmu_param_ext[i].sleep_volt > 0) {
 				sleep_volt = roundup(fw_pmu_param_ext[i].sleep_volt,
 						     CNSS_PMIC_VOLTAGE_STEP) -
 						     CNSS_PMIC_AUTO_HEADROOM;
@@ -2419,7 +2421,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 					sleep_volt += CNSS_IR_DROP_SLEEP;
 				}
 			}
-			if (fw_pmu_param_ext[i].svs_v_valid) {
+			if (fw_pmu_param_ext[i].svs_v > 0) {
 				svs_v = roundup(fw_pmu_param_ext[i].svs_v,
 						CNSS_PMIC_VOLTAGE_STEP) -
 						CNSS_PMIC_AUTO_HEADROOM;
@@ -2429,19 +2431,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 					svs_v += CNSS_IR_DROP_WAKE;
 				}
 			}
-			if (fw_pmu_param_ext[i].lsvs_valid) {
-				if (strcmp(fw_pmu_param_ext[i].pin_name,
-					   "VDDD_AON_0P9") == 0)
-					sleep_volt = roundup(fw_pmu_param_ext[i].lsvs,
-							     CNSS_PMIC_VOLTAGE_STEP) -
-							     CNSS_PMIC_AUTO_HEADROOM;
-				if (strcmp(fw_pmu_param_ext[i].pin_name, "VDDD_WLCX_0P9") != 0) {
-					sleep_volt += CNSS_IR_DROP_SLEEP_DEFAULT;
-				} else {
-					sleep_volt += CNSS_IR_DROP_SLEEP;
-				}
-			}
-			if (fw_pmu_param_ext[i].svsL1_valid) {
+			if (fw_pmu_param_ext[i].svsL1_v > 0) {
 				svsL1_v = roundup(fw_pmu_param_ext[i].svsL1_v,
 						  CNSS_PMIC_VOLTAGE_STEP) -
 						  CNSS_PMIC_AUTO_HEADROOM;
@@ -2562,6 +2552,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			break;
 	}
 end:
+	config_done = true;
 	return ret;
 }
 #else
