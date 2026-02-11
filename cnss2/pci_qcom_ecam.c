@@ -128,6 +128,11 @@ int cnss_set_pci_link(struct cnss_pci_data *pci_priv, bool link_up)
 	return ret;
 }
 
+int cnss_set_pci_pwrctrl(struct cnss_pci_data *pci_priv, bool power_on)
+{
+	return 0;
+}
+
 int cnss_pci_prevent_l1(struct device *dev)
 {
 	return 0;

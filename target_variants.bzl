@@ -9,6 +9,7 @@ targets = [
     "lahaina",
     "bengal",
     "malabar",
+    "monaco",
     "pineapple",
     "parrot",
     "seraph",

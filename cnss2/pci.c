@@ -1921,6 +1921,12 @@ int cnss_suspend_pci_link(struct cnss_pci_data *pci_priv)
 	/* Always do PCIe L2 suspend during power off/PCIe link recovery */
 	pci_priv->drv_connected_last = 0;
 
+	ret = cnss_set_pci_pwrctrl(pci_priv, false);
+	if (ret) {
+		pci_priv->pci_link_state = PCI_LINK_DOWN;
+		goto out;
+	}
+
 	ret = cnss_set_pci_link(pci_priv, PCI_LINK_DOWN);
 	if (ret)
 		cnss_pr_err("Failed to set pci link down, ret = %d\n", ret);
@@ -1948,6 +1954,20 @@ int cnss_resume_pci_link(struct cnss_pci_data *pci_priv)
 
 	if (pci_priv->pci_link_state == PCI_LINK_UP) {
 		cnss_pr_info("PCI link is already resumed\n");
+		goto out;
+	}
+
+	/*
+	 * In rc_pm_control enabled cases, pci_pwrctrl takes
+	 * care of powering on PCIe link and set_pci_link()
+	 * will be dummy NOP. Inverse in rc_pm_control disabled
+	 * cases ex: Previous platforms.
+	 */
+	ret = cnss_set_pci_pwrctrl(pci_priv, true);
+	if (ret) {
+		ret = -EAGAIN;
+		cnss_pci_update_link_event(pci_priv,
+					   BUS_EVENT_PCI_LINK_RESUME_FAIL, NULL);
 		goto out;
 	}
 
@@ -4965,6 +4985,19 @@ static int cnss_pci_suspend(struct device *dev)
 		mutex_unlock(&pci_priv->bus_lock);
 		if (ret)
 			goto resume_driver;
+	} else if (plat_priv->rc_pm_control) {
+		/*
+		 * Saving PCI state is called, so that this forces
+		 * PCIe RC driver to skip PCIe link off during its
+		 * PM OPS execution and make sure PCIe link active
+		 * in disable_pc case
+		 */
+		cnss_pr_dbg("disable_pc enabled, saving pci state\n");
+		ret = pci_save_state(pci_dev);
+		if (ret) {
+			cnss_pr_err("failed to save pci state\n");
+			goto clear_flag;
+		}
 	}
 
 	cnss_pci_set_monitor_wake_intr(pci_priv, false);
@@ -5167,10 +5200,16 @@ static int cnss_pci_runtime_suspend(struct device *dev)
 
 	driver_ops = pci_priv->driver_ops;
 	if (driver_ops && driver_ops->runtime_ops &&
-	    driver_ops->runtime_ops->runtime_suspend)
+	    driver_ops->runtime_ops->runtime_suspend) {
 		ret = driver_ops->runtime_ops->runtime_suspend(pci_dev);
-	else
+		if (plat_priv->rc_pm_control && !ret &&
+		    !cnss_pci_get_auto_suspended(pci_priv)) {
+			cnss_pr_vdbg("Auto suspend fail change status to EAGAIN\n");
+			ret = -EAGAIN;
+		}
+	} else {
 		ret = cnss_auto_suspend(dev);
+	}
 
 	if (ret)
 		pci_priv->drv_connected_last = 0;
@@ -5205,6 +5244,17 @@ static int cnss_pci_runtime_resume(struct device *dev)
 
 	cnss_pr_vdbg("Runtime resume start\n");
 
+	if (test_bit(CNSS_INTERNAL_RESUME, &plat_priv->ctrl_params.quirks)) {
+		/*
+		 * In cases where Resume is triggered internally by CNSS Client
+		 * Host driver involvement is not required to execute WOW receipe.
+		 * So auto_resume is being called only to resume the PCIe link
+		 */
+		cnss_pr_vdbg("Internal resume trigger\n");
+		ret = cnss_auto_resume(dev);
+		goto out;
+	}
+
 	driver_ops = pci_priv->driver_ops;
 	if (driver_ops && driver_ops->runtime_ops &&
 	    driver_ops->runtime_ops->runtime_resume) {
@@ -5219,6 +5269,8 @@ static int cnss_pci_runtime_resume(struct device *dev)
 	} else {
 		ret = cnss_auto_resume(dev);
 	}
+
+out:
 	cnss_pr_vdbg("Runtime resume status: %d\n", ret);
 
 	return ret;
@@ -5541,41 +5593,10 @@ int cnss_pci_force_wake_request_sync(struct device *dev, int timeout_us)
 }
 EXPORT_SYMBOL(cnss_pci_force_wake_request_sync);
 
+/* Obsolete API. To be removed later. */
 int cnss_pci_force_wake_request(struct device *dev)
 {
-	struct pci_dev *pci_dev = to_pci_dev(dev);
-	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	struct cnss_plat_data *plat_priv;
-	struct mhi_controller *mhi_ctrl;
-
-	if (!pci_priv)
-		return -ENODEV;
-
-	switch (pci_priv->device_id) {
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-	case KIWI_DEVICE_ID:
-	case MANGO_DEVICE_ID:
-	case PEACH_DEVICE_ID:
-	case COLOGNE_DEVICE_ID:
-	case FIG_DEVICE_ID:
-		break;
-	default:
-		return 0;
-	}
-
-	mhi_ctrl = pci_priv->mhi_ctrl;
-	if (!mhi_ctrl)
-		return -EINVAL;
-
-	plat_priv = pci_priv->plat_priv;
-	if (!plat_priv)
-		return -ENODEV;
-
-	if (test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state))
-		return -EAGAIN;
-
-	mhi_device_get(mhi_ctrl->mhi_dev);
+	cnss_pr_err("cnss_pci_force_wake_request: Obsolete API as no-op");
 
 	return 0;
 }
@@ -5653,10 +5674,20 @@ EXPORT_SYMBOL(cnss_pci_force_wake_release);
 
 int cnss_pci_qmi_send_get(struct cnss_pci_data *pci_priv)
 {
+	struct cnss_plat_data *plat_priv;
 	int ret = 0;
 
 	if (!pci_priv)
 		return -ENODEV;
+
+	plat_priv = pci_priv->plat_priv;
+	if (!plat_priv)
+		return -ENODEV;
+
+	if (plat_priv->rc_pm_control) {
+		cnss_pr_err("QMI stats not supported in rc_pm_ctrl\n");
+		return -EINVAL;
+	}
 
 	mutex_lock(&pci_priv->bus_lock);
 	if (cnss_pci_get_auto_suspended(pci_priv) &&
@@ -5672,10 +5703,20 @@ int cnss_pci_qmi_send_get(struct cnss_pci_data *pci_priv)
 
 int cnss_pci_qmi_send_put(struct cnss_pci_data *pci_priv)
 {
+	struct cnss_plat_data *plat_priv;
 	int ret = 0;
 
 	if (!pci_priv)
 		return -ENODEV;
+
+	plat_priv = pci_priv->plat_priv;
+	if (!plat_priv)
+		return -ENODEV;
+
+	if (plat_priv->rc_pm_control) {
+		cnss_pr_err("QMI stats not supported in rc_pm_ctrl\n");
+		return -EINVAL;
+	}
 
 	mutex_lock(&pci_priv->bus_lock);
 	if (pci_priv->qmi_send_usage_count)
@@ -7604,6 +7645,7 @@ int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 	struct image_info *fw_image, *rddm_image;
 	struct cnss_fw_mem *fw_mem = plat_priv->fw_mem;
 	int ret = 0, i, j;
+	bool rtpm_resume_vote = false;
 
 	if (test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state) &&
 	    !test_bit(CNSS_IN_PANIC, &plat_priv->driver_state))
@@ -7633,9 +7675,24 @@ int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 				mutex_unlock(&pci_priv->bus_lock);
 				goto out;
 			}
-			if (cnss_pci_resume_bus(pci_priv)) {
-				mutex_unlock(&pci_priv->bus_lock);
-				goto out;
+			if (plat_priv->rc_pm_control) {
+				set_bit(CNSS_INTERNAL_RESUME,
+					&plat_priv->ctrl_params.quirks);
+				rtpm_resume_vote = true;
+				if (cnss_pci_pm_runtime_get_sync(pci_priv,
+								 RTPM_ID_CNSS) < 0) {
+					clear_bit(CNSS_INTERNAL_RESUME,
+						  &plat_priv->ctrl_params.quirks);
+					mutex_unlock(&pci_priv->bus_lock);
+					goto out;
+				}
+				clear_bit(CNSS_INTERNAL_RESUME,
+					  &plat_priv->ctrl_params.quirks);
+			} else {
+				if (cnss_pci_resume_bus(pci_priv)) {
+					mutex_unlock(&pci_priv->bus_lock);
+					goto out;
+				}
 			}
 		}
 		mutex_unlock(&pci_priv->bus_lock);
@@ -7751,6 +7808,11 @@ int cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 skip_dump:
 	complete(&plat_priv->rddm_complete);
 out:
+	if (rtpm_resume_vote) {
+		cnss_pci_pm_runtime_mark_last_busy(pci_priv);
+		cnss_pci_pm_runtime_put_autosuspend(pci_priv, RTPM_ID_CNSS);
+	}
+
 	if (!in_panic && plat_priv->xdump_helper.dumping_bt_over_wl) {
 		plat_priv->xdump_helper.dumping_bt_over_wl = 0;
 		cnss_genl_send_xdump_bt_over_wl_resp(ret);
