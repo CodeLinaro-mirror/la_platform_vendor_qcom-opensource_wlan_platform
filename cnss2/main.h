@@ -439,6 +439,7 @@ enum cnss_debug_quirks {
 	DISABLE_TIME_SYNC,
 	FORCE_ONE_MSI,
 	PREVENT_PCI_LINK_RESUME,
+	CNSS_INTERNAL_RESUME,
 	QUIRK_MAX_VALUE
 };
 
@@ -609,6 +610,7 @@ struct cnss_wlan_tsf_info {
 
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
+	enum cnss_driver_mode driver_mode;
 	void *bus_priv;
 	enum cnss_dev_bus_type bus_type;
 	struct list_head vreg_list;
