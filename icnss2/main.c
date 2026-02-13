@@ -1469,9 +1469,10 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 				      ret);
 	}
 
-	if (priv->device_id == WCN6750_DEVICE_ID ||
+	if ((priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
-	    priv->device_id == WCN6450_DEVICE_ID) {
+	    priv->device_id == WCN6450_DEVICE_ID) &&
+	    !priv->legacy_ipc_transport) {
 		if (!priv->fw_soc_wake_ack_irq)
 			register_soc_wake_notif(&priv->pdev->dev);
 
@@ -1579,7 +1580,7 @@ static void icnss_host_ramdump_dev_release(struct device *dev)
 	kfree(dev);
 }
 
-const char *icnss_get_wlan_str(enum cnss_host_dump_type type)
+static const char *icnss_get_wlan_str(enum cnss_host_dump_type type)
 {
 	switch (type) {
 	case CNSS_HOST_WLAN_LOGS:
@@ -1815,7 +1816,7 @@ const char *icnss_get_wlan_str(enum cnss_host_dump_type type)
     }
 }
 
-int icnss_do_host_ramdump(struct icnss_priv *priv,
+static int icnss_do_host_ramdump(struct icnss_priv *priv,
 			  struct cnss_ssr_driver_dump_entry *ssr_entry,
 			  size_t num_entries_loaded)
 {
@@ -1915,7 +1916,7 @@ put_device:
 	return ret;
 }
 
-void icnss_collect_host_dump_info(struct icnss_priv *priv)
+static void icnss_collect_host_dump_info(struct icnss_priv *priv)
 {
 	struct cnss_ssr_driver_dump_entry *ssr_entry;
 	size_t num_entries_loaded = 0;
@@ -2336,8 +2337,11 @@ static int icnss_event_soc_wake_request(struct icnss_priv *priv, void *data)
 		return 0;
 	}
 
-	ret = icnss_send_smp2p(priv, ICNSS_SOC_WAKE_REQ,
-			       ICNSS_SMP2P_OUT_SOC_WAKE);
+	if (priv->legacy_ipc_transport)
+		ret = wlfw_send_soc_wake_msg(priv, QMI_WLFW_WAKE_REQUEST_V01);
+	else
+		ret = icnss_send_smp2p(priv, ICNSS_SOC_WAKE_REQ,
+				       ICNSS_SMP2P_OUT_SOC_WAKE);
 	if (!ret)
 		atomic_inc(&priv->soc_wake_ref_count);
 
@@ -2357,8 +2361,12 @@ static int icnss_event_soc_wake_release(struct icnss_priv *priv, void *data)
 		return 0;
 	}
 
-	ret = icnss_send_smp2p(priv, ICNSS_SOC_WAKE_REL,
-			       ICNSS_SMP2P_OUT_SOC_WAKE);
+	if (priv->legacy_ipc_transport)
+		ret = wlfw_send_soc_wake_msg(priv, QMI_WLFW_WAKE_RELEASE_V01);
+	else
+		ret = icnss_send_smp2p(priv, ICNSS_SOC_WAKE_REL,
+				       ICNSS_SMP2P_OUT_SOC_WAKE);
+
 	return ret;
 }
 
@@ -2524,9 +2532,10 @@ static int icnss_driver_event_pd_service_down(struct icnss_priv *priv,
 	if (priv->force_err_fatal)
 		ICNSS_ASSERT(0);
 
-	if (priv->device_id == WCN6750_DEVICE_ID ||
+	if ((priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
-	    priv->device_id == WCN6450_DEVICE_ID) {
+	    priv->device_id == WCN6450_DEVICE_ID) &&
+	    !priv->legacy_ipc_transport) {
 		icnss_send_smp2p(priv, ICNSS_RESET_MSG,
 				 ICNSS_SMP2P_OUT_SOC_WAKE);
 		icnss_send_smp2p(priv, ICNSS_RESET_MSG,
@@ -5334,7 +5343,8 @@ int icnss_prevent_l1(struct device *dev)
 		return 0;
 
 	return icnss_send_smp2p(priv, ICNSS_PCI_EP_POWER_SAVE_EXIT,
-				ICNSS_SMP2P_OUT_EP_POWER_SAVE);
+				priv->legacy_ipc_transport ?
+	ICNSS_SMP2P_OUT_POWER_SAVE : ICNSS_SMP2P_OUT_EP_POWER_SAVE);
 }
 EXPORT_SYMBOL(icnss_prevent_l1);
 
@@ -5347,7 +5357,8 @@ void icnss_allow_l1(struct device *dev)
 		return;
 
 	icnss_send_smp2p(priv, ICNSS_PCI_EP_POWER_SAVE_ENTER,
-			 ICNSS_SMP2P_OUT_EP_POWER_SAVE);
+				priv->legacy_ipc_transport ?
+	ICNSS_SMP2P_OUT_POWER_SAVE : ICNSS_SMP2P_OUT_EP_POWER_SAVE);
 }
 EXPORT_SYMBOL(icnss_allow_l1);
 
@@ -6313,6 +6324,13 @@ static void icnss_init_control_params(struct icnss_priv *priv)
 	if (of_property_read_bool(priv->pdev->dev.of_node,
 				"qcom,rc-ep-short-channel"))
 		icnss_set_feature_list(priv, CNSS_RC_EP_ULTRASHORT_CHANNEL_V01);
+
+	if (of_property_read_bool(priv->pdev->dev.of_node,
+				"qcom,wlan-legacy-ipc-transport")) {
+		priv->legacy_ipc_transport = true;
+		icnss_pr_dbg("Legacy IPC selected for soc_wake & PCI Endpoint Power Save\n");
+	}
+
 }
 
 static void icnss_read_device_configs(struct icnss_priv *priv)

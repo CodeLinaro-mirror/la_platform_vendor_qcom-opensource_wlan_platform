@@ -752,6 +752,7 @@ struct icnss_priv {
 	struct icnss_xo_trim_config xo_trim_conf;
 	struct nvmem_cell *wcn_ktb_info_reg;
 	u8 *wcn_ktb_info_buf;
+	bool legacy_ipc_transport;
 };
 
 struct icnss_reg_info {

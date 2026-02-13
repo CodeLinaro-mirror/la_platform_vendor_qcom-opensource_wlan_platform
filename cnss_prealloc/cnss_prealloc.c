@@ -111,10 +111,10 @@ static struct cnss_pool cnss_pools_default[] = {
 };
 
 static struct cnss_pool cnss_pools_adrastea[] = {
-	{16 * 1024, 10, "cnss-pool-16k", NULL, NULL, NULL},
+	{16 * 1024, 8, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 8, "cnss-pool-32k", NULL, NULL, NULL},
-	{64 * 1024, 4, "cnss-pool-64k", NULL, NULL, NULL},
-	{128 * 1024, 2, "cnss-pool-128k", NULL, NULL, NULL},
+	{64 * 1024, 3, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 0, "cnss-pool-128k", NULL, NULL, NULL},
 };
 
 static struct cnss_pool cnss_pools_wcn6750[] = {
@@ -136,6 +136,7 @@ struct cnss_pool *cnss_pools;
 unsigned int cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
 spinlock_t pool_table_lock;
 bool mempool_initialization_done;
+bool cnss_force_prealloc_pool;
 
 /**
  * cnss_pool_alloc_threshold() - Allocation threshold
@@ -189,6 +190,15 @@ static inline void cnss_stack_track_deinit(struct cnss_pool *cnss_pool)
  * Return: 0 - success, otherwise error code.
  *
  */
+void *cnss_mempool_alloc(gfp_t gfp_mask, void *pool_data)
+{
+	if (!mempool_initialization_done || !cnss_force_prealloc_pool)
+		return mempool_alloc_slab(gfp_mask, pool_data);
+	else
+		return NULL;
+
+}
+
 static int cnss_pool_init(void)
 {
 	int i;
@@ -208,7 +218,7 @@ static int cnss_pool_init(void)
 
 		/* Create the pool and associate to slab cache */
 		cnss_pools[i].mp =
-		    mempool_create(cnss_pools[i].min, mempool_alloc_slab,
+		    mempool_create(cnss_pools[i].min, cnss_mempool_alloc,
 				   mempool_free_slab, cnss_pools[i].cache);
 
 		if (!cnss_pools[i].mp) {
@@ -276,9 +286,12 @@ static void cnss_pool_deinit(void)
 static void cnss_assign_prealloc_pool(unsigned long device_id)
 {
 	pr_info("cnss_prealloc: assign cnss pool for device id 0x%lx", device_id);
+	cnss_force_prealloc_pool = false;
 
 	switch (device_id) {
 	case ADRASTEA_DEVICE_ID:
+		pr_info("cnss_prealloc: Force prealloc pool for adrastea");
+		cnss_force_prealloc_pool = true;
 		cnss_pools = cnss_pools_adrastea;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_adrastea);
 		break;
