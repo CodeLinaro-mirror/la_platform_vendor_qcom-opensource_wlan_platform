@@ -274,6 +274,7 @@ extern int cnss_get_fw_files_for_target(struct device *dev,
 					u32 target_type, u32 target_version);
 extern int cnss_get_platform_cap(struct device *dev,
 				 struct cnss_platform_cap *cap);
+extern bool cnss_smmu_s1_enabled(struct device *dev);
 extern struct iommu_domain *cnss_smmu_get_domain(struct device *dev);
 extern int cnss_smmu_map(struct device *dev,
 			 phys_addr_t paddr, uint32_t *iova_addr, size_t size);
@@ -372,5 +373,5 @@ extern void cnss_get_cpumask_for_wlan_tx_comp_interrupts(struct device *dev,
 							 unsigned int *cpumask);
 extern int cnss_set_cxpc(struct device *dev, enum cxpc_status arg);
 extern int cnss_pci_get_iova_info(struct device *dev, u64 *addr, u64 *size);
-
+extern int cnss_set_vendor_wonder_priv_data(const void *priv_data);
 #endif /* _NET_CNSS2_H */
