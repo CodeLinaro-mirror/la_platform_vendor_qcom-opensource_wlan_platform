@@ -3653,19 +3653,19 @@ static void icnss_populate_gpio_config(struct icnss_priv *priv,
 		req->gpio_config[gpio_info_type].gpio_bitreserved = cfg_arr[WLFW_GPIO_BITRESERVED_V01];
 		icnss_pr_dbg("GPIO_NUM: %d, GPIO_NAME: %s, PMIC_INDEX: %d, GPIO_TYPE: %s\n",
 			     req->gpio_config[gpio_info_type].gpio_num,
-			     icnss_gpio_name_str[req->gpio_config[gpio_info_type].gpio_name],
+			     icnss_gpio_name_str(req->gpio_config[gpio_info_type].gpio_name),
 			     req->gpio_config[gpio_info_type].pmic_index,
-			     icnss_gpio_type_str[req->gpio_config[gpio_info_type].gpio_type]);
+			     icnss_gpio_type_str(req->gpio_config[gpio_info_type].gpio_type));
 		icnss_pr_dbg("OUTPUT_VALUE: %s, FUNC_SELECT: %d, GPIO_DIRECTION: %s, DRIVE_STRENGTH: %d\n",
-			     icnss_gpio_output_str[req->gpio_config[gpio_info_type].output_value],
+			     icnss_gpio_output_str(req->gpio_config[gpio_info_type].output_value),
 			     req->gpio_config[gpio_info_type].func,
-			     icnss_gpio_direction_str[req->gpio_config[gpio_info_type].direction],
+			     icnss_gpio_direction_str(req->gpio_config[gpio_info_type].direction),
 			     req->gpio_config[gpio_info_type].drive_strength);
 		icnss_pr_dbg("BIAS_TYPE: %s, IS_CLK: %d, IS_WAKE: %d, INTRPT_TRIGGER_TYPE: %s\n",
-			     icnss_gpio_bias_str[req->gpio_config[gpio_info_type].bias],
+			     icnss_gpio_bias_str(req->gpio_config[gpio_info_type].bias),
 			     req->gpio_config[gpio_info_type].is_clk,
 			     req->gpio_config[gpio_info_type].is_wake,
-			     icnss_gpio_intr_trigger_str[req->gpio_config[gpio_info_type].intrpt_trigger_type]);
+			     icnss_gpio_intr_trigger_str(req->gpio_config[gpio_info_type].intrpt_trigger_type));
 		icnss_pr_dbg("PRIORITY: %d, GPIO_BITRESERVED: %d, GPIO_ARRAY_VALID: %d, GPIO_OWNER: %d\n",
 			     req->gpio_config[gpio_info_type].priority,
 			     req->gpio_config[gpio_info_type].gpio_bitreserved,
