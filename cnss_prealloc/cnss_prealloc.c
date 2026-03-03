@@ -190,7 +190,7 @@ static inline void cnss_stack_track_deinit(struct cnss_pool *cnss_pool)
  * Return: 0 - success, otherwise error code.
  *
  */
-void *cnss_mempool_alloc(gfp_t gfp_mask, void *pool_data)
+static void *cnss_mempool_alloc(gfp_t gfp_mask, void *pool_data)
 {
 	if (!mempool_initialization_done || !cnss_force_prealloc_pool)
 		return mempool_alloc_slab(gfp_mask, pool_data);
@@ -587,8 +587,11 @@ void *wcnss_prealloc_get(size_t size)
 
 	if (in_interrupt() || !preemptible() || rcu_preempt_depth())
 		gfp_mask |= GFP_ATOMIC;
-	else
+	else {
 		gfp_mask |= GFP_KERNEL;
+		if (cnss_force_prealloc_pool)
+			gfp_mask &= ~__GFP_DIRECT_RECLAIM;
+	}
 
 	if (size > cnss_pool_alloc_threshold()) {
 

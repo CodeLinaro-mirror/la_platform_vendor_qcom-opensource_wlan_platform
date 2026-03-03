@@ -5947,6 +5947,7 @@ static int icnss_smmu_fault_handler(struct iommu_domain *domain,
 	}
 
 	if (test_bit(ICNSS_FW_READY, &priv->state)) {
+		clear_bit(ICNSS_FW_READY, &priv->state);
 		fw_down_data.crashed = true;
 		icnss_call_driver_uevent(priv, ICNSS_UEVENT_SMMU_FAULT,
 					 &fw_down_data);
@@ -6007,6 +6008,7 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 
 	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_ENTRY);
 	if (test_bit(ICNSS_FW_READY, &priv->state)) {
+		clear_bit(ICNSS_FW_READY, &priv->state);
 		fw_down_data.crashed = true;
 		icnss_call_driver_uevent(priv, ICNSS_UEVENT_SMMU_FAULT,
 					 &fw_down_data);
