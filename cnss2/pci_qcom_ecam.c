@@ -192,6 +192,8 @@ void cnss_register_iommu_fault_handler(struct cnss_pci_data *pci_priv)
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+#define CNSS_IOMMU_NODE_NAME_MAX_LEN	50
+
 int cnss_pci_get_iommu_addr(struct cnss_pci_data *pci_priv,
 			    struct device_node *iommu_group_node)
 {
@@ -200,9 +202,14 @@ int cnss_pci_get_iommu_addr(struct cnss_pci_data *pci_priv,
 	const u32 *maps;
 	const u32 *end;
 	int size;
+	char iommu_name[CNSS_IOMMU_NODE_NAME_MAX_LEN];
+
+	snprintf(iommu_name, CNSS_IOMMU_NODE_NAME_MAX_LEN,
+		 "cnss_pci%d_iommu_region_partition",
+		 pci_priv->plat_priv->rc_num);
 
 	of_node = of_find_node_by_name(pci_dev->dev.of_node,
-				       "cnss_pci0_iommu_region_partition");
+				       iommu_name);
 	if (!of_node)
 		return -EINVAL;
 
