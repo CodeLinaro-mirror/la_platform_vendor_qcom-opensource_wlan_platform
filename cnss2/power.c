@@ -858,7 +858,13 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 	pinctrl_info->pinctrl = devm_pinctrl_get(dev);
 	if (IS_ERR_OR_NULL(pinctrl_info->pinctrl)) {
 		ret = PTR_ERR(pinctrl_info->pinctrl);
-		cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		if (ret == -ENODEV) {
+			cnss_pr_info("pinctrl is NOT configured\n");
+			ret = 0;
+		} else {
+			cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		}
+
 		goto out;
 	}
 
@@ -963,6 +969,12 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 	}
 
 	if (of_find_property(dev->of_node, WLAN_SW_CTRL_GPIO, NULL)) {
+		pinctrl_info->wlan_sw_ctrl_gpio = of_get_named_gpio(dev->of_node,
+								    WLAN_SW_CTRL_GPIO,
+								    0);
+		cnss_pr_dbg("WLAN Switch control GPIO: %d\n",
+			    pinctrl_info->wlan_sw_ctrl_gpio);
+
 		pinctrl_info->sw_ctrl_wl_cx =
 			pinctrl_lookup_state(pinctrl_info->pinctrl,
 					     "sw_ctrl_wl_cx");
@@ -978,6 +990,8 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 				cnss_pr_err("Failed to select sw_ctrl_wl_cx state, err = %d\n",
 					    ret);
 		}
+	} else {
+		pinctrl_info->wlan_sw_ctrl_gpio = -EINVAL;
 	}
 
 	cnss_set_wakeup_cap_for_gpios(dev);
@@ -1305,12 +1319,12 @@ out:
 int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
-	int i;
+	int i, ret = 0;
 
 	plat_priv->pd_count = of_count_phandle_with_args(
 		dev->of_node, "power-domains", "#power-domain-cells");
 	if (plat_priv->pd_count <= 1)
-		return 0;
+		goto out;
 
 	plat_priv->pd_devs = devm_kcalloc(dev, plat_priv->pd_count,
 					  sizeof(*plat_priv->pd_devs),
@@ -1321,12 +1335,14 @@ int cnss_fw_managed_domain_attach(struct cnss_plat_data *plat_priv)
 	for (i = 0; i < plat_priv->pd_count; i++) {
 		plat_priv->pd_devs[i] = dev_pm_domain_attach_by_id(dev, i);
 		if (IS_ERR(plat_priv->pd_devs[i])) {
+			ret = PTR_ERR(plat_priv->pd_devs[i]);
 			cnss_fw_managed_domain_detach(plat_priv);
-			return PTR_ERR(plat_priv->pd_devs[i]);
+			goto out;
 		}
 	}
 
-	return 0;
+out:
+	return ret;
 }
 
 void cnss_fw_managed_domain_detach(struct cnss_plat_data *plat_priv)
@@ -1601,6 +1617,16 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 		cnss_select_pinctrl_state(plat_priv, false);
 		cnss_clk_off(plat_priv, &plat_priv->clk_list);
 		cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
+
+		if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
+			ret = cnss_set_bidirectional_ack_pdc(plat_priv,
+							     ACK_GEN_DISABLED);
+			if (ret < 0) {
+				cnss_pr_err("Failed to set bi-d ack mode\n");
+				return;
+			}
+		}
+
 	}
 	plat_priv->powered_on = false;
 }
@@ -1970,19 +1996,24 @@ static int cnss_aop_pdc_disable_cx(struct cnss_plat_data *plat_priv)
 	char pdc_mode[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
 	char pdc_voltage[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
 	int ret = 0;
+	const char *cx_reg_name = plat_priv->cx_reg_name;
 
 	if (plat_priv->device_id == FIG_DEVICE_ID) {
 		cnss_pr_info("Disabling PDC control of WLAN CX on device: %d\n",
 			     plat_priv->device_id);
 
 		snprintf(pdc_mode, CNSS_MBOX_MSG_MAX_LEN,
-			 "{class: wlan_pdc, ss: bb, res: S1J1.m, enable: 0}");
+			 "{class: wlan_pdc, ss: bb, res: %s.m, enable: 0}",
+			 cx_reg_name);
+		cnss_pr_vdbg("PDC command: %s\n", pdc_mode);
 		ret = cnss_aop_send_msg(plat_priv, pdc_mode);
 		if (ret < 0)
 			return ret;
 
 		snprintf(pdc_voltage, CNSS_MBOX_MSG_MAX_LEN,
-			 "{class: wlan_pdc, ss: bb, res: S1J1.v, enable: 0}");
+			 "{class: wlan_pdc, ss: bb, res: %s.v, enable: 0}",
+			 cx_reg_name);
+		cnss_pr_vdbg("PDC command: %s\n", pdc_voltage);
 		ret = cnss_aop_send_msg(plat_priv, pdc_voltage);
 		if (ret < 0)
 			return ret;
@@ -2226,14 +2257,6 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 	} plat_vreg_param[QMI_WLFW_PMU_PARAMS_MAX_V01] = {0};
 	static bool config_done;
 	int cx_pin_idx = 0;
-	u32 cx_mode_dt;
-
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
 
 	if (config_done)
 		return 0;
@@ -2462,6 +2485,17 @@ void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv)
 		}
 	} else {
 		cnss_pr_dbg("PDC Init Table not configured\n");
+	}
+
+	/* Read cx regulator name from device tree */
+	ret = of_property_read_string(dev->of_node, "cx-reg-name",
+				      &plat_priv->cx_reg_name);
+	if (ret) {
+		cnss_pr_dbg("cx-reg-name not found in device tree, using default\n");
+		plat_priv->cx_reg_name = "S1J1";
+	} else {
+		cnss_pr_dbg("cx-reg-name found in device tree: %s\n",
+			    plat_priv->cx_reg_name);
 	}
 
 	plat_priv->vreg_pdc_map_len =
