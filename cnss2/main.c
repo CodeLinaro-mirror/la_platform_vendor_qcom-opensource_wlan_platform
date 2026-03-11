@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/delay.h>
@@ -7959,6 +7959,12 @@ out:
 #endif
 }
 
+#ifdef CONFIG_CNSS_SHUTDOWN_CALLBACK
+static void cnss_shutdown(struct platform_device *plat_dev)
+{
+	cnss_remove(plat_dev);
+}
+#else
 static void cnss_shutdown(struct platform_device *plat_dev)
 {
 	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
@@ -7987,6 +7993,7 @@ static void cnss_shutdown(struct platform_device *plat_dev)
 		cnss_power_off_device(plat_priv);
 	}
 }
+#endif
 
 static struct platform_driver cnss_platform_driver = {
 	.probe  = cnss_probe,
