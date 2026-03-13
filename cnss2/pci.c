@@ -2841,7 +2841,7 @@ cnss_get_plat_priv_when_unregister_driver(struct cnss_wlan_driver *driver_ops)
 static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
-	u32 scratch = PCIE_SCRATCH_2_SOC_PCIE_REG;
+	u32 scratch;
 	struct cnss_plat_data *plat_priv;
 
 	if (!pci_priv) {
@@ -2852,6 +2852,10 @@ static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 	switch (pci_priv->device_id) {
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
+		scratch = PCIE_SCRATCH_2_SOC_PCIE_REG;
+		break;
+	case KIWI_DEVICE_ID:
+		scratch = PCIE_KIWI_SCRATCH_2_SOC_PCIE_REG;
 		break;
 	default:
 		cnss_pr_dbg("device 0x%x not supported qrtr set, nothing to do\n",
@@ -6289,6 +6293,15 @@ bool cnss_pci_is_smmu_s1_enabled(struct cnss_pci_data *pci_priv)
 
 	return false;
 }
+
+bool cnss_smmu_s1_enabled(struct device *dev)
+{
+	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(to_pci_dev(dev));
+
+	return cnss_pci_is_smmu_s1_enabled(pci_priv);
+}
+EXPORT_SYMBOL(cnss_smmu_s1_enabled);
+
 struct iommu_domain *cnss_smmu_get_domain(struct device *dev)
 {
 	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(to_pci_dev(dev));
