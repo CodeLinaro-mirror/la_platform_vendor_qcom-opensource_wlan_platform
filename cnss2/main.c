@@ -118,6 +118,8 @@ static struct cnss_fw_files FW_FILES_DEFAULT = {
 	"utfbd.bin", "epping.bin", "evicted.bin"
 };
 
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv);
+
 struct cnss_driver_event {
 	struct list_head list;
 	enum cnss_driver_event_type type;
@@ -5242,6 +5244,9 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 	if (plat_priv->device_id == PEACH_DEVICE_ID)
 		cnss_set_feature_list(plat_priv, CNSS_AUX_UC_SUPPORT_V01);
 
+	ret = cnss_get_bdf_filename_from_dt(plat_priv);
+	if (ret)
+		cnss_pr_err("Get customer bdf filename error!\n");
 	return 0;
 }
 
@@ -5312,17 +5317,6 @@ static void cnss_get_pm_domain_info(struct cnss_plat_data *plat_priv)
 		of_property_read_bool(dev->of_node, "use-pm-domain");
 
 	cnss_pr_dbg("use-pm-domain is %d\n", plat_priv->use_pm_domain);
-}
-
-static void cnss_get_wlaon_pwr_ctrl_info(struct cnss_plat_data *plat_priv)
-{
-	struct device *dev = &plat_priv->plat_dev->dev;
-
-	plat_priv->set_wlaon_pwr_ctrl =
-		of_property_read_bool(dev->of_node, "qcom,set-wlaon-pwr-ctrl");
-
-	cnss_pr_dbg("set_wlaon_pwr_ctrl is %d\n",
-		    plat_priv->set_wlaon_pwr_ctrl);
 }
 
 static bool cnss_use_fw_path_with_prefix(struct cnss_plat_data *plat_priv)
@@ -5750,6 +5744,36 @@ int cnss_get_curr_therm_cdev_state(struct device *dev,
 }
 EXPORT_SYMBOL(cnss_get_curr_therm_cdev_state);
 
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv)
+{
+	const char *tmp_str = NULL;
+	int ret = 0;
+	size_t bdf_len;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return -EINVAL;
+
+	memset(plat_priv->bdfname_dt, 0, sizeof(plat_priv->bdfname_dt));
+	ret = of_property_read_string_index(plat_priv->plat_dev->dev.of_node,
+					    "bdf-names", 0,
+					     &tmp_str);
+
+	if (ret == 0 && tmp_str) {
+		bdf_len = strnlen(tmp_str, MAX_FIRMWARE_NAME_LEN + 1);
+		if (bdf_len == 0 ||  bdf_len >= MAX_FIRMWARE_NAME_LEN) {
+			cnss_pr_err("BDF filename invalid size (%zu bytes), max allowed: %zu\n",
+				bdf_len, MAX_FIRMWARE_NAME_LEN - 1);
+			return -EINVAL;
+		}
+
+		strlcpy(plat_priv->bdfname_dt, tmp_str,
+			sizeof(plat_priv->bdfname_dt));
+
+	}
+
+	return ret;
+}
+
 static int cnss_probe(struct platform_device *plat_dev)
 {
 	int ret = 0;
@@ -5824,7 +5848,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 	INIT_LIST_HEAD(&plat_priv->clk_list);
 
 	cnss_get_pm_domain_info(plat_priv);
-	cnss_get_wlaon_pwr_ctrl_info(plat_priv);
 	cnss_power_misc_params_init(plat_priv);
 	cnss_pci_of_switch_type_init(plat_priv);
 	cnss_get_tcs_info(plat_priv);
