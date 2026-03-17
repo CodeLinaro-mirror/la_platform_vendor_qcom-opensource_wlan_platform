@@ -340,6 +340,8 @@ enum cnss_driver_event_type {
 	CNSS_DRIVER_EVENT_FW_MEM_FILE_SAVE,
 	CNSS_DRIVER_EVENT_QDSS_TRACE_FREE,
 	CNSS_DRIVER_EVENT_QDSS_TRACE_REQ_DATA,
+	CNSS_DRIVER_EVENT_RESUME_POST_SOL,
+	CNSS_DRIVER_EVENT_XO_TRIM_IND,
 	CNSS_DRIVER_EVENT_MAX,
 };
 
@@ -515,6 +517,18 @@ struct cnss_thermal_cdev {
 	struct thermal_cooling_device *tcdev;
 };
 
+/**
+ * struct cnss_xo_trim_config - Configuration for crystal oscillator (XO) trim
+ * @xo_calib_reg: register for XO calibration
+ * @wcal_pbs: regulator to trigger PBS sequence
+ * @trim_val: trim value for XO
+ */
+struct cnss_xo_trim_config {
+	struct nvmem_cell *xo_calib_reg;
+	struct regulator *wcal_pbs;
+	u8 trim_val;
+};
+
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
 	enum cnss_driver_mode driver_mode;
@@ -624,6 +638,7 @@ struct cnss_plat_data {
 	u8 use_pm_domain;
 	u8 use_nv_mac;
 	u8 set_wlaon_pwr_ctrl;
+	u8 wlaon_pwr_ctrl_otp_supported;
 	struct cnss_tcs_info tcs_info;
 	bool fw_pcie_gen_switch;
 	bool fw_aux_uc_support;
@@ -668,6 +683,8 @@ struct cnss_plat_data {
 	bool is_fw_managed_pwr;
 	struct device **pd_devs;
 	int pd_count;
+	char bdfname_dt[MAX_FIRMWARE_NAME_LEN];
+	struct cnss_xo_trim_config xo_trim_conf;
 };
 
 #if IS_ENABLED(CONFIG_ARCH_QCOM)
