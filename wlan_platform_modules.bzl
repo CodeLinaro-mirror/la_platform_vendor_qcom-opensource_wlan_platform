@@ -10,8 +10,8 @@ _default_module_enablement_list = [
     "wlan_firmware_service",
 ]
 
-_cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "hamoa", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art", "art16k", "sa510m", "sa510m.1g"]
-_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina", "chora", "art", "art16k"]
+_cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "volcano", "canoe", "hamoa", "hamoa_la", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art", "art16k", "sa510m", "sa510m.1g"]
+_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "volcano", "parrot", "sun", "canoe", "lahaina", "chora", "art", "art16k", "alor-le", "bengal", "malabar", "shikra"]
 
 def matching_la_variant(target_16k):
     for target in targets:
@@ -329,7 +329,7 @@ def _define_modules_for_target_variant(target, variant):
     else:
         cnss_utils_dep_list += [ kernel_header ]
 
-    if target == "sun" or target == "canoe" or target == "art" or target == "hamoa" or target == "chora" or target == "art16k":
+    if target == "sun" or target == "canoe" or target == "art" or target == "hamoa" or target == "chora" or target == "art16k" or target == "hamoa_la":
         cnss_utils_dep_list = cnss_utils_dep_list + ["//vendor/qcom/opensource/data-kernel/drivers/smem-mailbox:{}_smem_mailbox".format(tv),]
     if target == "sdxkova":
         tgt = "target-aarch64_cortex-a53_musl"
