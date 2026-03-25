@@ -47,7 +47,7 @@ MODULE_DESCRIPTION("CNSS prealloc driver");
  */
 
 #define CNSS_STACK_TRACE_DEPTH 16
-#define CNSS_SYMBOL_NAME_LEN 128
+#define CNSS_SYMBOL_NAME_LEN KSYM_SYMBOL_LEN
 
 struct cnss_stack_entry {
 	char symbol[CNSS_SYMBOL_NAME_LEN];
@@ -111,10 +111,10 @@ static struct cnss_pool cnss_pools_default[] = {
 };
 
 static struct cnss_pool cnss_pools_adrastea[] = {
-	{16 * 1024, 10, "cnss-pool-16k", NULL, NULL, NULL},
+	{16 * 1024, 8, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 8, "cnss-pool-32k", NULL, NULL, NULL},
-	{64 * 1024, 4, "cnss-pool-64k", NULL, NULL, NULL},
-	{128 * 1024, 2, "cnss-pool-128k", NULL, NULL, NULL},
+	{64 * 1024, 3, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 0, "cnss-pool-128k", NULL, NULL, NULL},
 };
 
 static struct cnss_pool cnss_pools_wcn6750[] = {
@@ -132,10 +132,27 @@ static struct cnss_pool cnss_pools_wcn7750[] = {
 	{256 * 1024, 2, "cnss-pool-256k", NULL, NULL, NULL},
 };
 
+#ifdef CONFIG_CNSS2_DEBUG
+static struct cnss_pool cnss_pools_wcn6450[] = {
+	{16 * 1024, 24, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 14, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 36, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 10, "cnss-pool-128k", NULL, NULL, NULL},
+};
+#else
+static struct cnss_pool cnss_pools_wcn6450[] = {
+	{16 * 1024, 14, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 10, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 8, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 5, "cnss-pool-128k", NULL, NULL, NULL},
+};
+#endif
+
 struct cnss_pool *cnss_pools;
 unsigned int cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
 spinlock_t pool_table_lock;
 bool mempool_initialization_done;
+bool cnss_force_prealloc_pool;
 
 /**
  * cnss_pool_alloc_threshold() - Allocation threshold
@@ -189,6 +206,15 @@ static inline void cnss_stack_track_deinit(struct cnss_pool *cnss_pool)
  * Return: 0 - success, otherwise error code.
  *
  */
+static void *cnss_mempool_alloc(gfp_t gfp_mask, void *pool_data)
+{
+	if (!mempool_initialization_done || !cnss_force_prealloc_pool)
+		return mempool_alloc_slab(gfp_mask, pool_data);
+	else
+		return NULL;
+
+}
+
 static int cnss_pool_init(void)
 {
 	int i;
@@ -208,7 +234,7 @@ static int cnss_pool_init(void)
 
 		/* Create the pool and associate to slab cache */
 		cnss_pools[i].mp =
-		    mempool_create(cnss_pools[i].min, mempool_alloc_slab,
+		    mempool_create(cnss_pools[i].min, cnss_mempool_alloc,
 				   mempool_free_slab, cnss_pools[i].cache);
 
 		if (!cnss_pools[i].mp) {
@@ -275,10 +301,11 @@ static void cnss_pool_deinit(void)
 
 static void cnss_assign_prealloc_pool(unsigned long device_id)
 {
-	pr_info("cnss_prealloc: assign cnss pool for device id 0x%lx", device_id);
+	cnss_force_prealloc_pool = false;
 
 	switch (device_id) {
 	case ADRASTEA_DEVICE_ID:
+		cnss_force_prealloc_pool = true;
 		cnss_pools = cnss_pools_adrastea;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_adrastea);
 		break;
@@ -291,6 +318,10 @@ static void cnss_assign_prealloc_pool(unsigned long device_id)
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_wcn7750);
 		break;
 	case WCN6450_DEVICE_ID:
+		cnss_force_prealloc_pool = true;
+		cnss_pools = cnss_pools_wcn6450;
+		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_wcn6450);
+		break;
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
 	case MANGO_DEVICE_ID:
@@ -301,6 +332,9 @@ static void cnss_assign_prealloc_pool(unsigned long device_id)
 		cnss_pools = cnss_pools_default;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
 	}
+
+	pr_info("cnss_prealloc: assign cnss pool for device id 0x%lx with force_prealloc:%s\n",
+		device_id, cnss_force_prealloc_pool ? "enabled":"disabled");
 }
 
 void cnss_initialize_prealloc_pool(unsigned long device_id)
@@ -574,8 +608,11 @@ void *wcnss_prealloc_get(size_t size)
 
 	if (in_interrupt() || !preemptible() || rcu_preempt_depth())
 		gfp_mask |= GFP_ATOMIC;
-	else
+	else {
 		gfp_mask |= GFP_KERNEL;
+		if (cnss_force_prealloc_pool)
+			gfp_mask &= ~__GFP_DIRECT_RECLAIM;
+	}
 
 	if (size > cnss_pool_alloc_threshold()) {
 

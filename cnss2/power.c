@@ -858,7 +858,13 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 	pinctrl_info->pinctrl = devm_pinctrl_get(dev);
 	if (IS_ERR_OR_NULL(pinctrl_info->pinctrl)) {
 		ret = PTR_ERR(pinctrl_info->pinctrl);
-		cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		if (ret == -ENODEV) {
+			cnss_pr_info("pinctrl is NOT configured\n");
+			ret = 0;
+		} else {
+			cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		}
+
 		goto out;
 	}
 
@@ -1611,6 +1617,16 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 		cnss_select_pinctrl_state(plat_priv, false);
 		cnss_clk_off(plat_priv, &plat_priv->clk_list);
 		cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
+
+		if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
+			ret = cnss_set_bidirectional_ack_pdc(plat_priv,
+							     ACK_GEN_DISABLED);
+			if (ret < 0) {
+				cnss_pr_err("Failed to set bi-d ack mode\n");
+				return;
+			}
+		}
+
 	}
 	plat_priv->powered_on = false;
 }
@@ -2236,14 +2252,6 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 	} plat_vreg_param[QMI_WLFW_PMU_PARAMS_MAX_V01] = {0};
 	static bool config_done;
 	int cx_pin_idx = 0;
-	u32 cx_mode_dt;
-
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		return -EINVAL;
-	}
 
 	if (config_done)
 		return 0;
