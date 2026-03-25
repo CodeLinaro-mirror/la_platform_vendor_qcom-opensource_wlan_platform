@@ -1128,28 +1128,39 @@ int icnss_aop_pdc_reconfig(struct icnss_priv *priv)
 void icnss_power_misc_params_init(struct icnss_priv *priv)
 {
 	struct device *dev = &priv->pdev->dev;
+	const char *prop_name;
 	int ret;
 
 	/* common DT Entries */
-	priv->pdc_init_table_len =
-				of_property_count_strings(dev->of_node,
-							  "qcom,pdc_init_table");
-	if (priv->pdc_init_table_len > 0) {
-		priv->pdc_init_table =
-			kcalloc(priv->pdc_init_table_len,
-				sizeof(char *), GFP_KERNEL);
-		if (priv->pdc_init_table) {
-			ret = of_property_read_string_array(dev->of_node,
-						"qcom,pdc_init_table",
-						priv->pdc_init_table,
-						priv->pdc_init_table_len);
-			if (ret < 0)
-				icnss_pr_err("Failed to get PDC Init Table\n");
-		} else {
-			icnss_pr_err("Failed to alloc PDC Init Table mem\n");
-		}
-	} else {
+	if (priv->wcn_ktb_info_buf &&
+	    *priv->wcn_ktb_info_buf == WCN_KTB_EXT_RAIL)
+		prop_name = "qcom,pdc_init_table_v1";
+	else
+		prop_name = "qcom,pdc_init_table";
+
+	priv->pdc_init_table_len = of_property_count_strings(dev->of_node, prop_name);
+
+	if (priv->pdc_init_table_len <= 0) {
 		icnss_pr_dbg("PDC Init Table not configured\n");
+	} else {
+		priv->pdc_init_table = kcalloc(priv->pdc_init_table_len,
+					       sizeof(char *), GFP_KERNEL);
+
+		if (!priv->pdc_init_table) {
+			icnss_pr_err("Failed to alloc PDC Init Table mem\n");
+			priv->pdc_init_table_len = 0;
+		} else {
+			ret = of_property_read_string_array(dev->of_node, prop_name,
+							    priv->pdc_init_table,
+							    priv->pdc_init_table_len);
+
+			if (ret < 0) {
+				icnss_pr_err("Failed to get PDC Init Table\n");
+				kfree(priv->pdc_init_table);
+				priv->pdc_init_table = NULL;
+				priv->pdc_init_table_len = 0;
+			}
+		}
 	}
 }
 
