@@ -29,6 +29,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/nvmem-consumer.h>
 #include <linux/component.h>
+#include <linux/string.h>
 
 #include "cnss_plat_ipc_qmi.h"
 #include "cnss_utils.h"
@@ -157,6 +158,8 @@ static struct cnss_fw_files FW_FILES_DEFAULT = {
 	"qwlan.bin", "bdwlan.bin", "otp.bin", "utf.bin",
 	"utfbd.bin", "epping.bin", "evicted.bin"
 };
+
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv);
 
 struct cnss_driver_event {
 	struct list_head list;
@@ -760,6 +763,10 @@ bool cnss_get_fw_cap(struct device *dev, enum cnss_fw_caps fw_cap)
 	case CNSS_FW_CAP_BT_DUMP_OVER_WLAN_SUPPORT:
 		is_supported = !!(plat_priv->fw_caps &
 				  QMI_WLFW_BT_DUMP_OVER_WLAN_SUPPORT_V01);
+		break;
+	case CNSS_FW_CAP_DIRECT_REFILL_SUPPORT:
+		is_supported = !!(plat_priv->fw_caps &
+				  QMI_WLFW_DIRECT_REFILL_SUPPORT_V01);
 		break;
 	default:
 		cnss_pr_err("Invalid FW Capability: 0x%x\n", fw_cap);
@@ -1383,7 +1390,7 @@ static int cnss_cal_db_mem_update(struct cnss_plat_data *plat_priv,
 			return ret;
 		}
 	}
-	if (!plat_priv->cal_mem->va) {
+	if (!plat_priv->cal_mem || !plat_priv->cal_mem->va) {
 		cnss_pr_err("CAL DB Memory not setup for FW\n");
 		return -EINVAL;
 	}
@@ -1418,6 +1425,11 @@ static int cnss_cal_db_mem_update(struct cnss_plat_data *plat_priv,
 
 static int cnss_cal_mem_upload_to_file(struct cnss_plat_data *plat_priv)
 {
+	if (!plat_priv->cal_mem) {
+		cnss_pr_err("CAL DB Memory not setup for FW\n");
+		return -EINVAL;
+	}
+
 	if (plat_priv->cal_file_size > plat_priv->cal_mem->size) {
 		cnss_pr_err("Cal file size is larger than Cal DB Mem size\n");
 		return -EINVAL;
@@ -1429,6 +1441,11 @@ static int cnss_cal_mem_upload_to_file(struct cnss_plat_data *plat_priv)
 static int cnss_cal_file_download_to_mem(struct cnss_plat_data *plat_priv,
 					 u32 *cal_file_size)
 {
+	if (!plat_priv->cal_mem) {
+		cnss_pr_err("CAL DB Memory not setup for FW\n");
+		return -EINVAL;
+	}
+
 	/* To download pass the total size of cal DB mem allocated.
 	 * After cal file is download to mem, its size is updated in
 	 * return pointer
@@ -2995,8 +3012,10 @@ static int cnss_set_cxpc_pdc(struct cnss_plat_data *plat_priv,
 			     plat_priv->device_id, arg);
 
 		snprintf(pdc_mode, CNSS_MBOX_MSG_MAX_LEN,
-			 "{class: wlan_pdc, ss: bb, res: s1j1.e, enable: %d, vlvl: %d}",
-			 enable_collapse, RAIL_VOLTAGE_LEVEL_RET);
+			 "{class: wlan_pdc, ss: bb, res: %s.e, enable: %d, vlvl: %d}",
+			 plat_priv->cx_reg_name, enable_collapse,
+			 RAIL_VOLTAGE_LEVEL_RET);
+		cnss_pr_vdbg("PDC command: %s\n", pdc_mode);
 		ret = cnss_aop_send_msg(plat_priv, pdc_mode);
 		if (ret < 0) {
 			cnss_pr_err("Failed to send PDC mode message: %d\n", ret);
@@ -3115,8 +3134,9 @@ static int cnss_set_cx_voltage_corner_pdc(struct cnss_plat_data *plat_priv,
 			     cnss_get_cx_voltage_corner(vc), arg);
 
 		snprintf(pdc_voltage, CNSS_MBOX_MSG_MAX_LEN,
-			 "{class: wlan_pdc, ss: bb, res: s1j1.v, upval: %d, vlvl: %d}",
-			 arg, voltage_level);
+			 "{class: wlan_pdc, ss: bb, res: %s.v, upval: %d, vlvl: %d}",
+			 plat_priv->cx_reg_name, arg, voltage_level);
+		cnss_pr_vdbg("PDC command: %s\n", pdc_voltage);
 		ret = cnss_aop_send_msg(plat_priv, pdc_voltage);
 		if (ret < 0) {
 			cnss_pr_err("Failed to send PDC mode message: %d\n", ret);
@@ -6401,6 +6421,41 @@ static ssize_t user_config_show(struct device *dev,
 	return curr_len;
 }
 
+static ssize_t wcn_name_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
+	char device_name[MAX_FIRMWARE_NAME_LEN];
+	int i, j = 0;
+
+	if (!plat_priv)
+		return -ENODEV;
+
+	/* Check if PCI probe is done */
+	if (!test_bit(CNSS_PCI_PROBE_DONE, &plat_priv->driver_state)) {
+		cnss_pr_dbg("PCI probe not complete, cannot get device name\n");
+		return -EAGAIN;  /* Operation should be retried later */
+	}
+
+	memset(device_name, 0, sizeof(device_name));
+
+	/* Get the device_name name & Strip that trailing slash.
+	the sysfs node should expose folder name (e.g. "kiwi") */
+	cnss_bus_add_fw_prefix_name(plat_priv, device_name, "");
+
+	for (i = 0; device_name[i] != '\0'; i++) {
+		if (device_name[i] != '/')
+			device_name[j++] = device_name[i];
+	}
+	device_name[j] = '\0';
+
+	if (!device_name[0])
+		return -ENODEV;   /* nothing produced */
+
+	return scnprintf(buf, MAX_FIRMWARE_NAME_LEN, "%s\n", device_name);
+}
+
 static DEVICE_ATTR_WO(fs_ready);
 static DEVICE_ATTR_WO(shutdown);
 static DEVICE_ATTR_RW(recovery);
@@ -6413,6 +6468,7 @@ static DEVICE_ATTR_WO(hw_trace_override);
 static DEVICE_ATTR_WO(charger_mode);
 static DEVICE_ATTR_RW(time_sync_period);
 static DEVICE_ATTR_RW(user_config);
+static DEVICE_ATTR_RO(wcn_name);
 
 static struct attribute *cnss_attrs[] = {
 	&dev_attr_fs_ready.attr,
@@ -6427,6 +6483,7 @@ static struct attribute *cnss_attrs[] = {
 	&dev_attr_charger_mode.attr,
 	&dev_attr_time_sync_period.attr,
 	&dev_attr_user_config.attr,
+	&dev_attr_wcn_name.attr,
 	NULL,
 };
 
@@ -6991,6 +7048,10 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 	    plat_priv->device_id == FIG_DEVICE_ID)
 		cnss_set_feature_list(plat_priv, CNSS_AUX_UC_SUPPORT_V01);
 
+	ret = cnss_get_bdf_filename_from_dt(plat_priv);
+	if (ret)
+		cnss_pr_err("Get customer bdf filename error!\n");
+
 	return 0;
 }
 
@@ -7064,17 +7125,6 @@ static void cnss_get_pm_domain_info(struct cnss_plat_data *plat_priv)
 		of_property_read_bool(dev->of_node, "use-pm-domain");
 
 	cnss_pr_dbg("use-pm-domain is %d\n", plat_priv->use_pm_domain);
-}
-
-static void cnss_get_wlaon_pwr_ctrl_info(struct cnss_plat_data *plat_priv)
-{
-	struct device *dev = &plat_priv->plat_dev->dev;
-
-	plat_priv->set_wlaon_pwr_ctrl =
-		of_property_read_bool(dev->of_node, "qcom,set-wlaon-pwr-ctrl");
-
-	cnss_pr_dbg("set_wlaon_pwr_ctrl is %d\n",
-		    plat_priv->set_wlaon_pwr_ctrl);
 }
 
 static bool cnss_use_fw_path_with_prefix(struct cnss_plat_data *plat_priv)
@@ -7678,6 +7728,31 @@ static void cnss_vendor_wonder_dev_remove(void)
 	wonder_priv_data = NULL;
 }
 
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv)
+{
+	const char *tmp_str = NULL;
+	int ret = 0;
+	size_t bdf_len;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return -EINVAL;
+	memset(plat_priv->bdfname_dt, 0, sizeof(plat_priv->bdfname_dt));
+	ret = of_property_read_string_index(plat_priv->plat_dev->dev.of_node,
+					    "bdf-names", 0, &tmp_str);
+	if (ret == 0 && tmp_str) {
+		bdf_len = strnlen(tmp_str, MAX_FIRMWARE_NAME_LEN + 1);
+		if (bdf_len == 0 || bdf_len >= MAX_FIRMWARE_NAME_LEN) {
+			cnss_pr_err("BDF filename too long (%zu bytes), truncated to %zu\n",
+				    bdf_len, sizeof(plat_priv->bdfname_dt) - 1);
+			return -EINVAL;
+		}
+		strscpy(plat_priv->bdfname_dt, tmp_str,
+			sizeof(plat_priv->bdfname_dt));
+	}
+
+	return ret;
+}
+
 static int cnss_probe(struct platform_device *plat_dev)
 {
 	int ret = 0;
@@ -7790,7 +7865,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_enable_direct_cx_pmic_pbs(plat_priv);
 	cnss_get_nvmem_cells(plat_priv);
 	cnss_get_pm_domain_info(plat_priv);
-	cnss_get_wlaon_pwr_ctrl_info(plat_priv);
 	cnss_power_misc_params_init(plat_priv);
 	cnss_get_tcs_info(plat_priv);
 	cnss_get_cpr_info(plat_priv);
