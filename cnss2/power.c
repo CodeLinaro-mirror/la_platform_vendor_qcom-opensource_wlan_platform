@@ -72,6 +72,8 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define XO_CLK_GPIO			"qcom,xo-clk-gpio"
 #define SW_CTRL_GPIO			"qcom,sw-ctrl-gpio"
 #define WLAN_SW_CTRL_GPIO		"qcom,wlan-sw-ctrl-gpio"
+#define SW_CTRL_DATA_0_GPIO		"qcom,sw-ctrl-data-0-gpio"
+#define SW_CTRL_DATA_1_GPIO		"qcom,sw-ctrl-data-1-gpio"
 #define WLAN_EN_ACTIVE			"wlan_en_active"
 #define WLAN_EN_SLEEP			"wlan_en_sleep"
 #define WLAN_VREGS_PROP			"wlan_vregs"
@@ -858,7 +860,13 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 	pinctrl_info->pinctrl = devm_pinctrl_get(dev);
 	if (IS_ERR_OR_NULL(pinctrl_info->pinctrl)) {
 		ret = PTR_ERR(pinctrl_info->pinctrl);
-		cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		if (ret == -ENODEV) {
+			cnss_pr_info("pinctrl is NOT configured\n");
+			ret = 0;
+		} else {
+			cnss_pr_err("Failed to get pinctrl, err = %d\n", ret);
+		}
+
 		goto out;
 	}
 
@@ -986,6 +994,26 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 		}
 	} else {
 		pinctrl_info->wlan_sw_ctrl_gpio = -EINVAL;
+	}
+
+	if (of_find_property(dev->of_node, SW_CTRL_DATA_0_GPIO, NULL)) {
+		pinctrl_info->sw_ctrl_data_0_gpio = of_get_named_gpio(dev->of_node,
+								      SW_CTRL_DATA_0_GPIO,
+								      0);
+		cnss_pr_dbg("Switch control data 0 GPIO: %d\n",
+			    pinctrl_info->sw_ctrl_data_0_gpio);
+	} else {
+		pinctrl_info->sw_ctrl_data_0_gpio = -EINVAL;
+	}
+
+	if (of_find_property(dev->of_node, SW_CTRL_DATA_1_GPIO, NULL)) {
+		pinctrl_info->sw_ctrl_data_1_gpio = of_get_named_gpio(dev->of_node,
+								      SW_CTRL_DATA_1_GPIO,
+								      0);
+		cnss_pr_dbg("Switch control data 1 GPIO: %d\n",
+			    pinctrl_info->sw_ctrl_data_1_gpio);
+	} else {
+		pinctrl_info->sw_ctrl_data_1_gpio = -EINVAL;
 	}
 
 	cnss_set_wakeup_cap_for_gpios(dev);
@@ -1990,19 +2018,24 @@ static int cnss_aop_pdc_disable_cx(struct cnss_plat_data *plat_priv)
 	char pdc_mode[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
 	char pdc_voltage[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
 	int ret = 0;
+	const char *cx_reg_name = plat_priv->cx_reg_name;
 
 	if (plat_priv->device_id == FIG_DEVICE_ID) {
 		cnss_pr_info("Disabling PDC control of WLAN CX on device: %d\n",
 			     plat_priv->device_id);
 
 		snprintf(pdc_mode, CNSS_MBOX_MSG_MAX_LEN,
-			 "{class: wlan_pdc, ss: bb, res: S1J1.m, enable: 0}");
+			 "{class: wlan_pdc, ss: bb, res: %s.m, enable: 0}",
+			 cx_reg_name);
+		cnss_pr_vdbg("PDC command: %s\n", pdc_mode);
 		ret = cnss_aop_send_msg(plat_priv, pdc_mode);
 		if (ret < 0)
 			return ret;
 
 		snprintf(pdc_voltage, CNSS_MBOX_MSG_MAX_LEN,
-			 "{class: wlan_pdc, ss: bb, res: S1J1.v, enable: 0}");
+			 "{class: wlan_pdc, ss: bb, res: %s.v, enable: 0}",
+			 cx_reg_name);
+		cnss_pr_vdbg("PDC command: %s\n", pdc_voltage);
 		ret = cnss_aop_send_msg(plat_priv, pdc_voltage);
 		if (ret < 0)
 			return ret;
@@ -2244,11 +2277,7 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 		u32 lsvs;
 		u32 svsL1_v;
 	} plat_vreg_param[QMI_WLFW_PMU_PARAMS_MAX_V01] = {0};
-	static bool config_done;
 	int cx_pin_idx = 0;
-
-	if (config_done)
-		return 0;
 
 	if (plat_priv->pmu_vreg_map_len <= 0 ||
 	    !plat_priv->pmu_vreg_map ||
@@ -2437,7 +2466,6 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			break;
 	}
 end:
-	config_done = true;
 	return ret;
 }
 #else
@@ -2474,6 +2502,17 @@ void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv)
 		}
 	} else {
 		cnss_pr_dbg("PDC Init Table not configured\n");
+	}
+
+	/* Read cx regulator name from device tree */
+	ret = of_property_read_string(dev->of_node, "cx-reg-name",
+				      &plat_priv->cx_reg_name);
+	if (ret) {
+		cnss_pr_dbg("cx-reg-name not found in device tree, using default\n");
+		plat_priv->cx_reg_name = "S1J1";
+	} else {
+		cnss_pr_dbg("cx-reg-name found in device tree: %s\n",
+			    plat_priv->cx_reg_name);
 	}
 
 	plat_priv->vreg_pdc_map_len =
@@ -2703,4 +2742,54 @@ int cnss_dev_specific_power_on(struct cnss_plat_data *plat_priv)
 
 	plat_priv->powered_on = false;
 	return cnss_power_on_device(plat_priv, false);
+}
+
+void cnss_read_gpio_status_on_link_down(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_pinctrl_info *pinctrl_info;
+	int wlan_sw_ctrl_status = -1;
+	int sw_ctrl_status = -1;
+	int sw_ctrl_data_0_status = -1;
+	int sw_ctrl_data_1_status = -1;
+
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return;
+	}
+
+	pinctrl_info = &plat_priv->pinctrl_info;
+
+	/* Read wlan-sw-ctrl GPIO status */
+	if (pinctrl_info->wlan_sw_ctrl_gpio >= 0) {
+		wlan_sw_ctrl_status =
+			gpio_get_value(pinctrl_info->wlan_sw_ctrl_gpio);
+		cnss_pr_info("wlan-sw-ctrl GPIO(%d) status = %d\n",
+			     pinctrl_info->wlan_sw_ctrl_gpio,
+			     wlan_sw_ctrl_status);
+	}
+
+	/* Read sw-ctrl GPIO status */
+	if (pinctrl_info->sw_ctrl_gpio >= 0) {
+		sw_ctrl_status = gpio_get_value(pinctrl_info->sw_ctrl_gpio);
+		cnss_pr_info("sw-ctrl GPIO(%d) status = %d\n",
+			     pinctrl_info->sw_ctrl_gpio, sw_ctrl_status);
+	}
+
+	/* Read sw-ctrl-data-0 GPIO status */
+	if (pinctrl_info->sw_ctrl_data_0_gpio >= 0) {
+		sw_ctrl_data_0_status =
+			gpio_get_value(pinctrl_info->sw_ctrl_data_0_gpio);
+		cnss_pr_info("sw-ctrl-data-0 GPIO(%d) status = %d\n",
+			     pinctrl_info->sw_ctrl_data_0_gpio,
+			     sw_ctrl_data_0_status);
+	}
+
+	/* Read sw-ctrl-data-1 GPIO status */
+	if (pinctrl_info->sw_ctrl_data_1_gpio >= 0) {
+		sw_ctrl_data_1_status =
+			gpio_get_value(pinctrl_info->sw_ctrl_data_1_gpio);
+		cnss_pr_info("sw-ctrl-data-1 GPIO(%d) status = %d\n",
+			     pinctrl_info->sw_ctrl_data_1_gpio,
+			     sw_ctrl_data_1_status);
+	}
 }
