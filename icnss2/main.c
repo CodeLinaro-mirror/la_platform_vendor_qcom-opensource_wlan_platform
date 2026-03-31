@@ -178,7 +178,8 @@ static ssize_t icnss_sysfs_store(struct kobject *kobj,
 	atomic_set(&priv->is_shutdown, true);
 	if (((priv->wpss_supported || priv->rproc_fw_download) &&
 	      priv->device_id == ADRASTEA_DEVICE_ID) ||
-	      priv->device_id == WCN7750_DEVICE_ID)
+	      priv->device_id == WCN7750_DEVICE_ID ||
+	      priv->device_id == WCN6450_DEVICE_ID)
 		icnss_wpss_unload(priv);
 	return count;
 }
@@ -1137,19 +1138,19 @@ static void icnss_parse_gpio_config(struct icnss_priv *priv)
 			icnss_pr_dbg("Parse %s config property through DT\n", gpio_config_names[i]);
 			icnss_pr_dbg("GPIO_NUM: %d, GPIO_NAME: %s, PMIC_INDEX: %d, GPIO_TYPE: %s\n",
 				     priv->gpio_config_arr[i][WLFW_GPIO_NUM_V01],
-				     icnss_gpio_name_str[priv->gpio_config_arr[i][WLFW_GPIO_NAME_V01]],
+				     icnss_gpio_name_str(priv->gpio_config_arr[i][WLFW_GPIO_NAME_V01]),
 				     priv->gpio_config_arr[i][WLFW_PMIC_INDEX_V01],
-				     icnss_gpio_type_str[priv->gpio_config_arr[i][WLFW_GPIO_TYPE_V01]]);
+				     icnss_gpio_type_str(priv->gpio_config_arr[i][WLFW_GPIO_TYPE_V01]));
 			icnss_pr_dbg("OUTPUT_VALUE: %s, FUNC_SELECT: %d, GPIO_DIRECTION: %s, DRIVE_STRENGTH: %d\n",
-				     icnss_gpio_output_str[priv->gpio_config_arr[i][WLFW_OUTPUT_VALUE_V01]],
+				     icnss_gpio_output_str(priv->gpio_config_arr[i][WLFW_OUTPUT_VALUE_V01]),
 				     priv->gpio_config_arr[i][WLFW_FUNC_V01],
-				     icnss_gpio_direction_str[priv->gpio_config_arr[i][WLFW_DIRECTION_V01]],
+				     icnss_gpio_direction_str(priv->gpio_config_arr[i][WLFW_DIRECTION_V01]),
 				     priv->gpio_config_arr[i][WLFW_DRIVE_V01]);
 			icnss_pr_dbg("BIAS_TYPE: %s, IS_CLK: %d, IS_WAKE: %d, INTRPT_TRIGGER_TYPE: %s\n",
-				     icnss_gpio_bias_str[priv->gpio_config_arr[i][WLFW_BIAS_V01]],
+				     icnss_gpio_bias_str(priv->gpio_config_arr[i][WLFW_BIAS_V01]),
 				     priv->gpio_config_arr[i][WLFW_IS_CLK_V01],
 				     priv->gpio_config_arr[i][WLFW_IS_WAKE_V01],
-				     icnss_gpio_intr_trigger_str[priv->gpio_config_arr[i][WLFW_INTRPT_TRIGGER_TYPE_V01]]);
+				     icnss_gpio_intr_trigger_str(priv->gpio_config_arr[i][WLFW_INTRPT_TRIGGER_TYPE_V01]));
 			icnss_pr_dbg("PRIORITY: %d, GPIO_BITRESERVED: %d, GPIO_ARRAY_VALID: %d, GPIO_OWNER: %d\n",
 				     priv->gpio_config_arr[i][WLFW_PRIORITY_V01],
 				     priv->gpio_config_arr[i][WLFW_GPIO_BITRESERVED_V01],
@@ -3271,7 +3272,8 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 		      priv->state, notif->crashed);
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID ||
-	    priv->device_id == WCN7750_DEVICE_ID)
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN6450_DEVICE_ID)
 		icnss_update_shutdown_state_to_fw(priv, data);
 
 	set_bit(ICNSS_FW_DOWN, &priv->state);
@@ -5945,6 +5947,7 @@ static int icnss_smmu_fault_handler(struct iommu_domain *domain,
 	}
 
 	if (test_bit(ICNSS_FW_READY, &priv->state)) {
+		clear_bit(ICNSS_FW_READY, &priv->state);
 		fw_down_data.crashed = true;
 		icnss_call_driver_uevent(priv, ICNSS_UEVENT_SMMU_FAULT,
 					 &fw_down_data);
@@ -6005,6 +6008,7 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 
 	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_ENTRY);
 	if (test_bit(ICNSS_FW_READY, &priv->state)) {
+		clear_bit(ICNSS_FW_READY, &priv->state);
 		fw_down_data.crashed = true;
 		icnss_call_driver_uevent(priv, ICNSS_UEVENT_SMMU_FAULT,
 					 &fw_down_data);
@@ -6627,7 +6631,8 @@ static int icnss_probe(struct platform_device *pdev)
 		register_rproc_restart_level_notifier();
 	}
 
-	if (priv->device_id == WCN7750_DEVICE_ID) {
+	if (priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN6450_DEVICE_ID) {
 		icnss_reboot_register_notifier(priv);
 	}
 

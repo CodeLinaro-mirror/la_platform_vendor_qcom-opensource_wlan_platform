@@ -2030,6 +2030,15 @@ static inline void cnss_mhi_report_error(struct cnss_pci_data *pci_priv)
 static inline void cnss_mhi_report_error(struct cnss_pci_data *pci_priv) {}
 #endif
 
+#if IS_ENABLED(CONFIG_CNSS2_FMD_FEATURE_ENABLE)
+static inline void cnss_fmd_mhi_report_error(struct cnss_pci_data *pci_priv)
+{
+	cnss_mhi_report_error(pci_priv);
+}
+#else
+static inline void cnss_fmd_mhi_report_error(struct cnss_pci_data *pci_priv) {}
+#endif
+
 void cnss_pci_notify_mhi_error(struct cnss_pci_data *pci_priv)
 {
 	if (!pci_priv)
@@ -2046,7 +2055,10 @@ void cnss_pci_handle_linkdown(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
-	unsigned long flags;
+	unsigned long flags = 0;
+
+	/* Read GPIO status when PCIe link down is detected */
+	cnss_read_gpio_status_on_link_down(plat_priv);
 
 	if (test_bit(ENABLE_PCI_LINK_DOWN_PANIC,
 		     &plat_priv->ctrl_params.quirks))
@@ -2225,6 +2237,7 @@ static u32 cnss_dump_line_buf(char *line_buf, u32 data_len, bool dumpall)
 	const char *delim = "\n";
 	u32 cur = 0;
 
+	line_buf[data_len] = '\0';
 	ptr = line_buf;
 	while ((res = strsep(&ptr, delim)) != NULL) {
 		if (ptr) {
@@ -2241,8 +2254,11 @@ static u32 cnss_dump_line_buf(char *line_buf, u32 data_len, bool dumpall)
 			 * dump the data directly;
 			 * otherwise, pass the data to the next print
 			 */
-			if (dumpall || (res - line_buf < 4))
+			if (dumpall || (res - line_buf < 4)) {
 				cnss_pr_dbg("%s\n", res);
+				cur = 0;
+			}
+
 			else
 				memmove(line_buf, res, cur);
 		}
@@ -3300,13 +3316,43 @@ static void cnss_pci_deinit_mhi(struct cnss_pci_data *pci_priv)
 	cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_DEINIT);
 }
 
+static void cnss_pci_get_wlaon_pwr_ctrl_info(struct cnss_pci_data *pci_priv)
+{
+	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+	struct device *dev = &plat_priv->plat_dev->dev;
+
+	/*
+	 * As wlaon power ctrl feature is supported only for specific chip,
+	 * we need firstly read the set-wlaon-pwr-ctrl flag from parent node
+	 * to align old design, then re-update this flag from child node.
+	 * And only when wlaon power ctrl feature is enabled, read otp flag
+	 * from child node for specific chip.
+	 **/
+	plat_priv->set_wlaon_pwr_ctrl =
+		of_property_read_bool(dev->of_node, "qcom,set-wlaon-pwr-ctrl");
+
+	if (!plat_priv->set_wlaon_pwr_ctrl && plat_priv->dev_node)
+		plat_priv->set_wlaon_pwr_ctrl =
+			of_property_read_bool(plat_priv->dev_node,
+					      "qcom,set-wlaon-pwr-ctrl");
+
+	if (plat_priv->set_wlaon_pwr_ctrl && plat_priv->dev_node)
+		plat_priv->wlaon_pwr_ctrl_otp_supported =
+			of_property_read_bool(plat_priv->dev_node,
+					"qcom,wlaon-pwr-ctrl-otp-supported");
+
+	cnss_pr_dbg("set_wlaon_pwr_ctrl is %d, otp in cmn aon is %d\n",
+		    plat_priv->set_wlaon_pwr_ctrl,
+		    plat_priv->wlaon_pwr_ctrl_otp_supported);
+}
+
 static void cnss_pci_set_wlaon_pwr_ctrl(struct cnss_pci_data *pci_priv,
 					bool set_vddd4blow, bool set_shutdown,
 					bool do_force_wake)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	int ret;
-	u32 val;
+	u32 val, pwr_ctrl_value;
 
 	if (!plat_priv->set_wlaon_pwr_ctrl)
 		return;
@@ -3329,10 +3375,14 @@ static void cnss_pci_set_wlaon_pwr_ctrl(struct cnss_pci_data *pci_priv,
 	cnss_pr_dbg("Read register offset 0x%x, val = 0x%x\n",
 		    WLAON_QFPROM_PWR_CTRL_REG, val);
 
+	pwr_ctrl_value = QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_MASK;
+	if (plat_priv->wlaon_pwr_ctrl_otp_supported)
+		pwr_ctrl_value |= QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_WL_MASK;
+
 	if (set_vddd4blow)
-		val |= QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_MASK;
+		val |= pwr_ctrl_value;
 	else
-		val &= ~QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_MASK;
+		val &= ~pwr_ctrl_value;
 
 	if (set_shutdown)
 		val |= QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK;
@@ -3787,6 +3837,7 @@ int cnss_pci_fmd_status(struct cnss_pci_data *pci_priv,
 
 	if (fmd_status) {
 		ret = cnss_pci_fmd_enable(pci_priv);
+		cnss_fmd_mhi_report_error(pci_priv);
 		cnss_pr_dbg("Update FMD status to PCI: %d ret: %d\n",
 			    fmd_status, ret);
 	}
@@ -4319,6 +4370,7 @@ static void cnss_qca6290_crash_shutdown(struct cnss_pci_data *pci_priv)
 	cnss_pr_dbg("Crash shutdown with driver_state 0x%lx\n",
 		    plat_priv->driver_state);
 
+	cnss_read_gpio_status_on_link_down(plat_priv);
 	ret = cnss_pci_collect_dump_info(pci_priv, true);
 	clear_bit(CNSS_IN_PANIC, &plat_priv->driver_state);
 }
@@ -8347,7 +8399,7 @@ static void cnss_pci_set_mhi_event_config_for_one_msi(void)
 }
 #endif
 
-#ifdef CONFIG_QLI_MHI
+#ifdef CONFIG_QLI
 static void cnss_set_standard_elf(struct cnss_pci_data *pci_priv)
 {
 	bool is_standard_elf;
@@ -8874,7 +8926,7 @@ static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev)
 
 	return suspend_pwroff;
 }
-#elif defined(CONFIG_QLI_MHI)
+#elif defined(CONFIG_QLI)
 static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev)
 {
 	return false;
@@ -9026,6 +9078,7 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 		goto reset_ctx;
 	}
 
+	cnss_pci_get_wlaon_pwr_ctrl_info(pci_priv);
 	cnss_get_bwscal_info(plat_priv);
 	cnss_pr_dbg("no_bwscale: %d\n", plat_priv->no_bwscale);
 	cnss_pci_restore_rc_speed(pci_priv);
