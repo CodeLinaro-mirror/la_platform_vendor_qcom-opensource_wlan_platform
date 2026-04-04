@@ -754,3 +754,12 @@ int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 {
 	return msm_pcie_reg_dump(pci_priv->pci_dev, buf, len);
 }
+
+void cnss_pci_init_warm_reset_params(struct cnss_pci_data *pci_priv)
+{
+}
+
+int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on)
+{
+	return -EOPNOTSUPP;
+}
