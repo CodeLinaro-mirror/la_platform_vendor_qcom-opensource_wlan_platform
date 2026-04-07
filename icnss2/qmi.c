@@ -577,7 +577,8 @@ int wlfw_ind_register_send_sync_msg(struct icnss_priv *priv)
 		}
 	} else if (priv->device_id == WCN6750_DEVICE_ID ||
 		   priv->device_id == WCN6450_DEVICE_ID ||
-		   priv->device_id == WCN7750_DEVICE_ID) {
+		   priv->device_id == WCN7750_DEVICE_ID ||
+		   priv->device_id == WCN8750_DEVICE_ID) {
 		req->fw_init_done_enable_valid = 1;
 		req->fw_init_done_enable = 1;
 		req->cal_done_enable_valid = 1;
@@ -1414,6 +1415,7 @@ static void icnss_get_qdss_cfg_filename(struct icnss_priv *priv,
 	char *build_str = QDSS_FILE_BUILD_STR;
 
 	if (priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID)
 		snprintf(filename_tmp, filename_len, QDSS_TRACE_CONFIG_FILE
 			"_%s%s.cfg", build_str, HW_V1_NUMBER);
@@ -2730,7 +2732,8 @@ static void wlfw_qdss_trace_req_mem_ind_cb(struct qmi_handle *qmi,
 	}
 
 	if (priv->device_id == WCN6450_DEVICE_ID ||
-	    priv->device_id == WCN7750_DEVICE_ID)
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID)
 		icnss_free_qdss_mem(priv);
 
 	if (priv->qdss_mem_seg_len) {
@@ -3449,6 +3452,7 @@ int icnss_register_fw_service(struct icnss_priv *priv)
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID)
 		ret = qmi_add_lookup(&priv->qmi, WLFW_SERVICE_ID_V01,
 				     WLFW_SERVICE_VERS_V01,
@@ -3543,7 +3547,8 @@ int icnss_send_wlan_enable_to_fw(struct icnss_priv *priv,
 		memcpy(req->shadow_reg, config->shadow_reg_cfg,
 		       sizeof(struct wlfw_msi_cfg_s_v01) * req->shadow_reg_len);
 	} else if (priv->device_id == WCN6450_DEVICE_ID ||
-		   priv->device_id == WCN7750_DEVICE_ID) {
+		   priv->device_id == WCN7750_DEVICE_ID ||
+		   priv->device_id == WCN8750_DEVICE_ID) {
 		req->shadow_reg_v3_valid = 1;
 		if (config->num_shadow_reg_v3_cfg >
 			MAX_NUM_SHADOW_REG_V3)
@@ -3609,7 +3614,8 @@ static inline u32 icnss_get_host_build_type(void)
 static void icnss_wlfw_host_cap_parse_mlo(struct icnss_priv *priv,
 					 struct wlfw_host_cap_req_msg_v01 *req)
 {
-	if (priv->device_id == WCN7750_DEVICE_ID) {
+	if (priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID) {
 		req->mlo_capable_valid = 1;
 		req->mlo_capable = 1;
 		req->mlo_chip_id_valid = 1;
