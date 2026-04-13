@@ -134,7 +134,6 @@ static struct cnss_pool cnss_pools_adrastea[] = {
 	{16 * 1024, 8, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 8, "cnss-pool-32k", NULL, NULL, NULL},
 	{64 * 1024, 3, "cnss-pool-64k", NULL, NULL, NULL},
-	{128 * 1024, 0, "cnss-pool-128k", NULL, NULL, NULL},
 };
 
 static struct cnss_pool cnss_pools_wcn6750[] = {
@@ -168,7 +167,22 @@ static struct cnss_pool cnss_pools_peach[] = {
 	{256 * 1024, 1, "cnss-pool-256k", NULL, NULL, NULL},
 };
 
+static struct cnss_pool cnss_pools_kiwi[] = {
+	{16 * 1024, 120, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 12, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 35, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 11, "cnss-pool-128k", NULL, NULL, NULL},
+};
+
 static struct cnss_pool cnss_pools_wcn7750[] = {
+	{16 * 1024, 70, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 12, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 36, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 12, "cnss-pool-128k", NULL, NULL, NULL},
+	{256 * 1024, 2, "cnss-pool-256k", NULL, NULL, NULL},
+};
+
+static struct cnss_pool cnss_pools_wcn8750[] = {
 	{16 * 1024, 70, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 12, "cnss-pool-32k", NULL, NULL, NULL},
 	{64 * 1024, 36, "cnss-pool-64k", NULL, NULL, NULL},
@@ -200,7 +214,22 @@ static struct cnss_pool cnss_pools_peach[] = {
 	{256 * 1024, 1, "cnss-pool-256k", NULL, NULL, NULL},
 };
 
+static struct cnss_pool cnss_pools_kiwi[] = {
+	{16 * 1024, 108, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 13, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 8, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 7, "cnss-pool-128k", NULL, NULL, NULL},
+};
+
 static struct cnss_pool cnss_pools_wcn7750[] = {
+	{16 * 1024, 61, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 13, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 8, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 8, "cnss-pool-128k", NULL, NULL, NULL},
+	{256 * 1024, 2, "cnss-pool-256k", NULL, NULL, NULL},
+};
+
+static struct cnss_pool cnss_pools_wcn8750[] = {
 	{16 * 1024, 61, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 13, "cnss-pool-32k", NULL, NULL, NULL},
 	{64 * 1024, 8, "cnss-pool-64k", NULL, NULL, NULL},
@@ -649,6 +678,11 @@ static void cnss_assign_prealloc_pool(unsigned long device_id)
 		cnss_pools = cnss_pools_wcn7750;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_wcn7750);
 		break;
+	case WCN8750_DEVICE_ID:
+		cnss_force_prealloc_pool = true;
+		cnss_pools = cnss_pools_wcn8750;
+		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_wcn8750);
+		break;
 	case WCN6450_DEVICE_ID:
 		cnss_force_prealloc_pool = true;
 		cnss_pools = cnss_pools_wcn6450;
@@ -664,11 +698,14 @@ static void cnss_assign_prealloc_pool(unsigned long device_id)
 		cnss_pools = cnss_pools_peach;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_peach);
 		break;
-
+	case KIWI_DEVICE_ID:
+		cnss_force_prealloc_pool = true;
+		cnss_pools = cnss_pools_kiwi;
+		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_kiwi);
+		break;
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
 	case MANGO_DEVICE_ID:
-		case KIWI_DEVICE_ID:
 	default:
 		cnss_pools = cnss_pools_default;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
