@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved. */
-/* Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. */
 
 #ifndef WLAN_FIRMWARE_SERVICE_V01_H
 #define WLAN_FIRMWARE_SERVICE_V01_H
@@ -344,6 +344,7 @@ enum cnss_feature_v01 {
 	CNSS_PCIE_PERST_NO_PULL_V01 = 4,
 	CNSS_RC_EP_ULTRASHORT_CHANNEL_V01 = 5,
 	CNSS_AUX_UC_SUPPORT_V01 = 6,
+	CNSS_EXT_2P2RFA_SUPPORT_V01 = 7,
 	CNSS_MAX_FEATURE_V01 = 64,
 	CNSS_FEATURE_MAX_VAL_V01 = INT_MAX,
 };
