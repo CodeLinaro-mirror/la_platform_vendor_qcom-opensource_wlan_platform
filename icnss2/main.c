@@ -85,19 +85,33 @@
 
 #define ICNSS_BDF_TYPE_DEFAULT         ICNSS_BDF_ELF
 
-#define PROBE_TIMEOUT                 15000
-#define SMP2P_SOC_WAKE_TIMEOUT        500
+/*
+ * Increase various FW communication timeouts when running on emulation.
+ */
+
+#ifdef CONFIG_ICNSS_EMULATION
+#define PROBE_TIMEOUT			15000000
+#define SMP2P_SOC_WAKE_TIMEOUT		5000000
+#define ICNSS_QMI_TIMEOUT		90000
+#define ICNSS_RECOVERY_TIMEOUT		90000000
+#define ICNSS_WPSS_SSR_TIMEOUT		90000000
+#define ICNSS_CAL_TIMEOUT		90000000
+#else
+#define PROBE_TIMEOUT			15000
+#define SMP2P_SOC_WAKE_TIMEOUT		500
+#define ICNSS_QMI_TIMEOUT		3000
+#define ICNSS_RECOVERY_TIMEOUT		60000
+#define ICNSS_WPSS_SSR_TIMEOUT		5000
+#define ICNSS_CAL_TIMEOUT		40000
+#endif
+
 #ifdef CONFIG_ICNSS2_DEBUG
-static unsigned long qmi_timeout = 3000;
+static unsigned long qmi_timeout = ICNSS_QMI_TIMEOUT;
 module_param(qmi_timeout, ulong, 0600);
 #define WLFW_TIMEOUT                    msecs_to_jiffies(qmi_timeout)
 #else
-#define WLFW_TIMEOUT                    msecs_to_jiffies(3000)
+#define WLFW_TIMEOUT                    msecs_to_jiffies(ICNSS_QMI_TIMEOUT)
 #endif
-
-#define ICNSS_RECOVERY_TIMEOUT		60000
-#define ICNSS_WPSS_SSR_TIMEOUT          5000
-#define ICNSS_CAL_TIMEOUT		40000
 
 static struct icnss_priv *penv;
 static struct work_struct wpss_loader;

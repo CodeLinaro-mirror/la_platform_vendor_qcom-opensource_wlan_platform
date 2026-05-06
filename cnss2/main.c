@@ -8013,8 +8013,10 @@ static int cnss_probe(struct platform_device *plat_dev)
 	if (ret)
 		goto reset_ctx;
 
-	/* FMD WAR for Ganges, disable BT_EN GPIO */
-	if (plat_priv && plat_priv->device_id == PEACH_DEVICE_ID) {
+	/* FMD WAR for Ganges/Fig, disable BT_EN GPIO */
+	if (plat_priv &&
+	    (plat_priv->device_id == PEACH_DEVICE_ID ||
+	     plat_priv->device_id == FIG_DEVICE_ID)) {
 		int bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
 		if (bt_en_gpio > 0) {
 			cnss_pr_err("Disabling BT_EN");
