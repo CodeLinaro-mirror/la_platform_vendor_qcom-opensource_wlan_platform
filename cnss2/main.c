@@ -25,6 +25,8 @@
 #if IS_ENABLED(CONFIG_QCOM_MINIDUMP)
 #include <soc/qcom/minidump.h>
 #endif
+#include <linux/regulator/consumer.h>
+#include <linux/nvmem-consumer.h>
 
 #include "cnss_plat_ipc_qmi.h"
 #include "cnss_utils.h"
@@ -84,6 +86,7 @@
 #define CNSS_CAL_START_PROBE_WAIT_RETRY_MAX 100
 #define CNSS_CAL_START_PROBE_WAIT_MS	500
 #define CNSS_TIME_SYNC_PERIOD_INVALID	0xFFFFFFFF
+#define MAX_SYSFS_USER_COMMAND_SIZE_LENGTH (5)
 
 enum cnss_cal_db_op {
 	CNSS_CAL_DB_UPLOAD,
@@ -115,6 +118,8 @@ static struct cnss_fw_files FW_FILES_DEFAULT = {
 	"qwlan.bin", "bdwlan.bin", "otp.bin", "utf.bin",
 	"utfbd.bin", "epping.bin", "evicted.bin"
 };
+
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv);
 
 struct cnss_driver_event {
 	struct list_head list;
@@ -1383,6 +1388,8 @@ static char *cnss_driver_event_to_str(enum cnss_driver_event_type type)
 		return "QDSS_TRACE_REQ_DATA";
 	case CNSS_DRIVER_EVENT_RESUME_POST_SOL:
 		return "RESUME_POST_SOL";
+	case CNSS_DRIVER_EVENT_XO_TRIM_IND:
+		return "XO_TRIM_IND";
 	case CNSS_DRIVER_EVENT_MAX:
 		return "EVENT_MAX";
 	}
@@ -1692,6 +1699,100 @@ int cnss_idle_shutdown(struct device *dev)
 }
 EXPORT_SYMBOL(cnss_idle_shutdown);
 
+/**
+ * cnss_xo_trim_init - Initialize configurations for XO trim
+ * @plat_priv: Pointer to cnss platform data
+ *
+ * This function attempts to retrieve the register for inputting XO calibration
+ * data and the regulator to trigger the PBS from DTS.
+ *
+ * Return: None
+ */
+static void cnss_xo_trim_init(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev;
+	struct cnss_xo_trim_config *xo_trim_conf;
+
+	dev = &plat_priv->plat_dev->dev;
+	xo_trim_conf = &plat_priv->xo_trim_conf;
+
+	xo_trim_conf->xo_calib_reg = devm_nvmem_cell_get(dev, "xo_calib_reg");
+	if (IS_ERR(xo_trim_conf->xo_calib_reg)) {
+		cnss_pr_dbg("Invalid xo_calib_reg: %ld\n",
+			    PTR_ERR(xo_trim_conf->xo_calib_reg));
+		return;
+	}
+
+	xo_trim_conf->wcal_pbs = devm_regulator_get_optional(dev, "wcal-pbs");
+	if (IS_ERR(xo_trim_conf->wcal_pbs)) {
+		cnss_pr_dbg("Invalid wcal_pbs: %ld\n",
+			    PTR_ERR(xo_trim_conf->wcal_pbs));
+		return;
+	}
+
+	cnss_pr_dbg("XO trim initialized\n");
+}
+
+/**
+ * cnss_xo_trim_deinit - Deinitialize configurations for XO trim
+ * @plat_priv: Pointer to cnss platform data
+ *
+ * Return: None
+ */
+static void cnss_xo_trim_deinit(struct cnss_plat_data *plat_priv)
+{
+	/* The resources allocated by devm_* functions will be automatically
+	 * freed by the resource manager when the device is released.
+	 */
+	cnss_pr_dbg("XO trim de-initialized\n");
+}
+
+/**
+ * cnss_xo_trim_perform - Perform the XO trim
+ * @xo_trim_conf: pointer to config for XO trim
+ *
+ * This function writes the new XO trim value to the NVMEM location exposed by
+ * PMIC. It then triggers PBS sequence using the WLAN_CAL regulator resource by
+ * calling regulator_enable(), followed by regulator_disable().
+ * This sequence causes PMIC PBS to apply the new trim value to PMIC XO trim
+ * settings, leading to an adjustment in the crystal oscillator frequency.
+ *
+ * Return: 0 on success, errno otherwise
+ */
+static int cnss_xo_trim_perform(struct cnss_xo_trim_config *xo_trim_conf)
+{
+	int ret;
+
+	if (IS_ERR_OR_NULL(xo_trim_conf->xo_calib_reg) ||
+	    IS_ERR_OR_NULL(xo_trim_conf->wcal_pbs)) {
+		cnss_pr_err("Invalid xo trim config\n");
+		return -EINVAL;
+	}
+
+	ret = nvmem_cell_write(xo_trim_conf->xo_calib_reg,
+			       &xo_trim_conf->trim_val,
+			       sizeof(xo_trim_conf->trim_val));
+	if (ret < 0) {
+		cnss_pr_err("Fail to write xo_calib_reg, ret = %d\n", ret);
+		return ret;
+	}
+
+	/* Enable/disable regulator to trigger PBS sequence */
+	ret = regulator_enable(xo_trim_conf->wcal_pbs);
+	if (ret) {
+		cnss_pr_err("Fail to enable wcal_pbs: %d\n", ret);
+		return ret;
+	}
+
+	ret = regulator_disable(xo_trim_conf->wcal_pbs);
+	if (ret) {
+		cnss_pr_err("Fail to disable wcal_pbs: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 static int cnss_get_resources(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
@@ -1719,6 +1820,8 @@ static int cnss_get_resources(struct cnss_plat_data *plat_priv)
 		goto put_clk;
 	}
 
+	/* Non-fatal and continue if configuration is unavailable */
+	cnss_xo_trim_init(plat_priv);
 	return 0;
 
 put_clk:
@@ -1731,6 +1834,8 @@ out:
 
 static void cnss_put_resources(struct cnss_plat_data *plat_priv)
 {
+	cnss_xo_trim_deinit(plat_priv);
+
 	if (plat_priv->is_fw_managed_pwr) {
 		if (plat_priv->powered_on) {
 			cnss_fw_managed_power_gpio(plat_priv,
@@ -2924,6 +3029,33 @@ static int cnss_resume_post_sol_hdlr(struct cnss_plat_data *plat_priv,
 	return ret;
 }
 
+/**
+ * cnss_xo_trim_ind_hdlr - Handler for XO trim indication.
+ * @plat_priv: Pointer to platform driver context.
+ * @data: Pointer to event data that holds the trim value.
+ *
+ * This function performs XO trim and notifies target of the result.
+ *
+ * Return: 0 on success, errno othrewise
+ */
+static int cnss_xo_trim_ind_hdlr(struct cnss_plat_data *plat_priv, void *data)
+{
+	int ret = -EINVAL;
+
+	if (!data)
+		goto out;
+
+	plat_priv->xo_trim_conf.trim_val = *((u8 *)data);
+	kfree(data);
+
+	ret = cnss_xo_trim_perform(&plat_priv->xo_trim_conf);
+	cnss_pr_dbg("XO trim result with value(%u): %d\n",
+		    plat_priv->xo_trim_conf.trim_val, ret);
+
+out:
+	return cnss_wlfw_xo_trim_result_send_sync(plat_priv, ret);
+}
+
 static void cnss_driver_event_work(struct work_struct *work)
 {
 	struct cnss_plat_data *plat_priv =
@@ -3033,6 +3165,9 @@ static void cnss_driver_event_work(struct work_struct *work)
 		case CNSS_DRIVER_EVENT_RESUME_POST_SOL:
 			ret = cnss_resume_post_sol_hdlr(plat_priv,
 							     event->data);
+			break;
+		case CNSS_DRIVER_EVENT_XO_TRIM_IND:
+			ret = cnss_xo_trim_ind_hdlr(plat_priv, event->data);
 			break;
 		default:
 			cnss_pr_err("Invalid driver event type: %d",
@@ -4666,20 +4801,25 @@ static ssize_t qdss_conf_download_store(struct device *dev,
 	cnss_pr_dbg("Received QDSS download config command\n");
 	return count;
 }
-
 static ssize_t tme_opt_file_download_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count)
 {
 	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
-	char cmd[5];
+	char cmd[MAX_SYSFS_USER_COMMAND_SIZE_LENGTH];
 
+	if (count > MAX_SYSFS_USER_COMMAND_SIZE_LENGTH) {
+		cnss_pr_err("Cmd length is larger than %zu bytes, count: %zu ",
+			     MAX_SYSFS_USER_COMMAND_SIZE_LENGTH, count);
+
+		return -EINVAL;
+	}
 	if (sscanf(buf, "%s", cmd) != 1)
 		return -EINVAL;
 
 	if (!test_bit(CNSS_FW_READY, &plat_priv->driver_state)) {
 		cnss_pr_err("Firmware is not ready yet\n");
-		return 0;
+		return count;
 	}
 
 	if (plat_priv->device_id == PEACH_DEVICE_ID &&
@@ -5110,6 +5250,9 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 	if (plat_priv->device_id == PEACH_DEVICE_ID)
 		cnss_set_feature_list(plat_priv, CNSS_AUX_UC_SUPPORT_V01);
 
+	ret = cnss_get_bdf_filename_from_dt(plat_priv);
+	if (ret)
+		cnss_pr_err("Get customer bdf filename error!\n");
 	return 0;
 }
 
@@ -5180,17 +5323,6 @@ static void cnss_get_pm_domain_info(struct cnss_plat_data *plat_priv)
 		of_property_read_bool(dev->of_node, "use-pm-domain");
 
 	cnss_pr_dbg("use-pm-domain is %d\n", plat_priv->use_pm_domain);
-}
-
-static void cnss_get_wlaon_pwr_ctrl_info(struct cnss_plat_data *plat_priv)
-{
-	struct device *dev = &plat_priv->plat_dev->dev;
-
-	plat_priv->set_wlaon_pwr_ctrl =
-		of_property_read_bool(dev->of_node, "qcom,set-wlaon-pwr-ctrl");
-
-	cnss_pr_dbg("set_wlaon_pwr_ctrl is %d\n",
-		    plat_priv->set_wlaon_pwr_ctrl);
 }
 
 static bool cnss_use_fw_path_with_prefix(struct cnss_plat_data *plat_priv)
@@ -5618,6 +5750,36 @@ int cnss_get_curr_therm_cdev_state(struct device *dev,
 }
 EXPORT_SYMBOL(cnss_get_curr_therm_cdev_state);
 
+static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv)
+{
+	const char *tmp_str = NULL;
+	int ret = 0;
+	size_t bdf_len;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return -EINVAL;
+
+	memset(plat_priv->bdfname_dt, 0, sizeof(plat_priv->bdfname_dt));
+	ret = of_property_read_string_index(plat_priv->plat_dev->dev.of_node,
+					    "bdf-names", 0,
+					     &tmp_str);
+
+	if (ret == 0 && tmp_str) {
+		bdf_len = strnlen(tmp_str, MAX_FIRMWARE_NAME_LEN + 1);
+		if (bdf_len == 0 ||  bdf_len >= MAX_FIRMWARE_NAME_LEN) {
+			cnss_pr_err("BDF filename invalid size (%zu bytes), max allowed: %zu\n",
+				bdf_len, MAX_FIRMWARE_NAME_LEN - 1);
+			return -EINVAL;
+		}
+
+		strlcpy(plat_priv->bdfname_dt, tmp_str,
+			sizeof(plat_priv->bdfname_dt));
+
+	}
+
+	return ret;
+}
+
 static int cnss_probe(struct platform_device *plat_dev)
 {
 	int ret = 0;
@@ -5692,7 +5854,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 	INIT_LIST_HEAD(&plat_priv->clk_list);
 
 	cnss_get_pm_domain_info(plat_priv);
-	cnss_get_wlaon_pwr_ctrl_info(plat_priv);
 	cnss_power_misc_params_init(plat_priv);
 	cnss_pci_of_switch_type_init(plat_priv);
 	cnss_get_tcs_info(plat_priv);
