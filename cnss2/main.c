@@ -409,6 +409,15 @@ void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv)
 						      "qcom,no-bwscale");
 }
 
+static inline void
+cnss_get_caldb_rddm_reuse_info(struct cnss_plat_data *plat_priv)
+{
+	if (of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				  "caldb-rddm-reuse-supported"))
+		cnss_set_feature_list(plat_priv,
+				      CNSS_CALDB_RDDM_REUSE_SUPPORT_V01);
+}
+
 static inline int
 cnss_get_rc_num(struct cnss_plat_data *plat_priv)
 {
@@ -8061,6 +8070,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_power_misc_params_init(plat_priv);
 	cnss_get_tcs_info(plat_priv);
 	cnss_get_cpr_info(plat_priv);
+	cnss_get_caldb_rddm_reuse_info(plat_priv);
 
 	ret = cnss_get_wlan_tsf_gpio_info(plat_priv);
 	if (!ret)
