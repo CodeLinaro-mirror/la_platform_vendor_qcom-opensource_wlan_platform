@@ -454,6 +454,7 @@ enum cnss_debug_quirks {
 	FORCE_ONE_MSI,
 	PREVENT_PCI_LINK_RESUME,
 	CNSS_INTERNAL_RESUME,
+	DISABLE_CALDB_RDDM_REUSE,
 	QUIRK_MAX_VALUE
 };
 
@@ -862,6 +863,7 @@ struct cnss_plat_data *cnss_get_plat_env(int index);
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv);
 void cnss_get_sleep_clk_supported(struct cnss_plat_data *plat_priv);
 void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv);
+void cnss_get_caldb_rddm_reuse_info(struct cnss_plat_data *plat_priv);
 bool cnss_is_dual_wlan_enabled(void);
 int cnss_driver_event_post(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_event_type type,
