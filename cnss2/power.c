@@ -83,6 +83,7 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define WLAN_ENABLE_DELAY		1000
 /* unit ms */
 #define WLAN_ENABLE_DELAY_ROME		10
+#define WLAN_ENABLE_DELAY_M2_SUPPLY	50
 
 #define TCS_CMD_DATA_ADDR_OFFSET	0x4
 #define TCS_OFFSET			0xC8
@@ -1134,6 +1135,12 @@ static int cnss_select_pinctrl_state(struct cnss_plat_data *plat_priv,
 			if (plat_priv->device_id == QCA6174_DEVICE_ID ||
 			    plat_priv->device_id == 0)
 				mdelay(WLAN_ENABLE_DELAY_ROME);
+			/* Apply delay between WLAN device power on
+			 * and PERST De-assertion as per
+			 * PCI_Express_M.2_Spec Test Compliance Requirement.
+			 */
+			else if (plat_priv->m2_supply_detected)
+				msleep(WLAN_ENABLE_DELAY_M2_SUPPLY);
 			else
 				udelay(WLAN_ENABLE_DELAY);
 
@@ -2511,6 +2518,23 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 }
 #endif
 
+/**
+ * cnss_detect_m2_supply - Detect M.2 supply from dt prop
+ * @plat_priv: Platform private data structure pointer
+ */
+static void cnss_detect_m2_supply(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+
+	if (of_find_property(dev->of_node, "vdd-wlan-m2-supply", NULL)) {
+		plat_priv->m2_supply_detected = true;
+		cnss_pr_info("M.2 supply detected\n");
+	} else {
+		plat_priv->m2_supply_detected = false;
+		cnss_pr_dbg("M.2 supply not present\n");
+	}
+}
+
 void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
@@ -2661,6 +2685,8 @@ void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv)
 	} else {
 		cnss_pr_dbg("On chip PMIC device ids not configured\n");
 	}
+
+	cnss_detect_m2_supply(plat_priv);
 }
 
 int cnss_update_cpr_info(struct cnss_plat_data *plat_priv)

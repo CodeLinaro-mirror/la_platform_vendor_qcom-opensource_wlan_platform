@@ -298,13 +298,22 @@ struct cnss_plat_data *cnss_get_plat_priv_by_rc_num(int rc_num)
 static inline int
 cnss_get_qrtr_node_id(struct cnss_plat_data *plat_priv)
 {
-	return of_property_read_u32(plat_priv->dev_node,
-		"qcom,qrtr_node_id", &plat_priv->qrtr_node_id);
+	struct device *dev;
+	struct device_node *dt_node;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return -EINVAL;
+
+	dev = &plat_priv->plat_dev->dev;
+	dt_node = (plat_priv->dev_node ? plat_priv->dev_node : dev->of_node);
+	return of_property_read_u32(dt_node, "qcom,qrtr_node_id",
+				    &plat_priv->qrtr_node_id);
 }
 
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
+	int qrtr_node_id_base;
 
 	ret = cnss_get_qrtr_node_id(plat_priv);
 	if (ret) {
@@ -312,8 +321,13 @@ void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 		plat_priv->qrtr_node_id = 0;
 		plat_priv->wlfw_service_instance_id = 0;
 	} else {
-		plat_priv->wlfw_service_instance_id = plat_priv->qrtr_node_id +
-						      QRTR_NODE_FW_ID_BASE;
+		if (plat_priv->device_id == FIG_DEVICE_ID)
+			qrtr_node_id_base = QRTR_NODE_FW_ID_BASE_FIG;
+		else
+			qrtr_node_id_base = QRTR_NODE_FW_ID_BASE;
+
+		plat_priv->wlfw_service_instance_id =
+			plat_priv->qrtr_node_id + qrtr_node_id_base;
 		cnss_pr_dbg("service_instance_id=0x%x\n",
 			    plat_priv->wlfw_service_instance_id);
 	}
@@ -8013,8 +8027,10 @@ static int cnss_probe(struct platform_device *plat_dev)
 	if (ret)
 		goto reset_ctx;
 
-	/* FMD WAR for Ganges, disable BT_EN GPIO */
-	if (plat_priv && plat_priv->device_id == PEACH_DEVICE_ID) {
+	/* FMD WAR for Ganges/Fig, disable BT_EN GPIO */
+	if (plat_priv &&
+	    (plat_priv->device_id == PEACH_DEVICE_ID ||
+	     plat_priv->device_id == FIG_DEVICE_ID)) {
 		int bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
 		if (bt_en_gpio > 0) {
 			cnss_pr_err("Disabling BT_EN");
