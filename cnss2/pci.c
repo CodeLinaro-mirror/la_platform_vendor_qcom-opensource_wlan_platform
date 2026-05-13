@@ -787,6 +787,36 @@ static void cnss_pci_update_link_event(struct cnss_pci_data *pci_priv,
 				       enum cnss_bus_event_type type,
 				       void *data);
 
+
+static inline void
+__cnss_start_rddm_timer(struct cnss_pci_data *pci_priv,
+			const char *func, int line)
+{
+	int ret;
+
+	ret = mod_timer(&pci_priv->dev_rddm_timer,
+			jiffies + msecs_to_jiffies(DEV_RDDM_TIMEOUT));
+	cnss_pr_dbg("Start RDDM timer @%s(%d), ret %d\n", func, line, ret);
+}
+
+static inline int
+__cnss_del_rddm_timer(struct cnss_pci_data *pci_priv,
+		      const char *func, int line)
+{
+	int ret;
+
+	ret = cnss_timer_delete(&pci_priv->dev_rddm_timer);
+	cnss_pr_dbg("Delete RDDM timer @%s(%d), ret %d\n",
+		    func, line, ret);
+	return ret;
+}
+
+#define cnss_start_rddm_timer(_pci_priv) \
+	__cnss_start_rddm_timer(_pci_priv, __func__, __LINE__)
+#define cnss_del_rddm_timer(_pci_priv) \
+	__cnss_del_rddm_timer(_pci_priv, __func__, __LINE__)
+
+
 #if IS_ENABLED(CONFIG_MHI_BUS_MISC)
 static void cnss_mhi_debug_reg_dump(struct cnss_pci_data *pci_priv)
 {
@@ -1826,8 +1856,7 @@ static int cnss_pci_handle_mhi_poweron_timeout(struct cnss_pci_data *pci_priv)
 		 */
 		if (!test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state) &&
 		    !pci_priv->pci_link_down_ind) {
-			mod_timer(&pci_priv->dev_rddm_timer,
-				  jiffies + msecs_to_jiffies(DEV_RDDM_TIMEOUT));
+			cnss_start_rddm_timer(pci_priv);
 		}
 	} else {
 		cnss_pr_dbg("RDDM cookie is not set and device SOL is low\n");
@@ -2372,7 +2401,7 @@ retry:
 		  jiffies + msecs_to_jiffies(BOOT_DEBUG_TIMEOUT_MS));
 
 	ret = cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_POWER_ON);
-	del_timer_sync(&pci_priv->boot_debug_timer);
+	cnss_timer_delete_sync(&pci_priv->boot_debug_timer);
 	if (ret == 0)
 		cnss_wlan_adsp_pc_enable(pci_priv, false);
 
@@ -3266,7 +3295,7 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 	     test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state) ||
 	     test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state)) &&
 	    test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state)) {
-		del_timer(&pci_priv->dev_rddm_timer);
+		cnss_del_rddm_timer(pci_priv);
 		cnss_pci_collect_dump_info(pci_priv, false);
 
 		if (!plat_priv->recovery_enabled)
@@ -3512,7 +3541,7 @@ static void cnss_wlan_reg_driver_work(struct work_struct *work)
 			return;
 		}
 
-		del_timer(&plat_priv->fw_boot_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state) &&
 		    !test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 			cnss_pr_err("Timeout waiting for calibration to complete\n");
@@ -4420,39 +4449,10 @@ int cnss_pci_force_wake_request_sync(struct device *dev, int timeout_us)
 }
 EXPORT_SYMBOL(cnss_pci_force_wake_request_sync);
 
+/* Obsolete API. To be removed later. */
 int cnss_pci_force_wake_request(struct device *dev)
 {
-	struct pci_dev *pci_dev = to_pci_dev(dev);
-	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
-	struct cnss_plat_data *plat_priv;
-	struct mhi_controller *mhi_ctrl;
-
-	if (!pci_priv)
-		return -ENODEV;
-
-	switch (pci_priv->device_id) {
-	case QCA6390_DEVICE_ID:
-	case QCA6490_DEVICE_ID:
-	case KIWI_DEVICE_ID:
-	case MANGO_DEVICE_ID:
-	case PEACH_DEVICE_ID:
-		break;
-	default:
-		return 0;
-	}
-
-	mhi_ctrl = pci_priv->mhi_ctrl;
-	if (!mhi_ctrl)
-		return -EINVAL;
-
-	plat_priv = pci_priv->plat_priv;
-	if (!plat_priv)
-		return -ENODEV;
-
-	if (test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state))
-		return -EAGAIN;
-
-	mhi_device_get(mhi_ctrl->mhi_dev);
+	cnss_pr_err("cnss_pci_force_wake_request: Obsolete API as no-op");
 
 	return 0;
 }
@@ -5201,7 +5201,7 @@ int cnss_get_soc_info(struct device *dev, struct cnss_soc_info *info)
 	info->board_id = plat_priv->board_info.board_id;
 	info->soc_id = plat_priv->soc_info.soc_id;
 	info->fw_version = plat_priv->fw_version_info.fw_version;
-	strlcpy(info->fw_build_timestamp,
+	strscpy(info->fw_build_timestamp,
 		plat_priv->fw_version_info.fw_build_timestamp,
 		sizeof(info->fw_build_timestamp));
 	memcpy(&info->device_version, &plat_priv->device_version,
@@ -5755,7 +5755,7 @@ int cnss_pci_recover_link_down(struct cnss_pci_data *pci_priv)
 	ret = cnss_resume_pci_link(pci_priv);
 	if (ret) {
 		cnss_pr_err("Failed to resume PCI link, err = %d\n", ret);
-		del_timer(&pci_priv->dev_rddm_timer);
+		cnss_del_rddm_timer(pci_priv);
 		return ret;
 	}
 
@@ -5767,7 +5767,7 @@ retry:
 	msleep(RDDM_LINK_RECOVERY_RETRY_DELAY_MS);
 	mhi_ee = mhi_get_exec_env(pci_priv->mhi_ctrl);
 	if (mhi_ee == MHI_EE_RDDM) {
-		del_timer(&pci_priv->dev_rddm_timer);
+		cnss_del_rddm_timer(pci_priv);
 		cnss_pr_info("Device in RDDM after link recovery, try to collect dump\n");
 		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
 				       CNSS_REASON_RDDM);
@@ -5858,8 +5858,7 @@ int cnss_pci_force_fw_assert_hdlr(struct cnss_pci_data *pci_priv)
 	}
 
 	if (!test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state)) {
-		mod_timer(&pci_priv->dev_rddm_timer,
-			  jiffies + msecs_to_jiffies(DEV_RDDM_TIMEOUT));
+		cnss_start_rddm_timer(pci_priv);
 	}
 
 runtime_pm_put:
@@ -6494,10 +6493,9 @@ static int cnss_pci_handle_mhi_sys_err(struct cnss_pci_data *pci_priv)
 
 	cnss_ignore_qmi_failure(true);
 	set_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
-	del_timer(&plat_priv->fw_boot_timer);
+	cnss_timer_delete(&plat_priv->fw_boot_timer);
 	reinit_completion(&pci_priv->wake_event_complete);
-	mod_timer(&pci_priv->dev_rddm_timer,
-		  jiffies + msecs_to_jiffies(DEV_RDDM_TIMEOUT));
+	cnss_start_rddm_timer(pci_priv);
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
 
 	return 0;
@@ -6533,7 +6531,7 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 	case MHI_CB_FATAL_ERROR:
 		cnss_ignore_qmi_failure(true);
 		set_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
-		del_timer(&plat_priv->fw_boot_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
 		cnss_reason = CNSS_REASON_DEFAULT;
 		break;
@@ -6543,8 +6541,8 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 	case MHI_CB_EE_RDDM:
 		cnss_ignore_qmi_failure(true);
 		set_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
-		del_timer(&plat_priv->fw_boot_timer);
-		del_timer(&pci_priv->dev_rddm_timer);
+		cnss_timer_delete(&plat_priv->fw_boot_timer);
+		cnss_del_rddm_timer(pci_priv);
 		cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
 		cnss_reason = CNSS_REASON_RDDM;
 		break;
@@ -7333,8 +7331,8 @@ static void cnss_pci_remove(struct pci_dev *pci_dev)
 	case MANGO_DEVICE_ID:
 	case PEACH_DEVICE_ID:
 		cnss_pci_wake_gpio_deinit(pci_priv);
-		del_timer(&pci_priv->boot_debug_timer);
-		del_timer(&pci_priv->dev_rddm_timer);
+		cnss_timer_delete(&pci_priv->boot_debug_timer);
+		cnss_del_rddm_timer(pci_priv);
 		break;
 	default:
 		break;
