@@ -151,13 +151,11 @@ int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up,
 				cnss_pr_info("PCIe link has already been resumed\n");
 			} else {
 				/* restore the usage_count after the runtime resume fail
-				 * if the rpm_usage_count_operate is set to ture for the
+				 * if the rpm_usage_count_operate is set to true for the
 				 * function call pm_runtime_get_sync().
 				 */
 				if (rpm_usage_count_operate)
 					pm_runtime_put_noidle(dev);
-				/* restore the ignore_children flag */
-				pm_suspend_ignore_children(dev, current_ignore_children);
 				cnss_pr_info("Failed to resume PCIe link\n");
 			}
 		} else {
@@ -179,13 +177,11 @@ int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up,
 
 		if (ret) {
 			/* restore the usage_count after the runtime suspend fail
-			 * if the rpm_usage_count_operate is set to ture for the
+			 * if the rpm_usage_count_operate is set to true for the
 			 * function call pm_runtime_put_sync().
 			 */
 			if (rpm_usage_count_operate)
 				pm_runtime_get_noresume(dev);
-			/* restore the ignore_children flag */
-			pm_suspend_ignore_children(dev, current_ignore_children);
 			cnss_pr_info("Failed to suspend PCIe link\n");
 		} else {
 			while (retry < CNSS_PCI_SUSPEND_RETRY_MAX &&
@@ -195,20 +191,21 @@ int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up,
 			}
 			if (retry == CNSS_PCI_SUSPEND_RETRY_MAX) {
 				/* restore the usage_count after the runtime suspend fail
-				 * if the rpm_usage_count_operate is set to ture for the
+				 * if the rpm_usage_count_operate is set to true for the
 				 * function call pm_runtime_put_sync().
 				 */
 				if (rpm_usage_count_operate)
 					pm_runtime_get_noresume(dev);
-				/* restore the ignore_children flag */
-				pm_suspend_ignore_children(dev, current_ignore_children);
-				cnss_pr_info("Failed to suspend PCI link\n");
+				cnss_pr_info("Failed to suspend PCI link after max retry\n");
 				ret = -EINVAL;
 			} else {
 				cnss_pr_info("Suspend PCIe link successfully\n");
 			}
 		}
 	}
+
+	/* restore the ignore_children flag */
+	pm_suspend_ignore_children(dev, current_ignore_children);
 
 	cnss_pr_info("PCIe PM Exit: usage_count:%d, runtime_status:%d\n",
 		     atomic_read(&dev->power.usage_count),
