@@ -8137,6 +8137,12 @@ static int cnss_probe(struct platform_device *plat_dev)
 	if (ret)
 		goto deinit_misc;
 
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		ret = cnss_cx_voltage_corners_init(plat_priv);
+		if (ret)
+			goto deinit_misc;
+	}
+
 	/* Make sure all platform related init are done before
 	 * device power on and bus init.
 	 */
