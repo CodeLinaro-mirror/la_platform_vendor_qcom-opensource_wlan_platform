@@ -86,10 +86,12 @@
 #define CNSS_FS_NAME_SIZE		15
 #define CNSS_DEVICE_NAME_SIZE		16
 #define QRTR_NODE_FW_ID_BASE		7
+#define QRTR_NODE_FW_ID_BASE_FIG	1
 
 #define POWER_ON_RETRY_DELAY_MS         500
 #define WLFW_MAX_HANG_EVENT_DATA_SIZE   384
 #define CNSS_MBOX_MSG_MAX_LEN           64
+#define CNSS_IOMMU_NODE_NAME_MAX_LEN    50
 
 #define CNSS_EVENT_SYNC   BIT(0)
 #define CNSS_EVENT_UNINTERRUPTIBLE BIT(1)
@@ -815,6 +817,7 @@ struct cnss_plat_data {
 #endif
 	struct cnss_wlan_host_param *host_param;
 	struct cnss_wlan_tsf_info tsf_info;
+	bool m2_supply_detected;
 	bool rc_pm_control;
 	enum cx_modes cx_mode;
 	u32 pmic_auto_headroom;

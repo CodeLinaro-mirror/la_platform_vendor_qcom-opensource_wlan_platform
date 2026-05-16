@@ -298,13 +298,22 @@ struct cnss_plat_data *cnss_get_plat_priv_by_rc_num(int rc_num)
 static inline int
 cnss_get_qrtr_node_id(struct cnss_plat_data *plat_priv)
 {
-	return of_property_read_u32(plat_priv->dev_node,
-		"qcom,qrtr_node_id", &plat_priv->qrtr_node_id);
+	struct device *dev;
+	struct device_node *dt_node;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return -EINVAL;
+
+	dev = &plat_priv->plat_dev->dev;
+	dt_node = (plat_priv->dev_node ? plat_priv->dev_node : dev->of_node);
+	return of_property_read_u32(dt_node, "qcom,qrtr_node_id",
+				    &plat_priv->qrtr_node_id);
 }
 
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
+	int qrtr_node_id_base;
 
 	ret = cnss_get_qrtr_node_id(plat_priv);
 	if (ret) {
@@ -312,8 +321,13 @@ void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 		plat_priv->qrtr_node_id = 0;
 		plat_priv->wlfw_service_instance_id = 0;
 	} else {
-		plat_priv->wlfw_service_instance_id = plat_priv->qrtr_node_id +
-						      QRTR_NODE_FW_ID_BASE;
+		if (plat_priv->device_id == FIG_DEVICE_ID)
+			qrtr_node_id_base = QRTR_NODE_FW_ID_BASE_FIG;
+		else
+			qrtr_node_id_base = QRTR_NODE_FW_ID_BASE;
+
+		plat_priv->wlfw_service_instance_id =
+			plat_priv->qrtr_node_id + qrtr_node_id_base;
 		cnss_pr_dbg("service_instance_id=0x%x\n",
 			    plat_priv->wlfw_service_instance_id);
 	}
@@ -1497,6 +1511,9 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 		u32 rddm_entries = 0;
 		u32 rddm_seg_len = 0;
 		u32 caldb_len = plat_priv->cal_file_size;
+		u32 remaining;
+		u32 clear_len;
+		int i;
 
 		rddm_seg = cnss_bus_collect_rddm_seg_info(plat_priv,
 							  &rddm_entries,
@@ -1504,7 +1521,7 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 		if (!rddm_seg)
 			return -EINVAL;
 
-		for (int i = 0; i < rddm_entries; i++)
+		for (i = 0; i < rddm_entries; i++)
 			cnss_pr_dbg("[%d] 0x%p - 0x%x\n",
 				    i, rddm_seg[i], rddm_seg_len);
 
@@ -1517,6 +1534,31 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 					     &caldb_len,
 					     rddm_seg,
 					     rddm_entries, rddm_seg_len);
+
+		/*
+		 * If restore (DL) incomplete, clear the CalDB reuse region
+		 */
+		if (!save && ret != 0) {
+			remaining = plat_priv->cal_file_size;
+
+			for (i = 0; i < rddm_entries && remaining > 0; i++) {
+				if (!rddm_seg[i]) {
+					cnss_pr_dbg("rddm_seg[%d] NULL, stop "
+						    "clearing, remaining=%u\n",
+						    i, remaining);
+					break;
+				}
+
+				clear_len = min(remaining, rddm_seg_len);
+				memset(rddm_seg[i], 0, clear_len);
+				remaining -= clear_len;
+			}
+
+			cnss_pr_dbg("CalDB RDDM reuse DL incomplete, ret=%d, "
+				    "cal_file_size=%d\n",
+				    ret, plat_priv->cal_file_size);
+		}
+
 		vfree(rddm_seg);
 	}
 
@@ -7885,6 +7927,26 @@ static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv)
 	return ret;
 }
 
+static int cnss_enable_strong_pd(struct cnss_plat_data *plat_priv)
+{
+	int ret = 0;
+	char aop_msg[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
+
+	/* Enable Strong PD for Fig device via AOP msg */
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		snprintf(aop_msg, CNSS_MBOX_MSG_MAX_LEN,
+			 "{class: pmic, bid: 1, sid: 9, addr: 0x9BA0, value: 0x88}");
+		cnss_pr_info("Enabling Strong PD CTL\n");
+		ret = cnss_aop_send_msg(plat_priv, aop_msg);
+		if (ret < 0) {
+			cnss_pr_err("Failed to send AOP message: %d\n", ret);
+			/* Continue even if AOP message fails */
+		}
+	}
+
+	return ret;
+}
+
 static int cnss_probe(struct platform_device *plat_dev)
 {
 	int ret = 0;
@@ -8023,6 +8085,8 @@ static int cnss_probe(struct platform_device *plat_dev)
 			gpio_direction_output(bt_en_gpio, 0);
 		}
 	}
+
+	cnss_enable_strong_pd(plat_priv);
 
 	ret = cnss_register_esoc(plat_priv);
 	if (ret)
