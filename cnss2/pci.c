@@ -3040,7 +3040,7 @@ cnss_get_plat_priv_when_unregister_driver(struct cnss_wlan_driver *driver_ops)
 static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
-	u32 scratch = PCIE_SCRATCH_2_SOC_PCIE_REG;
+	u32 scratch;
 	struct cnss_plat_data *plat_priv;
 
 	if (!pci_priv) {
@@ -3051,6 +3051,10 @@ static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 	switch (pci_priv->device_id) {
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
+		scratch = PCIE_SCRATCH_2_SOC_PCIE_REG;
+		break;
+	case FIG_DEVICE_ID:
+		scratch = PCIE_PCIE_LOCAL_REG_PCIE_LOCAL_RSV0;
 		break;
 	default:
 		cnss_pr_dbg("device 0x%x not supported qrtr set, nothing to do\n",

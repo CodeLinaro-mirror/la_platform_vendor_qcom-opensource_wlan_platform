@@ -300,10 +300,34 @@ int cnss_pci_get_iommu_addr(struct cnss_pci_data *pci_priv,
 	struct device_node *of_node;
 	const u32 *maps;
 	const u32 *end;
-	int size;
+	int size, ret;
+	char iommu_name[CNSS_IOMMU_NODE_NAME_MAX_LEN];
+
+	if (!pci_priv->plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return -EINVAL;
+	}
+
+	ret = snprintf(iommu_name, CNSS_IOMMU_NODE_NAME_MAX_LEN,
+			"cnss_pci%d_iommu_region_partition",
+			pci_priv->plat_priv->rc_num);
+	if (ret < 0 || ret >= CNSS_IOMMU_NODE_NAME_MAX_LEN) {
+		cnss_pr_err("Failed to get iommu node rc:%d ret:%d\n",
+			    pci_priv->plat_priv->rc_num, ret);
+		return -EINVAL;
+	}
 
 	of_node = of_find_node_by_name(pci_dev->dev.of_node,
-				       "cnss_pci0_iommu_region_partition");
+				       iommu_name);
+	if (!of_node)
+		/*
+		 * fallback to check default name
+		 * cnss_pci0_iommu_region_partition
+		 * again,in case DTS name is not
+		 * matching to actual rc number
+		 */
+		of_node = of_find_node_by_name(pci_dev->dev.of_node,
+				"cnss_pci0_iommu_region_partition");
 	if (!of_node)
 		return -EINVAL;
 

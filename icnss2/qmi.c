@@ -1014,6 +1014,24 @@ out:
 	return ret;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0))
+static int cnss_kernel_connect(struct socket *sock,
+			       struct sockaddr_qrtr *sq,
+			       int addrlen, int flags)
+{
+	return kernel_connect(sock, (struct sockaddr_unsized *)sq,
+			      addrlen, flags);
+}
+#else
+static int cnss_kernel_connect(struct socket *sock,
+			       struct sockaddr_qrtr *sq,
+			       int addrlen, int flags)
+{
+	return kernel_connect(sock, (struct sockaddr *)sq,
+			      addrlen, flags);
+}
+#endif
+
 static int icnss_dms_connect_to_server(struct icnss_priv *priv,
 				      unsigned int node, unsigned int port)
 {
@@ -1025,8 +1043,7 @@ static int icnss_dms_connect_to_server(struct icnss_priv *priv,
 	sq.sq_node = node;
 	sq.sq_port = port;
 
-	ret = kernel_connect(qmi_dms->sock, (struct sockaddr *)&sq,
-			     sizeof(sq), 0);
+	ret = cnss_kernel_connect(qmi_dms->sock, &sq, sizeof(sq), 0);
 	if (ret < 0) {
 		icnss_pr_err("Failed to connect to QMI DMS remote service Node: %d Port: %d\n",
 			     node, port);
@@ -3343,7 +3360,7 @@ int icnss_connect_to_fw_server(struct icnss_priv *priv, void *data)
 	sq.sq_family = AF_QIPCRTR;
 	sq.sq_node = event_data->node;
 	sq.sq_port = event_data->port;
-	ret = kernel_connect(qmi->sock, (struct sockaddr *)&sq, sizeof(sq), 0);
+	ret = cnss_kernel_connect(qmi->sock, &sq, sizeof(sq), 0);
 	if (ret < 0) {
 		icnss_pr_err("Fail to connect to remote service port\n");
 		goto out;
@@ -4279,7 +4296,7 @@ static int ims_new_server(struct qmi_handle *qmi,
 	sq.sq_family = AF_QIPCRTR;
 	sq.sq_node = service->node;
 	sq.sq_port = service->port;
-	ret = kernel_connect(qmi->sock, (struct sockaddr *)&sq, sizeof(sq), 0);
+	ret = cnss_kernel_connect(qmi->sock, &sq, sizeof(sq), 0);
 	if (ret < 0) {
 		icnss_pr_err("Fail to connect to remote service port\n");
 		return ret;
