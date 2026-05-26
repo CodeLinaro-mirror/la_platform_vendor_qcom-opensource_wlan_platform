@@ -6031,15 +6031,34 @@ static void cnss_shutdown(struct platform_device *plat_dev)
 {
 	cnss_remove(plat_dev);
 }
-#else
+#elif defined(CONFIG_AUTO_PROJECT)
 static void cnss_shutdown(struct platform_device *plat_dev)
 {
 	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
 
-	if (plat_priv->is_fw_managed_pwr) {
-		cnss_pr_info("wlan cnss do shutdown\n");
-		cnss_power_off_device(plat_priv);
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return;
 	}
+
+	cnss_pr_info("wlan cnss do shutdown\n");
+	if (plat_priv->is_fw_managed_pwr) {
+		cnss_power_off_device(plat_priv);
+	} else {
+		mutex_lock(&plat_priv->driver_ops_lock);
+		if (plat_priv->bus_type == CNSS_BUS_PCI) {
+			set_bit(CNSS_DRIVER_UNLOADING,
+				&plat_priv->driver_state);
+			cnss_bus_dev_shutdown(plat_priv);
+			clear_bit(CNSS_DRIVER_UNLOADING,
+				  &plat_priv->driver_state);
+		}
+		mutex_unlock(&plat_priv->driver_ops_lock);
+	}
+}
+#else
+static void cnss_shutdown(struct platform_device *plat_dev)
+{
 }
 #endif
 

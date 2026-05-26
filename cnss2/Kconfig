@@ -216,3 +216,10 @@ config CNSS_SHUTDOWN_CALLBACK
 	  called and then cnss_remove be called. If target or system disabled
 	  IOMMU during shutdown and PCIe required this feature, then enabled
 	  it.
+
+config AUTO_PROJECT
+	bool "Enable/Disable AUTO SP"
+	depends on CNSS2
+	depends on PCI
+	help
+	  This is used to specify AUTO SP.
