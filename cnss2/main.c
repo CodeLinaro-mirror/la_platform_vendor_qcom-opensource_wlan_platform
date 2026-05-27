@@ -8082,6 +8082,16 @@ static int cnss_probe(struct platform_device *plat_dev)
 	INIT_LIST_HEAD(&plat_priv->vreg_list);
 	INIT_LIST_HEAD(&plat_priv->clk_list);
 
+	cnss_init_control_params(plat_priv);
+
+	ret = cnss_event_work_init(plat_priv);
+	if (ret)
+		goto out_unset_drvdata;
+
+	ret = cnss_create_sysfs(plat_priv);
+	if (ret)
+		goto deinit_event_work;
+
 	cnss_power_ctrl_mode_init(plat_priv);
 	cnss_enable_direct_cx_pmic_pbs(plat_priv);
 	cnss_get_nvmem_cells(plat_priv);
@@ -8095,13 +8105,12 @@ static int cnss_probe(struct platform_device *plat_dev)
 		cnss_get_tsf_ts_info(plat_priv);
 
 	cnss_aop_interface_init(plat_priv);
-	cnss_init_control_params(plat_priv);
 	cnss_get_cpumask_for_wlan_txrx_intr(plat_priv);
 	cnss_pm_notifier_init(plat_priv);
 
 	ret = cnss_get_resources(plat_priv);
 	if (ret)
-		goto reset_ctx;
+		goto remove_sysfs;
 
 	/* FMD WAR for Ganges/Fig, disable BT_EN GPIO */
 	if (plat_priv &&
@@ -8122,17 +8131,9 @@ static int cnss_probe(struct platform_device *plat_dev)
 	if (ret)
 		goto unreg_esoc;
 
-	ret = cnss_event_work_init(plat_priv);
-	if (ret)
-		goto unreg_bus_scale;
-
-	ret = cnss_create_sysfs(plat_priv);
-	if (ret)
-		goto deinit_event_work;
-
 	ret = cnss_dms_init(plat_priv);
 	if (ret)
-		goto remove_sysfs;
+		goto unreg_bus_scale;
 
 	ret = cnss_debugfs_create(plat_priv);
 	if (ret)
@@ -8180,19 +8181,19 @@ destroy_debugfs:
 deinit_dms:
 	cnss_cancel_dms_work(plat_priv);
 	cnss_dms_deinit(plat_priv);
-remove_sysfs:
-	cnss_remove_sysfs(plat_priv);
-deinit_event_work:
-	cnss_event_work_deinit(plat_priv);
 unreg_bus_scale:
 	cnss_unregister_bus_scale(plat_priv);
 unreg_esoc:
 	cnss_unregister_esoc(plat_priv);
 free_res:
 	cnss_put_resources(plat_priv);
-reset_ctx:
+remove_sysfs:
+	cnss_remove_sysfs(plat_priv);
 	cnss_pm_notifier_deinit(plat_priv);
 	cnss_aop_interface_deinit(plat_priv);
+deinit_event_work:
+	cnss_event_work_deinit(plat_priv);
+out_unset_drvdata:
 	platform_set_drvdata(plat_dev, NULL);
 reset_plat_dev:
 	cnss_clear_plat_priv(plat_priv);
