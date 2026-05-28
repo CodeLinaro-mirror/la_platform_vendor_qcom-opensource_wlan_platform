@@ -400,7 +400,11 @@ int cnss_sdio_dev_powerup(struct cnss_sdio_data *sdio_priv)
 	}
 
 	cnss_pr_info("CNSS SDIO Card resume");
-	qcn_sdio_card_claim();
+	ret = qcn_sdio_card_claim();
+	if (ret) {
+		cnss_pr_err("Failed to claim SDIO card: %d\n", ret);
+		return ret;
+	}
 
 	return cnss_sdio_call_driver_probe(sdio_priv);
 }
