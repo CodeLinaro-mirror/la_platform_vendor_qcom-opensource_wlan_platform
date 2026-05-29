@@ -1936,7 +1936,7 @@ int cnss_idle_restart(struct device *dev)
 
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot or shutdown is in progress, ignore idle restart\n");
-		ret = -EINVAL;
+		ret = -ESHUTDOWN;
 		goto out;
 	}
 
@@ -1979,7 +1979,7 @@ int cnss_idle_restart(struct device *dev)
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot or shutdown is in progress, ignore idle restart\n");
 		cnss_timer_delete(&plat_priv->fw_boot_timer);
-		ret = -EINVAL;
+		ret = -ESHUTDOWN;
 		goto out;
 	}
 
