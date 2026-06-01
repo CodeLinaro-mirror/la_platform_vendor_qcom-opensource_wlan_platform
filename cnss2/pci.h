@@ -30,6 +30,8 @@
 
 #include "main.h"
 
+#define CNSS_BDF_MAP_FILE     "wlan_pci_subsys_bdf_map.ini"
+
 #define PM_OPTIONS_DEFAULT		0
 #define PCI_LINK_DOWN			0
 

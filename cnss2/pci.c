@@ -6304,15 +6304,200 @@ static void cnss_pci_free_tme_opt_file_mem(struct cnss_pci_data *pci_priv)
 	}
 }
 
+#define CNSS_BDF_MAP_LINE_MAX 128
+
+/**
+ * cnss_bdf_map_parse_section() - Parse [pcie_dev_VID_DID] section header
+ * @line:    input line starting with '['
+ * @sec_vid: output vendor ID parsed from section header
+ * @sec_did: output device ID parsed from section header
+ *
+ * Return: 0 on success, -EINVAL if line is not a valid section header
+ */
+static int cnss_bdf_map_parse_section(const char *line,
+				      u16 *sec_vid, u16 *sec_did)
+{
+	unsigned int v, d;
+
+	if (*line != '[')
+		return -EINVAL;
+
+	if (sscanf(line, "[pcie_dev_%4x_%4x]", &v, &d) != 2)
+		return -EINVAL;
+
+	*sec_vid = (u16)v;
+	*sec_did = (u16)d;
+	return 0;
+}
+
+/**
+ * cnss_bdf_map_parse_entry() - Parse SUBSYS_XXXXXXXX = board_id entry line
+ * @line:     input INI entry line
+ * @ssid:     output subsystem device ID (high 16 bits of SUBSYS field)
+ * @svid:     output subsystem vendor ID (low 16 bits of SUBSYS field)
+ * @board_id: output board-id value mapped to bdwlan.e<board_id>
+ *
+ * Return: 0 on success, -EAGAIN to skip line, -EINVAL on bad format
+ */
+static int cnss_bdf_map_parse_entry(const char *line,
+				    u16 *ssid, u16 *svid, u32 *board_id)
+{
+	unsigned int subsys;
+	int bid = 0;
+	int key_start = 0, key_end = 0, val_start = 0;
+
+	while (*line == ' ' || *line == '\t')
+		line++;
+
+	if (*line == '\0' || *line == '\n' || *line == '#')
+		return -EAGAIN;
+
+	if (*line == '[')
+		return -EAGAIN;
+
+	/*
+	 * Two separate %n variables to measure exact hex digit count:
+	 *   key_start: position after "SUBSYS_"  (= 7)
+	 *   key_end:   position after hex digits  (= 7 + N)
+	 * Difference must equal 8 to enforce exactly 8 SUBSYS hex digits.
+	 * Space around '=' is optional — sscanf space matches 0+.
+	 */
+	if (sscanf(line, "SUBSYS_%n%8x%n =%n",
+		   &key_start, &subsys, &key_end, &val_start) != 1 ||
+	    val_start == 0)
+		return -EINVAL;
+
+	if ((key_end - key_start) != 8)
+		return -EINVAL;
+
+	/*
+	 * %i: auto-detects base (0x prefix -> hex), stops at first
+	 * non-numeric char so inline comments are ignored naturally.
+	 */
+	if (sscanf(line + val_start, " %i", &bid) != 1)
+		return -EINVAL;
+
+	*ssid = (u16)(subsys >> 16);
+	*svid = (u16)(subsys & 0xFFFF);
+	*board_id = (u32)bid;
+	return 0;
+}
+
+/**
+ * cnss_pcie_parse_bdf_ini() - Load and search wlan_cnss_pcie_bdf.ini
+ * @pci_priv: PCIe private data with query VID/DID/SSID/SVID identifiers
+ *
+ * Loads CNSS_BDF_MAP_FILE via firmware loader and searches for a section
+ * and entry matching the device PCIe identifiers. On match, caches the
+ * resolved board-id in pci_priv for subsequent SSR cycles.
+ *
+ * Return: 0 on match, -ENOENT if file missing or no entry found
+ */
+static int cnss_pcie_parse_bdf_ini(struct cnss_pci_data *pci_priv)
+{
+	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+	const struct firmware *fw_entry = NULL;
+	const char *buf, *buf_end, *line_start, *line_end;
+	char line[CNSS_BDF_MAP_LINE_MAX];
+	u16 q_vid, q_did, q_ssid, q_svid;
+	u16 sec_vid = 0, sec_did = 0;
+	u16 e_ssid, e_svid;
+	u32 board_id;
+	bool in_valid_section = false;
+	int ret, len, found = 0;
+
+	q_vid  = pci_priv->pci_vendor_id;
+	q_did  = (u16)pci_priv->device_id;
+	q_ssid = pci_priv->pci_subsystem_device;
+	q_svid = pci_priv->pci_subsystem_vendor;
+
+	cnss_pr_dbg("BDF INI lookup: VID=0x%04x DID=0x%04x SSID=0x%04x SVID=0x%04x\n",
+		    q_vid, q_did, q_ssid, q_svid);
+
+	ret = cnss_request_firmware_direct(plat_priv, &fw_entry,
+					   CNSS_BDF_MAP_FILE);
+	if (ret) {
+		cnss_pr_err("BDF INI %s not found: %d\n",
+			    CNSS_BDF_MAP_FILE, ret);
+		return -ENOENT;
+	}
+
+	buf        = fw_entry->data;
+	buf_end    = buf + fw_entry->size;
+	line_start = buf;
+
+	while (line_start < buf_end) {
+		line_end = memchr(line_start, '\n', buf_end - line_start);
+		if (!line_end)
+			line_end = buf_end;
+
+		len = min_t(int, line_end - line_start,
+			    CNSS_BDF_MAP_LINE_MAX - 1);
+		memcpy(line, line_start, len);
+		line[len] = '\0';
+		line_start = line_end + 1;
+
+		if (*line == '[') {
+			if (!cnss_bdf_map_parse_section(line,
+							&sec_vid, &sec_did)) {
+				in_valid_section = true;
+			} else {
+				in_valid_section = false;
+				sec_vid = 0;
+				sec_did = 0;
+				cnss_pr_warn("BDF INI malformed section: %s\n",
+					     line);
+			}
+			continue;
+		}
+
+		if (!in_valid_section)
+			continue;
+
+		ret = cnss_bdf_map_parse_entry(line, &e_ssid, &e_svid,
+					       &board_id);
+		if (ret == -EAGAIN)
+			continue;
+		if (ret == -EINVAL) {
+			cnss_pr_warn("BDF INI malformed entry: %s\n", line);
+			continue;
+		}
+
+		if (sec_vid == q_vid && sec_did == q_did &&
+		    e_ssid == q_ssid && e_svid == q_svid) {
+			found = 1;
+			break;
+		}
+	}
+
+	release_firmware(fw_entry);
+
+	if (!found)
+		return -ENOENT;
+
+	cnss_pr_info("BDF INI: SUBSYS_%04X%04X -> board_id=0x%x\n",
+		     q_ssid, q_svid, board_id);
+
+	pci_priv->pcie_board_id = board_id;
+	pci_priv->pcie_board_id_valid = true;
+	return 0;
+}
+
 int cnss_pci_lookup_board_id(struct cnss_pci_data *pci_priv, u32 *board_id)
 {
+	int ret;
+
 	if (pci_priv->pcie_board_id_valid) {
 		*board_id = pci_priv->pcie_board_id;
 		return 0;
 	}
 
-	/* INI-based lookup to be implemented */
-	return -ENOENT;
+	ret = cnss_pcie_parse_bdf_ini(pci_priv);
+	if (ret)
+		return ret;
+
+	*board_id = pci_priv->pcie_board_id;
+	return 0;
 }
 
 int cnss_pci_load_m3(struct cnss_pci_data *pci_priv)
