@@ -2393,9 +2393,9 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 
 			if (fw_pmu_param_ext[i].wake_volt > 0) {
 				wake_volt = roundup(fw_pmu_param_ext[i].wake_volt,
-						    CNSS_PMIC_VOLTAGE_STEP) -
-						    CNSS_PMIC_AUTO_HEADROOM;
+						    CNSS_PMIC_VOLTAGE_STEP);
 				if (strcmp(fw_pmu_param_ext[i].pin_name, "VDDD_WLCX_0P9") != 0) {
+					wake_volt -= CNSS_PMIC_AUTO_HEADROOM;
 					wake_volt += CNSS_IR_DROP_WAKE_DEFAULT;
 				} else {
 					wake_volt += CNSS_IR_DROP_WAKE;
@@ -2403,9 +2403,9 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			}
 			if (fw_pmu_param_ext[i].sleep_volt > 0) {
 				sleep_volt = roundup(fw_pmu_param_ext[i].sleep_volt,
-						     CNSS_PMIC_VOLTAGE_STEP) -
-						     CNSS_PMIC_AUTO_HEADROOM;
+						     CNSS_PMIC_VOLTAGE_STEP);
 				if (strcmp(fw_pmu_param_ext[i].pin_name, "VDDD_WLCX_0P9") != 0) {
+					sleep_volt -= CNSS_PMIC_AUTO_HEADROOM;
 					sleep_volt += CNSS_IR_DROP_SLEEP_DEFAULT;
 				} else {
 					sleep_volt += CNSS_IR_DROP_SLEEP;
@@ -2413,9 +2413,9 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			}
 			if (fw_pmu_param_ext[i].svs_v > 0) {
 				svs_v = roundup(fw_pmu_param_ext[i].svs_v,
-						CNSS_PMIC_VOLTAGE_STEP) -
-						CNSS_PMIC_AUTO_HEADROOM;
+						CNSS_PMIC_VOLTAGE_STEP);
 				if (strcmp(fw_pmu_param_ext[i].pin_name, "VDDD_WLCX_0P9") != 0) {
+					svs_v -= CNSS_PMIC_AUTO_HEADROOM;
 					svs_v += CNSS_IR_DROP_WAKE_DEFAULT;
 				} else {
 					svs_v += CNSS_IR_DROP_WAKE;
@@ -2423,9 +2423,9 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			}
 			if (fw_pmu_param_ext[i].svsL1_v > 0) {
 				svsL1_v = roundup(fw_pmu_param_ext[i].svsL1_v,
-						  CNSS_PMIC_VOLTAGE_STEP) -
-						  CNSS_PMIC_AUTO_HEADROOM;
+						  CNSS_PMIC_VOLTAGE_STEP);
 				if (strcmp(fw_pmu_param_ext[i].pin_name, "VDDD_WLCX_0P9") != 0) {
+					svsL1_v -= CNSS_PMIC_AUTO_HEADROOM;
 					svsL1_v += CNSS_IR_DROP_WAKE_DEFAULT;
 				} else {
 					svsL1_v += CNSS_IR_DROP_WAKE;
