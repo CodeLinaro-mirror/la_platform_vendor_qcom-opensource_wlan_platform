@@ -9083,6 +9083,9 @@ static int cnss_pci_probe(struct pci_dev *pci_dev,
 	pci_priv->pci_dev = pci_dev;
 	pci_priv->pci_device_id = id;
 	pci_priv->device_id = pci_dev->device;
+	pci_priv->pci_vendor_id = pci_dev->vendor;
+	pci_priv->pci_subsystem_vendor = pci_dev->subsystem_vendor;
+	pci_priv->pci_subsystem_device = pci_dev->subsystem_device;
 	cnss_set_pci_priv(pci_dev, pci_priv);
 	plat_priv->device_id = pci_dev->device;
 	plat_priv->bus_priv = pci_priv;
