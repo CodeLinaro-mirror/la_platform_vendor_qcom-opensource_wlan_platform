@@ -1243,6 +1243,7 @@ static bool cnss_is_aux_support_enabled(struct cnss_plat_data *plat_priv)
 static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
+	u32 board_id;
 
 	if (!plat_priv)
 		return -ENODEV;
@@ -1252,6 +1253,13 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 	ret = cnss_wlfw_tgt_cap_send_sync(plat_priv);
 	if (ret)
 		goto out;
+
+	if (plat_priv->board_id_src == CNSS_BOARD_ID_SRC_PCIE_MAP) {
+		if (!cnss_bus_lookup_board_id(plat_priv, &board_id))
+			plat_priv->board_info.board_id = board_id;
+		else
+			cnss_pr_err("Failed to get board-id from PCIe config space\n");
+	}
 
 	if (plat_priv->device_id == FIG_DEVICE_ID) {
 

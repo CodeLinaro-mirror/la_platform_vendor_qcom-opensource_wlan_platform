@@ -6304,6 +6304,17 @@ static void cnss_pci_free_tme_opt_file_mem(struct cnss_pci_data *pci_priv)
 	}
 }
 
+int cnss_pci_lookup_board_id(struct cnss_pci_data *pci_priv, u32 *board_id)
+{
+	if (pci_priv->pcie_board_id_valid) {
+		*board_id = pci_priv->pcie_board_id;
+		return 0;
+	}
+
+	/* INI-based lookup to be implemented */
+	return -ENOENT;
+}
+
 int cnss_pci_load_m3(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
