@@ -1511,6 +1511,9 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 		u32 rddm_entries = 0;
 		u32 rddm_seg_len = 0;
 		u32 caldb_len = plat_priv->cal_file_size;
+		u32 remaining;
+		u32 clear_len;
+		int i;
 
 		rddm_seg = cnss_bus_collect_rddm_seg_info(plat_priv,
 							  &rddm_entries,
@@ -1518,7 +1521,7 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 		if (!rddm_seg)
 			return -EINVAL;
 
-		for (int i = 0; i < rddm_entries; i++)
+		for (i = 0; i < rddm_entries; i++)
 			cnss_pr_dbg("[%d] 0x%p - 0x%x\n",
 				    i, rddm_seg[i], rddm_seg_len);
 
@@ -1531,6 +1534,31 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 					     &caldb_len,
 					     rddm_seg,
 					     rddm_entries, rddm_seg_len);
+
+		/*
+		 * If restore (DL) incomplete, clear the CalDB reuse region
+		 */
+		if (!save && ret != 0) {
+			remaining = plat_priv->cal_file_size;
+
+			for (i = 0; i < rddm_entries && remaining > 0; i++) {
+				if (!rddm_seg[i]) {
+					cnss_pr_dbg("rddm_seg[%d] NULL, stop "
+						    "clearing, remaining=%u\n",
+						    i, remaining);
+					break;
+				}
+
+				clear_len = min(remaining, rddm_seg_len);
+				memset(rddm_seg[i], 0, clear_len);
+				remaining -= clear_len;
+			}
+
+			cnss_pr_dbg("CalDB RDDM reuse DL incomplete, ret=%d, "
+				    "cal_file_size=%d\n",
+				    ret, plat_priv->cal_file_size);
+		}
+
 		vfree(rddm_seg);
 	}
 

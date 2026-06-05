@@ -97,7 +97,8 @@ int cnss_wlan_adsp_pc_enable(struct cnss_pci_data *pci_priv, bool control)
  * RC driver team and will be maintained by them.
  */
 static inline
-int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up)
+int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up,
+			      bool rpm_usage_count_operate)
 {
 	int ret = -EINVAL;
 	struct device *dev, *host_bridge_dev;
@@ -127,21 +128,33 @@ int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up)
 
 	if (link_up) {
 		pm_suspend_ignore_children(dev, false);
-		ret = pm_runtime_resume(dev);
-		pm_runtime_barrier(dev);
+		if (rpm_usage_count_operate) {
+			cnss_pr_dbg("Resume PCIe link with usage_count increase\n");
+			ret = pm_runtime_get_sync(dev);
+		} else {
+			cnss_pr_dbg("Resume PCIe link without usage_count increase\n");
+			ret = pm_runtime_resume(dev);
+			pm_runtime_barrier(dev);
+		}
 		cnss_pr_info("PCIe resume: ret:%d, usage_count:%d, runtime_status:%d\n",
 			     ret, atomic_read(&dev->power.usage_count),
 			     dev->power.runtime_status);
 
 		if (ret ||
 		    dev->power.runtime_status != RPM_ACTIVE) {
-			cnss_pr_info("Faile to resume PCIe link\n");
+			cnss_pr_info("Failed to resume PCIe link\n");
 			return ret;
 		}
 	} else {
 		pm_suspend_ignore_children(dev, true);
-		ret = pm_runtime_suspend(dev);
-		pm_runtime_barrier(dev);
+		if (rpm_usage_count_operate) {
+			cnss_pr_dbg("Suspend PCIe link with usage_count decrease\n");
+			ret = pm_runtime_put_sync(dev);
+		} else {
+			cnss_pr_dbg("Suspend PCIe link without usage_count decrease\n");
+			ret = pm_runtime_suspend(dev);
+			pm_runtime_barrier(dev);
+		}
 		cnss_pr_info("PCIe suspend: ret:%d, usage_count:%d, runtime_status:%d\n",
 			     ret, atomic_read(&dev->power.usage_count),
 			     dev->power.runtime_status);
@@ -149,7 +162,7 @@ int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up)
 		if (ret ||
 		    dev->power.runtime_status != RPM_SUSPENDED) {
 			dev->power.ignore_children = false;
-			cnss_pr_info("Faile to suspend PCIe link\n");
+			cnss_pr_info("Failed to suspend PCIe link\n");
 			return ret;
 		}
 	}
@@ -161,21 +174,35 @@ int cnss_set_pci_link(struct cnss_pci_data *pci_priv, bool link_up)
 {
 	int ret = 0;
 	struct cnss_plat_data *plat_priv;
+	bool rpm_usage_count_operate = false;
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
 	}
 
-	plat_priv = pci_priv->plat_priv;
-	/* PCIe device never enters D3Cold in ALWAYS_ON mode */
-	if (plat_priv &&
-	    plat_priv->pwr_ctrl_mode == CNSS_POWER_CTRL_ALWAYS_ON)
-		return 0;
+	/* the PCIe link suspend/resume will be set for all the power ctrl
+	 * mode when processing the PCIe link down recovery, including the
+	 * CNSS_POWER_CTRL_ALWAYS_ON mode.
+	 */
+	if (pci_priv->pci_link_down_ind) {
+		/* the rpm usage count was not dropped when set the PCIe link
+		 * suspend during the handle of PCIe link down recovery, and
+		 * need to decrease/increase the rpm usage count when set the
+		 * PCIe link suspend/resume for the PCIe link down recovery.
+		 */
+		rpm_usage_count_operate = true;
+	} else {
+		plat_priv = pci_priv->plat_priv;
+		/* PCIe device never enters D3Cold in ALWAYS_ON mode */
+		if (plat_priv &&
+		    plat_priv->pwr_ctrl_mode == CNSS_POWER_CTRL_ALWAYS_ON)
+			return 0;
+	}
 
 	cnss_pr_info("%s PCI link, \n", link_up ? "Resuming" : "Suspending");
-
-	ret = cnss_rc_rtpm_mgmt_wrapper(pci_priv->pci_dev, link_up);
+	ret = cnss_rc_rtpm_mgmt_wrapper(pci_priv->pci_dev, link_up,
+					rpm_usage_count_operate);
 
 	cnss_pr_info("cnss_set_pci_link, ret = %d\n", ret);
 
@@ -247,7 +274,8 @@ cnss_pci_smmu_dev_fault_handler(struct iommu_fault *fault,  void *data)
 
 	pci_priv->is_smmu_fault = true;
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
-	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
+	if (cnss_force_fw_assert(&pci_priv->pci_dev->dev) == -EOPNOTSUPP)
+		CNSS_ASSERT(0);
 
 	/* IOMMU driver requires -ENOSYS to print debug info. */
 	return -ENOSYS;
@@ -278,7 +306,8 @@ static int cnss_pci_smmu_fault_handler(struct iommu_domain *domain,
 
 	pci_priv->is_smmu_fault = true;
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
-	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
+	if (cnss_force_fw_assert(&pci_priv->pci_dev->dev) == -EOPNOTSUPP)
+		CNSS_ASSERT(0);
 
 	/* IOMMU driver requires -ENOSYS to print debug info. */
 	return -ENOSYS;
@@ -300,10 +329,34 @@ int cnss_pci_get_iommu_addr(struct cnss_pci_data *pci_priv,
 	struct device_node *of_node;
 	const u32 *maps;
 	const u32 *end;
-	int size;
+	int size, ret;
+	char iommu_name[CNSS_IOMMU_NODE_NAME_MAX_LEN];
+
+	if (!pci_priv->plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return -EINVAL;
+	}
+
+	ret = snprintf(iommu_name, CNSS_IOMMU_NODE_NAME_MAX_LEN,
+			"cnss_pci%d_iommu_region_partition",
+			pci_priv->plat_priv->rc_num);
+	if (ret < 0 || ret >= CNSS_IOMMU_NODE_NAME_MAX_LEN) {
+		cnss_pr_err("Failed to get iommu node rc:%d ret:%d\n",
+			    pci_priv->plat_priv->rc_num, ret);
+		return -EINVAL;
+	}
 
 	of_node = of_find_node_by_name(pci_dev->dev.of_node,
-				       "cnss_pci0_iommu_region_partition");
+				       iommu_name);
+	if (!of_node)
+		/*
+		 * fallback to check default name
+		 * cnss_pci0_iommu_region_partition
+		 * again,in case DTS name is not
+		 * matching to actual rc number
+		 */
+		of_node = of_find_node_by_name(pci_dev->dev.of_node,
+				"cnss_pci0_iommu_region_partition");
 	if (!of_node)
 		return -EINVAL;
 

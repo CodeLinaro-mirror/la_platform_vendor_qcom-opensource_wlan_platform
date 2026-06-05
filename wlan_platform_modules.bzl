@@ -416,7 +416,7 @@ def _define_modules_for_target_variant(target, variant):
     )
 
     pkg_install(
-        name = "{}_modules_dist".format(tv),
+        name = "{}_wlan_platform_modules_dist".format(tv),
         srcs = [":{}_dist_files".format(tv)],
         destdir = "out/target/product/{}/dlkm/lib/modules/".format(target),
     )
