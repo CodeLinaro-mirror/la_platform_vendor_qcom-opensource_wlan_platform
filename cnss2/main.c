@@ -7295,6 +7295,27 @@ static void cnss_init_time_sync_period_default(struct cnss_plat_data *plat_priv)
 		CNSS_TIME_SYNC_PERIOD_DEFAULT;
 }
 
+/* Parse qcom,board-id-src DT property. */
+static void cnss_init_board_id_src(struct cnss_plat_data *plat_priv)
+{
+	u32 val = CNSS_BOARD_ID_SRC_FW;
+
+	of_property_read_u32(plat_priv->plat_dev->dev.of_node,
+			     "qcom,board-id-src", &val);
+
+	if (val >= CNSS_BOARD_ID_SRC_MAX) {
+		cnss_pr_dbg("Invalid qcom,board-id-src=%u, using FW default\n",
+			    val);
+		val = CNSS_BOARD_ID_SRC_FW;
+	}
+
+	plat_priv->board_id_src = val;
+
+	cnss_pr_dbg("board_id_src: %s (%u)\n",
+		    val == CNSS_BOARD_ID_SRC_FW ? "FW-QMI" : "PCIe-map",
+		    val);
+}
+
 static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
 {
 	plat_priv->ctrl_params.quirks = CNSS_QUIRKS_DEFAULT;
@@ -7313,6 +7334,7 @@ static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
 	 * enabled by default
 	 */
 	plat_priv->adsp_pc_enabled = true;
+	cnss_init_board_id_src(plat_priv);
 }
 
 static void cnss_get_pm_domain_info(struct cnss_plat_data *plat_priv)
