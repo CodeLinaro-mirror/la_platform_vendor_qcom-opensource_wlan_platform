@@ -91,6 +91,7 @@
 #define POWER_ON_RETRY_DELAY_MS         500
 #define WLFW_MAX_HANG_EVENT_DATA_SIZE   384
 #define CNSS_MBOX_MSG_MAX_LEN           64
+#define CNSS_IOMMU_NODE_NAME_MAX_LEN    50
 
 #define CNSS_EVENT_SYNC   BIT(0)
 #define CNSS_EVENT_UNINTERRUPTIBLE BIT(1)
@@ -453,6 +454,7 @@ enum cnss_debug_quirks {
 	FORCE_ONE_MSI,
 	PREVENT_PCI_LINK_RESUME,
 	CNSS_INTERNAL_RESUME,
+	DISABLE_CALDB_RDDM_REUSE,
 	QUIRK_MAX_VALUE
 };
 
@@ -861,6 +863,7 @@ struct cnss_plat_data *cnss_get_plat_env(int index);
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv);
 void cnss_get_sleep_clk_supported(struct cnss_plat_data *plat_priv);
 void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv);
+void cnss_get_caldb_rddm_reuse_info(struct cnss_plat_data *plat_priv);
 bool cnss_is_dual_wlan_enabled(void);
 int cnss_driver_event_post(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_event_type type,

@@ -160,6 +160,14 @@ def _define_modules_for_target_variant(target, variant):
                     "//build/qcom_build_extensions:qtisocrepo_false": [],
             })
 
+        if target == "art" or target == "art16k" or target == "canoe":
+            deps += select({
+                  "//build/qcom_build_extensions:qtisocrepo_true": [
+                    "//soc-repo:{}/drivers/iommu/qcom_iommu_util".format(tv),
+                ],
+                    "//build/qcom_build_extensions:qtisocrepo_false": [],
+            })
+
         if target != "x1e80100" and target != "sdxkova" and target != "sa510m" and target != "sa510m.1g":
             deps += select({
                   "//build/qcom_build_extensions:qtisocrepo_true": [
@@ -416,7 +424,7 @@ def _define_modules_for_target_variant(target, variant):
     )
 
     pkg_install(
-        name = "{}_modules_dist".format(tv),
+        name = "{}_wlan_platform_modules_dist".format(tv),
         srcs = [":{}_dist_files".format(tv)],
         destdir = "out/target/product/{}/dlkm/lib/modules/".format(target),
     )
