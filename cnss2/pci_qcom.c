@@ -544,7 +544,8 @@ cnss_pci_smmu_dev_fault_handler(struct iommu_fault *fault,  void *data)
 
 	pci_priv->is_smmu_fault = true;
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
-	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
+	if (cnss_force_fw_assert(&pci_priv->pci_dev->dev) == -EOPNOTSUPP)
+		CNSS_ASSERT(0);
 
 	/* IOMMU driver requires -ENOSYS to print debug info. */
 	return -ENOSYS;
@@ -575,18 +576,29 @@ static int cnss_pci_smmu_fault_handler(struct iommu_domain *domain,
 
 	pci_priv->is_smmu_fault = true;
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
-	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
+	if (cnss_force_fw_assert(&pci_priv->pci_dev->dev) == -EOPNOTSUPP)
+		CNSS_ASSERT(0);
 
 	/* IOMMU driver requires -ENOSYS to print debug info. */
 	return -ENOSYS;
 }
 
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static
+void cnss_register_iommu_fault_handler(struct cnss_pci_data *pci_priv)
+{
+	qcom_iommu_set_fault_handler(pci_priv->iommu_domain,
+				     cnss_pci_smmu_fault_handler, pci_priv);
+}
+#else
 static
 void cnss_register_iommu_fault_handler(struct cnss_pci_data *pci_priv)
 {
 	iommu_set_fault_handler(pci_priv->iommu_domain,
 				cnss_pci_smmu_fault_handler, pci_priv);
 }
+#endif
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
@@ -597,11 +609,35 @@ int cnss_pci_get_iommu_addr(struct cnss_pci_data *pci_priv,
 	struct device_node *of_node;
 	const u32 *maps;
 	const u32 *end;
-	int size;
+	int size, ret;
+	char iommu_name[CNSS_IOMMU_NODE_NAME_MAX_LEN];
+
+	if (!pci_priv->plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return -EINVAL;
+	}
+
+	ret = snprintf(iommu_name, CNSS_IOMMU_NODE_NAME_MAX_LEN,
+			"cnss_pci%d_iommu_region_partition",
+			pci_priv->plat_priv->rc_num);
+	if (ret < 0 || ret >= CNSS_IOMMU_NODE_NAME_MAX_LEN) {
+		cnss_pr_err("Failed to get iommu node rc:%d ret:%d\n",
+			    pci_priv->plat_priv->rc_num, ret);
+		return -EINVAL;
+	}
 
 	of_node = of_find_node_by_name(pci_dev->dev.of_node,
-				       "cnss_pci0_iommu_region_partition");
+				       iommu_name);
 	if (!of_node)
+		/*
+		 * fallback to check default name
+		 * cnss_pci0_iommu_region_partition
+		 * again,in case DTS name is not
+		 * matching to actual rc number
+		 */
+		of_node = of_find_node_by_name(pci_dev->dev.of_node,
+				"cnss_pci0_iommu_region_partition");
+	if(!of_node)
 		return -EINVAL;
 
 	maps = of_get_property(of_node, "iommu-addresses", &size);
@@ -660,7 +696,7 @@ int cnss_pci_get_iommu_addr(struct cnss_pci_data *pci_priv,
 }
 #endif
 
-int cnss_pci_init_smmuv3(struct cnss_pci_data *pci_priv)
+static int cnss_pci_init_smmuv3(struct cnss_pci_data *pci_priv)
 {
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
 	int ret = 0;
@@ -753,4 +789,13 @@ int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 			   u8 *buf, u32 len)
 {
 	return msm_pcie_reg_dump(pci_priv->pci_dev, buf, len);
+}
+
+void cnss_pci_init_warm_reset_params(struct cnss_pci_data *pci_priv)
+{
+}
+
+int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on)
+{
+	return -EOPNOTSUPP;
 }
