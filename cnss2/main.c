@@ -66,7 +66,6 @@
 #define FW_READY_TIMEOUT		20000
 #define FW_ASSERT_TIMEOUT		5000
 #define CNSS_EVENT_PENDING		2989
-#define POWER_RESET_MIN_DELAY_MS	100
 #define MAX_NAME_LEN			12
 
 #define CNSS_QUIRKS_DEFAULT		0
@@ -1276,8 +1275,12 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 		    cnss_wlfw_soft_sku_dnld_send_sync(plat_priv);
 	}
 
-	if (plat_priv->hds_enabled)
-		cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_HDS);
+	if (plat_priv->hds_enabled) {
+		ret = cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_HDS);
+		/* Bail only if a PCIe reset was actually scheduled. */
+		if (ret == -EHOSTDOWN)
+			goto out;
+	}
 
 	cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_REGDB);
 
@@ -1288,6 +1291,9 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 					   plat_priv->ctrl_params.bdf_type);
 	if (ret)
 		goto out;
+
+	/* Full BDF sequence succeeded; clear the PCIe-reset failure streak. */
+	plat_priv->bdf_dnld_fail_count = 0;
 
 	if (plat_priv->device_id == QCN7605_DEVICE_ID)
 		return 0;

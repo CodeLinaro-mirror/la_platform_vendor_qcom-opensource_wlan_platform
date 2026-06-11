@@ -92,6 +92,7 @@
 #define WLFW_MAX_HANG_EVENT_DATA_SIZE   384
 #define CNSS_MBOX_MSG_MAX_LEN           64
 #define CNSS_IOMMU_NODE_NAME_MAX_LEN    50
+#define POWER_RESET_MIN_DELAY_MS	100
 
 #define CNSS_EVENT_SYNC   BIT(0)
 #define CNSS_EVENT_UNINTERRUPTIBLE BIT(1)
@@ -833,6 +834,7 @@ struct cnss_plat_data {
 	u32 wake_voltage_drop_adjustment;
 	u32 sleep_voltage_drop_adjustment;
 	enum cnss_power_ctrl_mode pwr_ctrl_mode;
+	u32 bdf_dnld_fail_count;
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
