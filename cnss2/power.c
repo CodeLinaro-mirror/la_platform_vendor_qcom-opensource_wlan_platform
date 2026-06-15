@@ -1205,7 +1205,7 @@ out:
  * cnss_select_pinctrl_enable - select WLAN_GPIO for Active pinctrl status
  * @plat_priv: Platform private data structure pointer
  *
- * For QCA6490, PMU requires minimum 100ms delay between BT_EN_GPIO off and
+ * For QCN7605/QCA6490, PMU requires minimum 100ms delay between BT_EN_GPIO off and
  * WLAN_EN_GPIO on. This is done to avoid power up issues.
  *
  * Return: Status of pinctrl select operation. 0 - Success.
@@ -1215,8 +1215,15 @@ static int cnss_select_pinctrl_enable(struct cnss_plat_data *plat_priv)
 	int ret = 0, bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
 	u8 wlan_en_state = 0;
 
-	if (bt_en_gpio < 0 || plat_priv->device_id != QCA6490_DEVICE_ID)
+	if (bt_en_gpio < 0)
 		goto set_wlan_en;
+	switch (plat_priv->device_id) {
+	case QCN7605_DEVICE_ID:
+	case QCA6490_DEVICE_ID:
+		break;
+	default:
+		goto set_wlan_en;
+	}
 
 	if (gpio_get_value(bt_en_gpio)) {
 		cnss_pr_dbg("BT_EN_GPIO State: On\n");
