@@ -4616,7 +4616,7 @@ reg_driver:
 	reinit_completion(&plat_priv->power_up_complete);
 	cnss_driver_event_post(plat_priv,
 			       CNSS_DRIVER_EVENT_REGISTER_DRIVER,
-			       CNSS_EVENT_SYNC_UNKILLABLE,
+			       0,
 			       pci_priv->driver_ops);
 }
 
