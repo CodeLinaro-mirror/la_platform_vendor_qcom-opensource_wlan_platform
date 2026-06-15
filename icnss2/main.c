@@ -6171,6 +6171,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 	struct resource *res;
 	u32 addr_win[2];
 	struct device_node *of_node = dev->of_node;
+	struct device_node *iommu_group_node = NULL;
 
 	ret = of_property_read_u32_array(of_node,
 					 "qcom,iommu-dma-addr-pool",
@@ -6178,13 +6179,15 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 					 ARRAY_SIZE(addr_win));
 
 	if (ret) {
-		of_node = of_parse_phandle(dev->of_node,
-					   "qcom,iommu-group", 0);
-		if (of_node)
+		iommu_group_node = of_parse_phandle(dev->of_node,
+						    "qcom,iommu-group", 0);
+		if (iommu_group_node) {
+			of_node = iommu_group_node;
 			ret = of_property_read_u32_array(of_node,
 							 "qcom,iommu-dma-addr-pool",
 							 addr_win,
 							 ARRAY_SIZE(addr_win));
+		}
 	}
 
 	if (ret)
@@ -6202,8 +6205,10 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		priv->iommu_domain =
 			iommu_get_domain_for_dev(&pdev->dev);
 
-		if (!priv->iommu_domain)
+		if (!priv->iommu_domain) {
+			of_node_put(iommu_group_node);
 			return -EPROBE_DEFER;
+		}
 
 		ret = of_property_read_string(of_node, "qcom,iommu-dma",
 					      &iommu_dma_type);
@@ -6235,8 +6240,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		}
 	}
 
-	if (of_node != dev->of_node)
-		of_node_put(of_node);
+	of_node_put(iommu_group_node);
 
 	return 0;
 }
