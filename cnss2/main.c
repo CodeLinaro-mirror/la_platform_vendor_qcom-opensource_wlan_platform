@@ -7438,6 +7438,33 @@ static void cnss_get_rc_pm_control_info(struct cnss_plat_data *plat_priv)
 	cnss_pr_dbg("rc_pm_control: %d\n", plat_priv->rc_pm_control);
 }
 
+static void cnss_get_cx_mode_from_dt(struct cnss_plat_data *plat_priv)
+{
+	u32 cx_mode_dt;
+
+	if (of_property_read_u32(plat_priv->plat_dev->dev.of_node,
+				 "cx-mode", &cx_mode_dt)) {
+		cnss_pr_dbg("cx-mode not found in DT, defaulting to CX_LEGACY\n");
+		plat_priv->cx_mode = CX_LEGACY;
+		return;
+	}
+
+	switch (cx_mode_dt) {
+	case CX_LEGACY:
+	case CX_DATA_PIN:
+	case CX_DATA_PIN_PDC:
+	case CX_DATA_PIN_PMIC:
+		plat_priv->cx_mode = (enum cx_modes)cx_mode_dt;
+		cnss_pr_dbg("CX mode set to %d\n", plat_priv->cx_mode);
+		break;
+	default:
+		cnss_pr_err("Invalid cx-mode value %d, defaulting to CX_LEGACY\n",
+			    cx_mode_dt);
+		plat_priv->cx_mode = CX_LEGACY;
+		break;
+	}
+}
+
 static int cnss_get_dev_cfg_node(struct cnss_plat_data *plat_priv)
 {
 	struct device_node *child;
@@ -7981,7 +8008,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 	const struct of_device_id *of_id;
 	const struct platform_device_id *device_id;
 	static bool prealloc_initialized;
-	u32 cx_mode_dt;
 
 	of_id = of_match_device(cnss_of_match_table, &plat_dev->dev);
 	if (!of_id || !of_id->data) {
@@ -8023,27 +8049,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_pr_dbg("Probing platform driver from dt type: %d\n",
 		    plat_priv->dt_type);
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		plat_priv->cx_mode = CX_LEGACY; /* Set to invalid/default value */
-	} else {
-		/* Validate the cx_mode_dt value and set plat_priv->cx_mode */
-		switch (cx_mode_dt) {
-		case CX_LEGACY:
-		case CX_DATA_PIN:
-		case CX_DATA_PIN_PDC:
-		case CX_DATA_PIN_PMIC:
-			plat_priv->cx_mode = (enum cx_modes)cx_mode_dt;
-			cnss_pr_dbg("CX mode set to %d\n", plat_priv->cx_mode);
-			break;
-		default:
-			cnss_pr_err("Invalid cx-mode value %d, setting to CX_LEGACY\n", cx_mode_dt);
-			plat_priv->cx_mode = CX_LEGACY;
-			break;
-		}
-	}
+	cnss_get_cx_mode_from_dt(plat_priv);
 
 	cnss_xdump_init(plat_priv);
 	plat_priv->use_fw_path_with_prefix =
