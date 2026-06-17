@@ -6568,6 +6568,7 @@ static void icnss_direct_link_remove(struct platform_device *pdev)
 static int icnss_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	int bt_en_gpio, bt_en_gpio_val;
 	const char *device_name;
 	struct device *dev = &pdev->dev;
 	struct icnss_priv *priv;
@@ -6620,6 +6621,19 @@ static int icnss_probe(struct platform_device *pdev)
 	ret = icnss_resource_parse(priv);
 	if (ret)
 		goto out_reset_drvdata;
+
+	if (priv->device_id == WCN7750_DEVICE_ID &&
+	    gpio_is_valid(priv->pinctrl_info.bt_en_gpio)) {
+		bt_en_gpio = priv->pinctrl_info.bt_en_gpio;
+		bt_en_gpio_val = gpio_get_value(bt_en_gpio);
+		ret = gpio_direction_output(bt_en_gpio, 0);
+		icnss_pr_info("BT_EN GPIO(%d) before: %d after: %d\n",
+			     bt_en_gpio, bt_en_gpio_val, gpio_get_value(bt_en_gpio));
+		if (ret)
+			icnss_pr_err("Failed to reset BT_EN GPIO(%d), err = %d\n",
+				     bt_en_gpio, ret);
+		ret = 0;
+	}
 
 	ret = icnss_msa_dt_parse(priv);
 	if (ret)

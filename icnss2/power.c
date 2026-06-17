@@ -94,6 +94,7 @@ static struct icnss_clk_cfg icnss_adrestea_clk_list[] = {
 
 #define SW_CTRL_GPIO			"pin_sw-ctrl-gpio"
 #define WLAN_EN_GPIO			"pin_wlan-en-gpio"
+#define BT_EN_GPIO			"pin_bt-en-gpio"
 #define PIN_CTRL			"pin-ctrl-support"
 #define WLAN_EN_ACTIVE			"wlan_en_active"
 #define WLAN_EN_SLEEP			"wlan_en_sleep"
@@ -751,6 +752,9 @@ int icnss_get_pinctrl(struct icnss_priv *priv)
 		pinctrl_info->sw_ctrl_gpio = -EINVAL;
 		pinctrl_info->wlan_en_gpio = -EINVAL;
 	}
+
+	pinctrl_info->bt_en_gpio = of_get_named_gpio(dev->of_node, BT_EN_GPIO, 0);
+	icnss_pr_dbg("BT_EN GPIO: %d\n", pinctrl_info->bt_en_gpio);
 
 	/* Find out and configure all those GPIOs which need to be setup
 	 * for interrupt wakeup capable
