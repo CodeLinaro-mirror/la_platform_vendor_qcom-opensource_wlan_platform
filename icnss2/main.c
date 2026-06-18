@@ -6522,7 +6522,7 @@ icnss_get_cpumask_for_wlan_txrx_intr(struct icnss_priv *priv)
 					 "wlan-txrx-intr-cpumask",
 					 cpumask, CPUMASK_ARRAY_SIZE);
 	if (ret) {
-		icnss_pr_err("Failed to get cpumask for wlan txrx interrupts");
+		icnss_pr_dbg("irq affinity not defined in DT, applying default affinity");
 		return;
 	}
 
