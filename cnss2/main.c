@@ -409,6 +409,21 @@ void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv)
 						      "qcom,no-bwscale");
 }
 
+void cnss_get_caldb_rddm_reuse_info(struct cnss_plat_data *plat_priv)
+{
+	if (test_bit(DISABLE_CALDB_RDDM_REUSE, &plat_priv->ctrl_params.quirks)) {
+		cnss_clear_feature_list(plat_priv,
+					CNSS_CALDB_RDDM_REUSE_SUPPORT_V01);
+		cnss_pr_dbg("caldb_rddm_reuse feature disabled by quirk\n");
+		return;
+	}
+
+	if (of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				  "caldb-rddm-reuse-supported"))
+		cnss_set_feature_list(plat_priv,
+				      CNSS_CALDB_RDDM_REUSE_SUPPORT_V01);
+}
+
 static inline int
 cnss_get_rc_num(struct cnss_plat_data *plat_priv)
 {
@@ -6397,8 +6412,10 @@ static ssize_t fs_ready_store(struct device *dev,
 	int fs_ready = 0;
 	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
 
-	if (sscanf(buf, "%du", &fs_ready) != 1)
+	if (sscanf(buf, "%du", &fs_ready) != 1) {
+		cnss_pr_err("Failed to parse fs_ready from buf=%s\n", buf);
 		return -EINVAL;
+	}
 
 	cnss_pr_dbg("File system is ready, fs_ready is %d, count is %zu\n",
 		    fs_ready, count);

@@ -460,6 +460,7 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 
 	cnss_wlfw_host_cap_parse_mlo(plat_priv, req);
 
+	cnss_get_caldb_rddm_reuse_info(plat_priv);
 	ret = cnss_get_feature_list(plat_priv, &feature_list);
 	if (!ret) {
 		req->feature_list_valid = 1;
