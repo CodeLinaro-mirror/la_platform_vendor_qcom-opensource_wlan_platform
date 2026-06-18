@@ -7845,7 +7845,7 @@ cnss_get_cpumask_for_wlan_txrx_intr(struct cnss_plat_data *plat_priv)
 					 "wlan-txrx-intr-cpumask",
 					 cpumask, CPUMASK_ARRAY_SIZE);
 	if (ret) {
-		cnss_pr_err("Failed to get cpumask for wlan txrx interrupts");
+		cnss_pr_dbg("irq affinity not defined in DT, applying default affinity");
 		return;
 	}
 
