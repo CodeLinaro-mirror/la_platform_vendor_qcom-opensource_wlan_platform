@@ -7256,7 +7256,7 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 
 	ret = cnss_get_bdf_filename_from_dt(plat_priv);
 	if (ret)
-		cnss_pr_err("Get customer bdf filename error!\n");
+		cnss_pr_dbg("Customer bdf filename prop not present in DT\n");
 
 	return 0;
 }
