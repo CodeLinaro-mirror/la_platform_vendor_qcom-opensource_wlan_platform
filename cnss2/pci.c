@@ -564,6 +564,9 @@ static const struct mhi_controller_config cnss_mhi_config_default = {
 	.num_events = ARRAY_SIZE(cnss_mhi_events),
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
+#ifdef CONFIG_CNSS2_MHI_RDDM_TIMEOUT
+	.rddm_timeout_us = CONFIG_CNSS2_MHI_RDDM_TIMEOUT,
+#endif
 };
 
 static const struct mhi_controller_config cnss_mhi_config_genoa = {
@@ -592,6 +595,9 @@ static const struct mhi_controller_config cnss_mhi_config_no_satellite = {
 			CNSS_MHI_SATELLITE_EVT_COUNT,
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
+#ifdef CONFIG_CNSS2_MHI_RDDM_TIMEOUT
+	.rddm_timeout_us = CONFIG_CNSS2_MHI_RDDM_TIMEOUT,
+#endif
 };
 
 static struct cnss_pci_reg ce_src[] = {
