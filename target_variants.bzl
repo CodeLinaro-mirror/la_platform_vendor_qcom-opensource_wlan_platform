@@ -17,6 +17,7 @@ targets = [
     "seraph",
     "shikra",
     "sun",
+    "waipio",
     "vienna",
 ]
 
