@@ -82,6 +82,12 @@
 #define CPUMASK_ARRAY_SIZE		2
 #define MAX_SYSFS_USER_COMMAND_SIZE_LENGTH (5)
 
+#ifdef CONFIG_AUTO_PROJECT
+#define CNSS_REBOOT_NB_PRIORITY 128
+#else
+#define CNSS_REBOOT_NB_PRIORITY 0
+#endif
+
 enum cnss_cal_db_op {
 	CNSS_CAL_DB_UPLOAD,
 	CNSS_CAL_DB_DOWNLOAD,
@@ -4984,6 +4990,29 @@ static void cnss_event_work_deinit(struct cnss_plat_data *plat_priv)
 	destroy_workqueue(plat_priv->event_wq);
 }
 
+#ifdef CONFIG_AUTO_PROJECT
+/*
+ * Stop both host and EP sides of the PCIe link before RC teardown
+ * to avoid an in-flight transaction racing into an SMMU or NoC
+ * fault on the PCIe path.
+ */
+static void cnss_reboot_shutdown(struct cnss_plat_data *plat_priv,
+				 unsigned long action)
+{
+	mutex_lock(&plat_priv->driver_ops_lock);
+	set_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state);
+	cnss_pr_info("cnss reboot shutdown (action=%lu)\n", action);
+	cnss_bus_dev_shutdown(plat_priv);
+	clear_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state);
+	mutex_unlock(&plat_priv->driver_ops_lock);
+}
+#else
+static void cnss_reboot_shutdown(struct cnss_plat_data *plat_priv,
+				 unsigned long action)
+{
+}
+#endif
+
 static int cnss_reboot_notifier(struct notifier_block *nb,
 				unsigned long action,
 				void *data)
@@ -4996,7 +5025,10 @@ static int cnss_reboot_notifier(struct notifier_block *nb,
 	del_timer(&plat_priv->fw_boot_timer);
 	complete_all(&plat_priv->power_up_complete);
 	complete_all(&plat_priv->cal_complete);
-	cnss_pr_dbg("Reboot is in progress with action %d\n", action);
+
+	cnss_reboot_shutdown(plat_priv, action);
+
+	cnss_pr_dbg("Reboot is in progress with action %lu\n", action);
 
 	return NOTIFY_DONE;
 }
@@ -5196,6 +5228,7 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 	mutex_init(&plat_priv->driver_ops_lock);
 
 	plat_priv->reboot_nb.notifier_call = cnss_reboot_notifier;
+	plat_priv->reboot_nb.priority = CNSS_REBOOT_NB_PRIORITY;
 	ret = register_reboot_notifier(&plat_priv->reboot_nb);
 	if (ret)
 		cnss_pr_err("Failed to register reboot notifier, err = %d\n",
@@ -6034,12 +6067,6 @@ static void cnss_shutdown(struct platform_device *plat_dev)
 #else
 static void cnss_shutdown(struct platform_device *plat_dev)
 {
-	struct cnss_plat_data *plat_priv = platform_get_drvdata(plat_dev);
-
-	if (plat_priv->is_fw_managed_pwr) {
-		cnss_pr_info("wlan cnss do shutdown\n");
-		cnss_power_off_device(plat_priv);
-	}
 }
 #endif
 
