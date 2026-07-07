@@ -85,19 +85,33 @@
 
 #define ICNSS_BDF_TYPE_DEFAULT         ICNSS_BDF_ELF
 
-#define PROBE_TIMEOUT                 15000
-#define SMP2P_SOC_WAKE_TIMEOUT        500
+/*
+ * Increase various FW communication timeouts when running on emulation.
+ */
+
+#ifdef CONFIG_ICNSS_EMULATION
+#define PROBE_TIMEOUT			15000000
+#define SMP2P_SOC_WAKE_TIMEOUT		5000000
+#define ICNSS_QMI_TIMEOUT		90000
+#define ICNSS_RECOVERY_TIMEOUT		90000000
+#define ICNSS_WPSS_SSR_TIMEOUT		90000000
+#define ICNSS_CAL_TIMEOUT		90000000
+#else
+#define PROBE_TIMEOUT			15000
+#define SMP2P_SOC_WAKE_TIMEOUT		500
+#define ICNSS_QMI_TIMEOUT		3000
+#define ICNSS_RECOVERY_TIMEOUT		60000
+#define ICNSS_WPSS_SSR_TIMEOUT		5000
+#define ICNSS_CAL_TIMEOUT		40000
+#endif
+
 #ifdef CONFIG_ICNSS2_DEBUG
-static unsigned long qmi_timeout = 3000;
+static unsigned long qmi_timeout = ICNSS_QMI_TIMEOUT;
 module_param(qmi_timeout, ulong, 0600);
 #define WLFW_TIMEOUT                    msecs_to_jiffies(qmi_timeout)
 #else
-#define WLFW_TIMEOUT                    msecs_to_jiffies(3000)
+#define WLFW_TIMEOUT                    msecs_to_jiffies(ICNSS_QMI_TIMEOUT)
 #endif
-
-#define ICNSS_RECOVERY_TIMEOUT		60000
-#define ICNSS_WPSS_SSR_TIMEOUT          5000
-#define ICNSS_CAL_TIMEOUT		40000
 
 static struct icnss_priv *penv;
 static struct work_struct wpss_loader;
@@ -1835,7 +1849,7 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 			  size_t num_entries_loaded)
 {
 	struct qcom_dump_segment *seg;
-	struct cnss_host_dump_meta_info meta_info = {0};
+	struct cnss_host_dump_meta_info *meta_info;
 	struct list_head head;
 	int dev_ret = -1;
 	struct device *new_device;
@@ -1848,9 +1862,15 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		return ret;
 	}
 
+	/* Allocate meta_info on heap to avoid large on-stack allocation */
+	meta_info = kzalloc(sizeof(*meta_info), GFP_KERNEL);
+	if (!meta_info)
+		return -ENOMEM;
+
 	new_device = kcalloc(1, sizeof(*new_device), GFP_KERNEL);
 	if (!new_device) {
 		icnss_pr_err("Failed to alloc device mem\n");
+		kfree(meta_info);
 		return -ENOMEM;
 	}
 
@@ -1874,7 +1894,7 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		 * So initialize type with -1(Invalid) to avoid such issues.
 		 */
 
-		meta_info.entry[i].type = -1;
+		meta_info->entry[i].type = -1;
 		seg = kcalloc(1, sizeof(*seg), GFP_KERNEL);
 		if (!seg) {
 			icnss_pr_err("Failed to alloc seg entry %d\n", i);
@@ -1888,10 +1908,10 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		for (dump_type_id = 0; dump_type_id < CNSS_HOST_DUMP_TYPE_MAX;
 			 dump_type_id++) {
 			if (strcmp(ssr_entry[i].region_name, icnss_get_wlan_str(dump_type_id)) == 0)
-				meta_info.entry[i].type = dump_type_id;
+				meta_info->entry[i].type = dump_type_id;
 		}
-		meta_info.entry[i].entry_start = i + 1;
-		meta_info.entry[i].entry_num++;
+		meta_info->entry[i].entry_start = i + 1;
+		meta_info->entry[i].entry_num++;
 
 		list_add_tail(&seg->node, &head);
 	}
@@ -1904,14 +1924,14 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		goto skip_host_dump;
 	}
 
-	meta_info.magic = ICNSS_RAMDUMP_MAGIC;
-	meta_info.version = ICNSS_RAMDUMP_VERSION;
-	meta_info.chipset = priv->device_id;
-	meta_info.total_entries = num_entries_loaded;
+	meta_info->magic = ICNSS_RAMDUMP_MAGIC;
+	meta_info->version = ICNSS_RAMDUMP_VERSION;
+	meta_info->chipset = priv->device_id;
+	meta_info->total_entries = num_entries_loaded;
 
-	seg->va = &meta_info;
-	seg->da = (dma_addr_t)&meta_info;
-	seg->size = sizeof(meta_info);
+	seg->va = meta_info;
+	seg->da = (dma_addr_t)meta_info;
+	seg->size = sizeof(*meta_info);
 
 	list_add(&seg->node, &head);
 
@@ -1927,6 +1947,7 @@ skip_host_dump:
 put_device:
 	put_device(new_device);
 	icnss_pr_dbg("host ramdump result %d\n", ret);
+	kfree(meta_info);
 	return ret;
 }
 

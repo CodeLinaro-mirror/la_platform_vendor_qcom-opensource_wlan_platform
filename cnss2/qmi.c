@@ -460,6 +460,7 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 
 	cnss_wlfw_host_cap_parse_mlo(plat_priv, req);
 
+	cnss_get_caldb_rddm_reuse_info(plat_priv);
 	ret = cnss_get_feature_list(plat_priv, &feature_list);
 	if (!ret) {
 		req->feature_list_valid = 1;
@@ -475,22 +476,21 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	}
 
 	if (plat_priv->device_id == FIG_DEVICE_ID) {
-		if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
-			ret = cnss_set_bidirectional_ack_pdc(plat_priv,
-							     ACK_GEN_ENABLED);
-			if (ret < 0) {
-				cnss_pr_err("Failed to set bi-d ack mode\n");
-				goto out;
-			}
-		}
-
 		req->target_attachment_valid = 1;
-		if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
+
+		/* CX_DATA_PIN_PDC intentionally uses WLFW_PMIC_V01 to disable
+		 * bi-directional ACK until fully validated.
+		 */
+		switch (plat_priv->cx_mode) {
+		case CX_DATA_PIN_PMIC:
+			fallthrough;
+		case CX_DATA_PIN_PDC:
 			req->target_attachment = WLFW_PMIC_V01;
-		else if (plat_priv->cx_mode == CX_DATA_PIN_PDC)
-			req->target_attachment = WLFW_PDC_V01;
-		else
+			break;
+		default:
 			req->target_attachment = WLFW_THIRD_PARTY_V01;
+			break;
+		}
 
 		cnss_pr_info("Sending target attachment info: %d",
 			     req->target_attachment);
@@ -3104,19 +3104,7 @@ int cnss_wlfw_get_info_send_sync(struct cnss_plat_data *plat_priv, int type,
 		goto out;
 	}
 
-	ret = qmi_txn_wait(&txn, QMI_WLFW_TIMEOUT_JF);
-	if (ret < 0) {
-		cnss_pr_err("Failed to wait for response of get info request, err: %d\n",
-			    ret);
-		goto out;
-	}
-
-	if (resp->resp.result != QMI_RESULT_SUCCESS_V01) {
-		cnss_pr_err("Get info request failed, result: %d, err: %d\n",
-			    resp->resp.result, resp->resp.error);
-		ret = -resp->resp.result;
-		goto out;
-	}
+	qmi_txn_cancel(&txn);
 
 	vfree(req);
 	kfree(resp);
@@ -3803,6 +3791,24 @@ static struct qmi_msg_handler qmi_wlfw_msg_handlers[] = {
 	{}
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0))
+static int cnss_kernel_connect(struct socket *sock,
+			       struct sockaddr_qrtr *sq,
+			       int addrlen, int flags)
+{
+	return kernel_connect(sock, (struct sockaddr_unsized *)sq,
+			      addrlen, flags);
+}
+#else
+static int cnss_kernel_connect(struct socket *sock,
+			       struct sockaddr_qrtr *sq,
+			       int addrlen, int flags)
+{
+	return kernel_connect(sock, (struct sockaddr *)sq,
+			      addrlen, flags);
+}
+#endif
+
 static int cnss_wlfw_connect_to_server(struct cnss_plat_data *plat_priv,
 				       void *data)
 {
@@ -3818,8 +3824,7 @@ static int cnss_wlfw_connect_to_server(struct cnss_plat_data *plat_priv,
 	sq.sq_node = event_data->node;
 	sq.sq_port = event_data->port;
 
-	ret = kernel_connect(qmi_wlfw->sock, (struct sockaddr *)&sq,
-			     sizeof(sq), 0);
+	ret = cnss_kernel_connect(qmi_wlfw->sock, &sq, sizeof(sq), 0);
 	if (ret < 0) {
 		cnss_pr_err("Failed to connect to QMI WLFW remote service port\n");
 		goto out;
@@ -4071,8 +4076,7 @@ static int cnss_dms_connect_to_server(struct cnss_plat_data *plat_priv,
 	sq.sq_node = node;
 	sq.sq_port = port;
 
-	ret = kernel_connect(qmi_dms->sock, (struct sockaddr *)&sq,
-			     sizeof(sq), 0);
+	ret = cnss_kernel_connect(qmi_dms->sock, &sq, sizeof(sq), 0);
 	if (ret < 0) {
 		cnss_pr_err("Failed to connect to QMI DMS remote service Node: %d Port: %d\n",
 			    node, port);
@@ -4375,7 +4379,7 @@ static int coex_new_server(struct qmi_handle *qmi,
 	sq.sq_family = AF_QIPCRTR;
 	sq.sq_node = service->node;
 	sq.sq_port = service->port;
-	ret = kernel_connect(qmi->sock, (struct sockaddr *)&sq, sizeof(sq), 0);
+	ret = cnss_kernel_connect(qmi->sock, &sq, sizeof(sq), 0);
 	if (ret < 0) {
 		cnss_pr_err("Fail to connect to remote service port\n");
 		return ret;
@@ -4574,7 +4578,7 @@ static int ims_new_server(struct qmi_handle *qmi,
 	sq.sq_family = AF_QIPCRTR;
 	sq.sq_node = service->node;
 	sq.sq_port = service->port;
-	ret = kernel_connect(qmi->sock, (struct sockaddr *)&sq, sizeof(sq), 0);
+	ret = cnss_kernel_connect(qmi->sock, &sq, sizeof(sq), 0);
 	if (ret < 0) {
 		cnss_pr_err("Fail to connect to remote service port\n");
 		return ret;

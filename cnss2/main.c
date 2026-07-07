@@ -298,13 +298,22 @@ struct cnss_plat_data *cnss_get_plat_priv_by_rc_num(int rc_num)
 static inline int
 cnss_get_qrtr_node_id(struct cnss_plat_data *plat_priv)
 {
-	return of_property_read_u32(plat_priv->dev_node,
-		"qcom,qrtr_node_id", &plat_priv->qrtr_node_id);
+	struct device *dev;
+	struct device_node *dt_node;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return -EINVAL;
+
+	dev = &plat_priv->plat_dev->dev;
+	dt_node = (plat_priv->dev_node ? plat_priv->dev_node : dev->of_node);
+	return of_property_read_u32(dt_node, "qcom,qrtr_node_id",
+				    &plat_priv->qrtr_node_id);
 }
 
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
+	int qrtr_node_id_base;
 
 	ret = cnss_get_qrtr_node_id(plat_priv);
 	if (ret) {
@@ -312,8 +321,13 @@ void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv)
 		plat_priv->qrtr_node_id = 0;
 		plat_priv->wlfw_service_instance_id = 0;
 	} else {
-		plat_priv->wlfw_service_instance_id = plat_priv->qrtr_node_id +
-						      QRTR_NODE_FW_ID_BASE;
+		if (plat_priv->device_id == FIG_DEVICE_ID)
+			qrtr_node_id_base = QRTR_NODE_FW_ID_BASE_FIG;
+		else
+			qrtr_node_id_base = QRTR_NODE_FW_ID_BASE;
+
+		plat_priv->wlfw_service_instance_id =
+			plat_priv->qrtr_node_id + qrtr_node_id_base;
 		cnss_pr_dbg("service_instance_id=0x%x\n",
 			    plat_priv->wlfw_service_instance_id);
 	}
@@ -393,6 +407,21 @@ void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv)
 {
 	plat_priv->no_bwscale = of_property_read_bool(plat_priv->dev_node,
 						      "qcom,no-bwscale");
+}
+
+void cnss_get_caldb_rddm_reuse_info(struct cnss_plat_data *plat_priv)
+{
+	if (test_bit(DISABLE_CALDB_RDDM_REUSE, &plat_priv->ctrl_params.quirks)) {
+		cnss_clear_feature_list(plat_priv,
+					CNSS_CALDB_RDDM_REUSE_SUPPORT_V01);
+		cnss_pr_dbg("caldb_rddm_reuse feature disabled by quirk\n");
+		return;
+	}
+
+	if (of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+				  "caldb-rddm-reuse-supported"))
+		cnss_set_feature_list(plat_priv,
+				      CNSS_CALDB_RDDM_REUSE_SUPPORT_V01);
 }
 
 static inline int
@@ -1497,6 +1526,9 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 		u32 rddm_entries = 0;
 		u32 rddm_seg_len = 0;
 		u32 caldb_len = plat_priv->cal_file_size;
+		u32 remaining;
+		u32 clear_len;
+		int i;
 
 		rddm_seg = cnss_bus_collect_rddm_seg_info(plat_priv,
 							  &rddm_entries,
@@ -1504,7 +1536,7 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 		if (!rddm_seg)
 			return -EINVAL;
 
-		for (int i = 0; i < rddm_entries; i++)
+		for (i = 0; i < rddm_entries; i++)
 			cnss_pr_dbg("[%d] 0x%p - 0x%x\n",
 				    i, rddm_seg[i], rddm_seg_len);
 
@@ -1517,6 +1549,31 @@ int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save)
 					     &caldb_len,
 					     rddm_seg,
 					     rddm_entries, rddm_seg_len);
+
+		/*
+		 * If restore (DL) incomplete, clear the CalDB reuse region
+		 */
+		if (!save && ret != 0) {
+			remaining = plat_priv->cal_file_size;
+
+			for (i = 0; i < rddm_entries && remaining > 0; i++) {
+				if (!rddm_seg[i]) {
+					cnss_pr_dbg("rddm_seg[%d] NULL, stop "
+						    "clearing, remaining=%u\n",
+						    i, remaining);
+					break;
+				}
+
+				clear_len = min(remaining, rddm_seg_len);
+				memset(rddm_seg[i], 0, clear_len);
+				remaining -= clear_len;
+			}
+
+			cnss_pr_dbg("CalDB RDDM reuse DL incomplete, ret=%d, "
+				    "cal_file_size=%d\n",
+				    ret, plat_priv->cal_file_size);
+		}
+
 		vfree(rddm_seg);
 	}
 
@@ -1879,7 +1936,7 @@ int cnss_idle_restart(struct device *dev)
 
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot or shutdown is in progress, ignore idle restart\n");
-		ret = -EINVAL;
+		ret = -ESHUTDOWN;
 		goto out;
 	}
 
@@ -1922,7 +1979,7 @@ int cnss_idle_restart(struct device *dev)
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot or shutdown is in progress, ignore idle restart\n");
 		cnss_timer_delete(&plat_priv->fw_boot_timer);
-		ret = -EINVAL;
+		ret = -ESHUTDOWN;
 		goto out;
 	}
 
@@ -6355,8 +6412,10 @@ static ssize_t fs_ready_store(struct device *dev,
 	int fs_ready = 0;
 	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
 
-	if (sscanf(buf, "%du", &fs_ready) != 1)
+	if (sscanf(buf, "%du", &fs_ready) != 1) {
+		cnss_pr_err("Failed to parse fs_ready from buf=%s\n", buf);
 		return -EINVAL;
+	}
 
 	cnss_pr_dbg("File system is ready, fs_ready is %d, count is %zu\n",
 		    fs_ready, count);
@@ -8013,8 +8072,10 @@ static int cnss_probe(struct platform_device *plat_dev)
 	if (ret)
 		goto reset_ctx;
 
-	/* FMD WAR for Ganges, disable BT_EN GPIO */
-	if (plat_priv && plat_priv->device_id == PEACH_DEVICE_ID) {
+	/* FMD WAR for Ganges/Fig, disable BT_EN GPIO */
+	if (plat_priv &&
+	    (plat_priv->device_id == PEACH_DEVICE_ID ||
+	     plat_priv->device_id == FIG_DEVICE_ID)) {
 		int bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
 		if (bt_en_gpio > 0) {
 			cnss_pr_err("Disabling BT_EN");
@@ -8053,6 +8114,12 @@ static int cnss_probe(struct platform_device *plat_dev)
 	ret = cnss_wlan_hw_disable_check(plat_priv);
 	if (ret)
 		goto deinit_misc;
+
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
+		ret = cnss_cx_voltage_corners_init(plat_priv);
+		if (ret)
+			goto deinit_misc;
+	}
 
 	/* Make sure all platform related init are done before
 	 * device power on and bus init.
