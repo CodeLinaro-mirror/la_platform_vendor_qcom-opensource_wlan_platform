@@ -139,7 +139,6 @@ static struct cnss_pool cnss_pools_adrastea[] = {
 	{128 * 1024, 1, "cnss-pool-128k", NULL, NULL, NULL},
 };
 
-#ifdef CONFIG_CNSS2_DEBUG
 static struct cnss_pool cnss_pools_wcn6750[] = {
 	{16 * 1024, 10, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 11, "cnss-pool-32k", NULL, NULL, NULL},
