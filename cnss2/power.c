@@ -1642,9 +1642,9 @@ out:
 	return ret;
 }
 
-static int cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
+static void cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
 {
-	int ret = 0;
+	int ret;
 
 	if (plat_priv->device_id == FIG_DEVICE_ID ||
 	    plat_priv->device_id == PEACH_DEVICE_ID ||
@@ -1670,15 +1670,11 @@ static int cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
 	cnss_select_pinctrl_state(plat_priv, false);
 	cnss_clk_off(plat_priv, &plat_priv->clk_list);
 	cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
-
-	return ret;
 }
 
 
 void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 {
-	int ret = 0;
-
 	if (!plat_priv->powered_on) {
 		cnss_pr_dbg("Already powered down");
 		return;
@@ -1692,9 +1688,7 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 		cnss_fw_managed_power_gpio(plat_priv, false);
 		cnss_fw_managed_power_regulator(plat_priv, false);
 	} else if (plat_priv->pwr_ctrl_mode == CNSS_POWER_CTRL_HOST) {
-		ret = cnss_power_off_device_host(plat_priv);
-		if (ret)
-			return;
+		cnss_power_off_device_host(plat_priv);
 	}
 
 	plat_priv->powered_on = false;
