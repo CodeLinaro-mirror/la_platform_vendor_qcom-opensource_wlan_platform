@@ -2292,7 +2292,7 @@ static u32 cnss_dump_line_buf(char *line_buf, u32 data_len, bool dumpall)
 }
 
 /**
- * cnss_pci_dump_reg - read debug log from register and dump
+ * cnss_pci_dump_sbl_log - read debug log from register and dump
  * @pci_priv: driver PCI bus context pointer
  * @start_addr: start address
  * @size: size(in bytes) of the log
@@ -2974,10 +2974,10 @@ cnss_get_plat_priv_when_register_driver(struct cnss_wlan_driver *driver_ops)
 		return NULL;
 	}
 
-	/* here suppose in dual wlan case, alway has below sequence:
+	/* here suppose in dual wlan case, always has below sequence:
 	 * 1st : dual cnss_probe done
-	 * 2st : dual cnss_pci_probe done
-	 * 3st : load primary wlan driver, then load secondary wlan driver
+	 * 2nd : dual cnss_pci_probe done
+	 * 3rd : load primary wlan driver, then load secondary wlan driver
 	 */
 
 	for (i = 0; i < plat_env_count; i++) {
@@ -3150,8 +3150,8 @@ static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 #endif
 
 #ifdef CONFIG_ONE_MSI_VECTOR
-/**
- * All the user share the same vector and msi data
+/*
+ * All the users share the same vector and msi data
  * For MHI user, we need pass IRQ array information to MHI component
  */
 static struct cnss_msi_config msi_config_one_msi = {
@@ -5340,7 +5340,7 @@ static int cnss_pci_runtime_resume(struct device *dev)
 	if (test_bit(CNSS_INTERNAL_RESUME, &plat_priv->ctrl_params.quirks)) {
 		/*
 		 * In cases where Resume is triggered internally by CNSS Client
-		 * Host driver involvement is not required to execute WOW receipe.
+		 * Host driver involvement is not required to execute WOW recipe.
 		 * So auto_resume is being called only to resume the PCIe link
 		 */
 		cnss_pr_vdbg("Internal resume trigger\n");
@@ -6103,7 +6103,7 @@ static void cnss_pci_add_fw_infix_name(struct cnss_pci_data *pci_priv,
 	if (!pci_priv)
 		return;
 
-	/*Re-using prefix API to get infix target name string*/
+	/*Reusing prefix API to get infix target name string*/
 	__cnss_pci_add_fw_prefix_name(pci_priv, device_name, empty_char);
 
 	/*Remove extra slash along with target name*/
@@ -7675,7 +7675,7 @@ int cnss_pci_force_fw_assert_hdlr(struct cnss_pci_data *pci_priv)
 		return -EINVAL;
 	/*
 	 * Call pm_runtime_get_sync insteat of auto_resume to get
-	 * reference and make sure runtime_suspend wont get called.
+	 * reference and make sure runtime_suspend won't get called.
 	 */
 	ret = cnss_pci_pm_runtime_get_sync(pci_priv, RTPM_ID_CNSS);
 	if (ret < 0)
@@ -7695,7 +7695,7 @@ int cnss_pci_force_fw_assert_hdlr(struct cnss_pci_data *pci_priv)
 
 	/*
 	 * Fist try MHI SYS_ERR, if fails try HOST SOL and return.
-	 * If SOL is not enabled try HOST Reset Rquest after MHI
+	 * If SOL is not enabled try HOST Reset Request after MHI
 	 * SYS_ERRR fails.
 	 */
 	ret = cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_TRIGGER_RDDM);
@@ -8288,6 +8288,8 @@ static char *cnss_mhi_notify_status_to_str(enum mhi_callback status)
 		return "FATAL_ERROR";
 	case MHI_CB_EE_MISSION_MODE:
 		return "MISSION_MODE";
+	case MHI_CB_EE_SBL_MODE:
+		return "SBL_MODE";
 #if IS_ENABLED(CONFIG_MHI_BUS_MISC) && \
 (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 	case MHI_CB_FALLBACK_IMG:
@@ -8431,6 +8433,11 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 	switch (reason) {
 	case MHI_CB_IDLE:
 	case MHI_CB_EE_MISSION_MODE:
+		return;
+	case MHI_CB_EE_SBL_MODE:
+		cnss_timer_delete_sync(&pci_priv->boot_debug_timer);
+		mod_timer(&pci_priv->boot_debug_timer,
+			  jiffies + msecs_to_jiffies(BOOT_DEBUG_TIMEOUT_MS));
 		return;
 	case MHI_CB_FATAL_ERROR:
 		cnss_ignore_qmi_failure(true);
