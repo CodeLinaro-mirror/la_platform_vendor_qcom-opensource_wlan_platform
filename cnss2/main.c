@@ -1936,7 +1936,7 @@ int cnss_idle_restart(struct device *dev)
 
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot or shutdown is in progress, ignore idle restart\n");
-		ret = -EINVAL;
+		ret = -ESHUTDOWN;
 		goto out;
 	}
 
@@ -1979,7 +1979,7 @@ int cnss_idle_restart(struct device *dev)
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Reboot or shutdown is in progress, ignore idle restart\n");
 		cnss_timer_delete(&plat_priv->fw_boot_timer);
-		ret = -EINVAL;
+		ret = -ESHUTDOWN;
 		goto out;
 	}
 
@@ -7944,26 +7944,6 @@ static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv)
 	return ret;
 }
 
-static int cnss_enable_strong_pd(struct cnss_plat_data *plat_priv)
-{
-	int ret = 0;
-	char aop_msg[CNSS_MBOX_MSG_MAX_LEN] = {0x00};
-
-	/* Enable Strong PD for Fig device via AOP msg */
-	if (plat_priv->device_id == FIG_DEVICE_ID) {
-		snprintf(aop_msg, CNSS_MBOX_MSG_MAX_LEN,
-			 "{class: pmic, bid: 1, sid: 9, addr: 0x9BA0, value: 0x88}");
-		cnss_pr_info("Enabling Strong PD CTL\n");
-		ret = cnss_aop_send_msg(plat_priv, aop_msg);
-		if (ret < 0) {
-			cnss_pr_err("Failed to send AOP message: %d\n", ret);
-			/* Continue even if AOP message fails */
-		}
-	}
-
-	return ret;
-}
-
 static int cnss_probe(struct platform_device *plat_dev)
 {
 	int ret = 0;
@@ -8102,8 +8082,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 			gpio_direction_output(bt_en_gpio, 0);
 		}
 	}
-
-	cnss_enable_strong_pd(plat_priv);
 
 	ret = cnss_register_esoc(plat_priv);
 	if (ret)
