@@ -251,6 +251,14 @@ def _define_modules_for_target_variant(target, variant):
                   "//msm-kernel:all_headers",
                ],
         })
+        if target == "art" or target == "art16k" or target == "canoe":
+            deps += select({
+                  "//build/qcom_build_extensions:qtisocrepo_true": [
+                    "//soc-repo:{}/drivers/iommu/qcom_iommu_util".format(tv),
+                ],
+                    "//build/qcom_build_extensions:qtisocrepo_false": [],
+            })
+
         ddk_module(
             name = "{}_icnss2".format(tv),
             srcs = native.glob([
@@ -339,6 +347,7 @@ def _define_modules_for_target_variant(target, variant):
 
     if target == "sun" or target == "canoe" or target == "art" or target == "chora" or target == "art16k":
         cnss_utils_dep_list = cnss_utils_dep_list + ["//vendor/qcom/opensource/data-kernel/drivers/smem-mailbox:{}_smem_mailbox".format(tv),]
+
     if target == "sdxkova":
         tgt = "target-aarch64_cortex-a53_musl"
         board = "sdx85"
