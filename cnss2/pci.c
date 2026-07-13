@@ -5104,7 +5104,7 @@ static int cnss_pci_resume(struct device *dev)
 		goto out;
 
 	if (plat_priv->pwr_ctrl_mode == CNSS_POWER_CTRL_SCMI) {
-		/* pcie link have been resume by pcie bus pm */
+		/* pcie link has been resumed by pcie bus pm */
 		pci_priv->pci_link_state = PCI_LINK_UP;
 		goto out;
 	}
@@ -5117,11 +5117,12 @@ static int cnss_pci_resume(struct device *dev)
 		ret = cnss_pci_resume_bus(pci_priv);
 		mutex_unlock(&pci_priv->bus_lock);
 		if (ret)
-			goto out;
+			goto clear_flag;
 	}
 
 	ret = cnss_pci_resume_driver(pci_priv);
 
+clear_flag:
 	pci_priv->drv_connected_last = 0;
 	clear_bit(CNSS_IN_SUSPEND_RESUME, &plat_priv->driver_state);
 
