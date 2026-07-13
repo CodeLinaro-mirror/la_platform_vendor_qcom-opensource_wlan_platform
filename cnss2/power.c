@@ -2106,7 +2106,7 @@ int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv)
 	cnss_pr_dbg("PDC init table length: %d\n",
 		    plat_priv->pdc_init_table_len);
 
-	cnss_aop_pdc_disable_cx(plat_priv);
+	ret = cnss_aop_pdc_disable_cx(plat_priv);
 	if (ret < 0) {
 		cnss_pr_err("Failed to disable PDC control of CX, err = %d\n",
 			    ret);
