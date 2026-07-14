@@ -6982,8 +6982,10 @@ static int cnss_pci_enable_msi(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
+	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	int num_vectors;
 	struct cnss_msi_config *msi_config;
+	unsigned int irq_flag = PCI_IRQ_MSI;
 
 	if (pci_priv->device_id == QCA6174_DEVICE_ID)
 		return 0;
@@ -7006,19 +7008,13 @@ static int cnss_pci_enable_msi(struct cnss_pci_data *pci_priv)
 		goto out;
 	}
 
-	switch (pci_priv->device_id) {
-	case COLOGNE_DEVICE_ID:
-		num_vectors = pci_alloc_irq_vectors(pci_dev,
-						    msi_config->total_vectors,
-						    msi_config->total_vectors,
-						    PCI_IRQ_MSI | PCI_IRQ_MSIX);
-		break;
-	default:
-		num_vectors = pci_alloc_irq_vectors(pci_dev,
-						    msi_config->total_vectors,
-						    msi_config->total_vectors,
-						    PCI_IRQ_MSI);
-	}
+	if (plat_priv && plat_priv->msix_supported)
+		irq_flag |= PCI_IRQ_MSIX;
+
+	num_vectors = pci_alloc_irq_vectors(pci_dev,
+					    msi_config->total_vectors,
+					    msi_config->total_vectors,
+					    irq_flag);
 	if ((num_vectors != msi_config->total_vectors) &&
 	    !cnss_pci_fallback_one_msi(pci_priv, &num_vectors)) {
 		cnss_pr_err("Failed to get enough MSI vectors (%d), available vectors = %d",
