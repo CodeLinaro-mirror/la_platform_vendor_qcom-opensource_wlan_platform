@@ -4760,6 +4760,11 @@ static ssize_t fs_ready_store(struct device *dev,
 		cnss_driver_event_post(plat_priv,
 				       CNSS_DRIVER_EVENT_COLD_BOOT_CAL_START,
 				       0, NULL);
+	} else if (test_bit(CNSS_DRIVER_REGISTER, &plat_priv->driver_state)) {
+		cnss_pr_dbg("Schedule WLAN driver load from FS Ready\n");
+		if (cancel_delayed_work_sync(&plat_priv->wlan_reg_driver_work))
+			schedule_delayed_work(&plat_priv->wlan_reg_driver_work,
+					      0);
 	}
 
 	return count;
