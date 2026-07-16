@@ -7603,11 +7603,20 @@ static int cnss_pci_get_dev_cfg_node(struct cnss_plat_data *plat_priv)
 static bool cnss_should_suspend_pwroff(struct pci_dev *pci_dev)
 {
 	bool suspend_pwroff;
+	struct cnss_pci_data *pci_priv = cnss_get_pci_priv(pci_dev);
+	struct cnss_plat_data *plat_priv =
+		pci_priv ? pci_priv->plat_priv : NULL;
 
 	switch (pci_dev->device) {
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
-		suspend_pwroff = false;
+		/* Avoid VDD_PA leak on boards sharing PWR_CTRL1 with VDD_CORE_VH */
+		if (plat_priv && plat_priv->plat_dev &&
+		    of_property_read_bool(plat_priv->plat_dev->dev.of_node,
+					  "qcom,suspend-poweroff"))
+			suspend_pwroff = true;
+		else
+			suspend_pwroff = false;
 		break;
 	default:
 		suspend_pwroff = true;
