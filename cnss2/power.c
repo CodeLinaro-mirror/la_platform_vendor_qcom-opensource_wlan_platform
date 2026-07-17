@@ -104,6 +104,7 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define CNSS_IR_DROP_SLEEP_DEFAULT 10
 #define CNSS_IR_DROP_SLEEP (plat_priv->sleep_voltage_drop_adjustment)
 #define VREG_NOTFOUND 1
+#define AON_REG_SLEEP_VOLTAGE 750
 
 /**
  * enum cnss_aop_vreg_param: Voltage regulator TCS param
@@ -2499,14 +2500,14 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 				u32 dwnval = plat_vreg_param[i].sleep_volt;
 
 				/* For regulator mapped to WLMX rail, set
-				 * sleep_volt equal to wake_volt to maintain
-				 * sufficient retention voltage for chip state
-				 * during DRV sleep.
+				 * sleep_volt equal to wake_volt to 750mV to
+				 * maintain sufficient retention voltage for
+				 * chip state during DRV sleep.
 				 */
 				if (mx_pin_idx >= 0 &&
 				    strcmp(plat_vreg_param[i].vreg,
 					   plat_priv->pmu_vreg_map[mx_pin_idx + 1]) == 0)
-					dwnval = plat_vreg_param[i].wake_volt;
+					dwnval = AON_REG_SLEEP_VOLTAGE;
 
 				ret =
 				cnss_aop_set_vreg_param(plat_priv,
