@@ -351,4 +351,6 @@ extern void cnss_get_cpumask_for_wlan_rx_interrupts(struct device *dev,
 						    unsigned int *cpumask);
 extern void cnss_get_cpumask_for_wlan_tx_comp_interrupts(struct device *dev,
 							 unsigned int *cpumask);
+extern bool cnss_get_napi_ipi_redirect_enabled(struct device *dev);
+
 #endif /* _NET_CNSS2_H */
