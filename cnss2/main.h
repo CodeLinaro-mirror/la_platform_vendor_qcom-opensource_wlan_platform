@@ -465,6 +465,13 @@ enum cnss_bdf_type {
 	CNSS_BDF_HDS = 6,
 };
 
+/* board_id source, controlled by qcom,board-id-src DT. */
+enum cnss_board_id_src {
+	CNSS_BOARD_ID_SRC_FW       = 0,
+	CNSS_BOARD_ID_SRC_PCIE_MAP = 1,
+	CNSS_BOARD_ID_SRC_MAX,
+};
+
 enum cnss_cal_status {
 	CNSS_CAL_DONE,
 	CNSS_CAL_TIMEOUT,
@@ -801,6 +808,7 @@ struct cnss_plat_data {
 	bool pm_suspend_in_progress;
 	struct notifier_block pm_notifier;
 	char bdfname_dt[MAX_FIRMWARE_NAME_LEN];
+	enum cnss_board_id_src board_id_src;
 	struct cnss_xo_trim_config xo_trim_conf;
 	struct cnss_xdump_helper xdump_helper;
 	int direct_cx_data_pin_mode;
@@ -819,6 +827,7 @@ struct cnss_plat_data {
 	struct cnss_wlan_host_param *host_param;
 	struct cnss_wlan_tsf_info tsf_info;
 	bool m2_supply_detected;
+	bool msix_supported;
 	bool rc_pm_control;
 	enum cx_modes cx_mode;
 	u32 pmic_auto_headroom;
