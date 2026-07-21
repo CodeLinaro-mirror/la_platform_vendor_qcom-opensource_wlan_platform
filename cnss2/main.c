@@ -5803,6 +5803,19 @@ void cnss_get_cpumask_for_wlan_tx_comp_interrupts(struct device *dev,
 }
 EXPORT_SYMBOL(cnss_get_cpumask_for_wlan_tx_comp_interrupts);
 
+bool cnss_get_napi_ipi_redirect_enabled(struct device *dev)
+{
+	struct cnss_plat_data *priv = cnss_get_plat_priv(NULL);
+
+	if (!priv) {
+		cnss_pr_err("Platform driver is not initialized!\n");
+		return false;
+	}
+
+	return priv->napi_ipi_redirect_enable;
+}
+EXPORT_SYMBOL(cnss_get_napi_ipi_redirect_enabled);
+
 static void
 cnss_get_cpumask_for_wlan_txrx_intr(struct cnss_plat_data *plat_priv)
 {
@@ -5820,6 +5833,21 @@ cnss_get_cpumask_for_wlan_txrx_intr(struct cnss_plat_data *plat_priv)
 
 	plat_priv->cpumask_for_rx_intrs = cpumask[0];
 	plat_priv->cpumask_for_tx_comp_intrs = cpumask[1];
+}
+
+static void
+cnss_get_napi_ipi_redirect_info(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return;
+
+	dev = &plat_priv->plat_dev->dev;
+
+	plat_priv->napi_ipi_redirect_enable =
+		of_property_read_bool(dev->of_node,
+				      "qcom,napi-ipi-redirect-enable");
 }
 
 static int cnss_probe(struct platform_device *plat_dev)
@@ -5912,6 +5940,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_aop_interface_init(plat_priv);
 	cnss_init_control_params(plat_priv);
 	cnss_get_cpumask_for_wlan_txrx_intr(plat_priv);
+	cnss_get_napi_ipi_redirect_info(plat_priv);
 	cnss_pm_notifier_init(plat_priv);
 
 	ret = cnss_get_resources(plat_priv);
