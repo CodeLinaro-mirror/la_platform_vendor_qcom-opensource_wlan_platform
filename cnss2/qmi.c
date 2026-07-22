@@ -3421,7 +3421,7 @@ static void cnss_wlfw_fw_mem_file_save_ind_cb(struct qmi_handle *qmi_wlfw,
 	event_data->total_size = ind_msg->total_size;
 
 	if (ind_msg->mem_seg_valid) {
-		if (ind_msg->mem_seg_len > QMI_WLFW_MAX_STR_LEN_V01) {
+		if (ind_msg->mem_seg_len > QMI_WLFW_MAX_NUM_MEM_SEG_V01) {
 			cnss_pr_err("Invalid seg len indication\n");
 			goto free_event_data;
 		}
