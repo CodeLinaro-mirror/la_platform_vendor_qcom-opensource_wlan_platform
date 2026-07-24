@@ -2420,6 +2420,7 @@ static int cnss_init_dev_sol_gpio(struct cnss_plat_data *plat_priv)
 
 free_gpio:
 	gpio_free(sol_gpio->dev_sol_gpio);
+	sol_gpio->dev_sol_gpio = -EINVAL;
 out:
 	return ret;
 }
@@ -2433,6 +2434,7 @@ static void cnss_deinit_dev_sol_gpio(struct cnss_plat_data *plat_priv)
 
 	free_irq(sol_gpio->dev_sol_irq, plat_priv);
 	gpio_free(sol_gpio->dev_sol_gpio);
+	sol_gpio->dev_sol_gpio = -EINVAL;
 }
 
 int cnss_set_host_sol_value(struct cnss_plat_data *plat_priv, int value)
@@ -2514,6 +2516,7 @@ static void cnss_deinit_host_sol_gpio(struct cnss_plat_data *plat_priv)
 		return;
 
 	gpio_free(sol_gpio->host_sol_gpio);
+	sol_gpio->host_sol_gpio = -EINVAL;
 }
 
 static int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
@@ -2603,6 +2606,7 @@ static void cnss_deinit_direct_cx_host_sol_gpio(struct cnss_plat_data *plat_priv
 		return;
 
 	gpio_free(plat_priv->direct_cx_host_sol_gpio);
+	plat_priv->direct_cx_host_sol_gpio = -EINVAL;
 }
 #else
 int cnss_set_direct_cx_host_sol_value(struct cnss_plat_data *plat_priv, int value)
@@ -8036,6 +8040,9 @@ static int cnss_probe(struct platform_device *plat_dev)
 		goto out;
 	}
 
+	plat_priv->sol_gpio.dev_sol_gpio = -EINVAL;
+	plat_priv->sol_gpio.host_sol_gpio = -EINVAL;
+	plat_priv->direct_cx_host_sol_gpio = -EINVAL;
 	plat_priv->plat_dev = plat_dev;
 	plat_priv->dev_node = NULL;
 	plat_priv->device_id = device_id->driver_data;
