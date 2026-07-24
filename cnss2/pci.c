@@ -7535,6 +7535,7 @@ retry:
 	cnss_mhi_debug_reg_dump(pci_priv);
 	cnss_pci_bhi_debug_reg_dump(pci_priv);
 	cnss_pci_soc_scratch_reg_dump(pci_priv);
+	cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 
 recovery:
 	cnss_schedule_recovery(&pci_priv->pci_dev->dev,
@@ -7624,6 +7625,7 @@ retry:
 	cnss_mhi_debug_reg_dump(pci_priv);
 	cnss_pci_bhi_debug_reg_dump(pci_priv);
 	cnss_pci_soc_scratch_reg_dump(pci_priv);
+	cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 
 	if (!cnss_pci_assert_host_sol(pci_priv))
 		return 0;
@@ -8294,6 +8296,7 @@ static void cnss_dev_rddm_timeout_hdlr(struct timer_list *t)
 		cnss_mhi_debug_reg_dump(pci_priv);
 		cnss_pci_bhi_debug_reg_dump(pci_priv);
 		cnss_pci_soc_scratch_reg_dump(pci_priv);
+		cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
 				       CNSS_REASON_TIMEOUT);
 		return;
@@ -8319,6 +8322,7 @@ static void cnss_dev_rddm_timeout_hdlr(struct timer_list *t)
 		cnss_mhi_debug_reg_dump(pci_priv);
 		cnss_pci_bhi_debug_reg_dump(pci_priv);
 		cnss_pci_soc_scratch_reg_dump(pci_priv);
+		cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 
 		if (!cnss_pci_assert_host_sol(pci_priv))
 			return;
