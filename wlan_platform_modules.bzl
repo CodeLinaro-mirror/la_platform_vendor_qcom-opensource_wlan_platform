@@ -1,6 +1,5 @@
+load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
-load("@rules_pkg//pkg:install.bzl", "pkg_install")
-load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
 load(":target_variants.bzl", "get_all_variants", "targets", "get_16k_mtv")
 
 _default_module_enablement_list = [
@@ -425,17 +424,15 @@ def _define_modules_for_target_variant(target, variant):
     )
     tv = "{}_{}".format(target, variant)
 
-    pkg_files(
-        name = tv + "_dist_files",
-        srcs = _get_module_list(target, variant),
-        visibility = ["//visibility:private"],
-        strip_prefix = strip_prefix.files_only(),
-    )
-
-    pkg_install(
+    copy_to_dist_dir(
         name = "{}_wlan_platform_modules_dist".format(tv),
-        srcs = [":{}_dist_files".format(tv)],
-        destdir = "out/target/product/{}/dlkm/lib/modules/".format(target),
+	data = _get_module_list(target, variant),
+	dist_dir = "out/target/product/{}/dlkm/lib/modules/".format(target),
+	flat = True,
+	wipe_dist_dir = False,
+	allow_duplicate_filenames = False,
+	mode_overrides = {"**/*": "644"},
+	log = "info",
     )
 
 def define_modules():
