@@ -4245,6 +4245,24 @@ int cnss_pci_dev_shutdown(struct cnss_pci_data *pci_priv)
 	return ret;
 }
 
+bool cnss_pci_is_reboot_dev_shutdown_required(struct cnss_pci_data *pci_priv)
+{
+	if (!pci_priv)
+		return false;
+
+	switch (pci_priv->device_id) {
+	case QCA6390_DEVICE_ID:
+	case QCN7605_DEVICE_ID:
+	case QCA6490_DEVICE_ID:
+	case KIWI_DEVICE_ID:
+		if (test_bit(CNSS_MHI_POWER_ON, &pci_priv->mhi_state))
+			return true;
+		return false;
+	default:
+		return false;
+	}
+}
+
 int cnss_pci_dev_crash_shutdown(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
