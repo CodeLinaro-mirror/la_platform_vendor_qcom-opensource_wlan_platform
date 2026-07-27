@@ -5000,10 +5000,15 @@ static void cnss_reboot_shutdown(struct cnss_plat_data *plat_priv,
 				 unsigned long action)
 {
 	mutex_lock(&plat_priv->driver_ops_lock);
-	set_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state);
-	cnss_pr_info("cnss reboot shutdown (action=%lu)\n", action);
-	cnss_bus_dev_shutdown(plat_priv);
-	clear_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state);
+	if (cnss_bus_is_reboot_dev_shutdown_required(plat_priv)) {
+		set_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state);
+		cnss_pr_info("cnss reboot shutdown (action=%lu)\n", action);
+		cnss_bus_dev_shutdown(plat_priv);
+		clear_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state);
+	}
+	if (plat_priv->is_fw_managed_pwr)
+		cnss_power_off_device(plat_priv);
+
 	mutex_unlock(&plat_priv->driver_ops_lock);
 }
 #else
