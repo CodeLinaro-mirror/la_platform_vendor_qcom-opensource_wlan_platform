@@ -9641,6 +9641,35 @@ void cnss_pci_deinit(struct cnss_plat_data *plat_priv)
 	}
 }
 
+#if (KERNEL_VERSION(7, 1, 0) <= LINUX_VERSION_CODE)
+/*
+ * struct image_info's mhi_buf became a flexible array member upstream in
+ * kernel 7.1.0, which is always embedded in the struct allocation and can
+ * never be NULL, so only the entries count is worth validating here.
+ */
+static bool cnss_pci_rddm_image_invalid(struct image_info *rddm_image)
+{
+	if (rddm_image->entries <= 1) {
+		cnss_pr_err("Invalid RDDM image: entries=%d\n",
+			    rddm_image->entries);
+		return true;
+	}
+
+	return false;
+}
+#else
+static bool cnss_pci_rddm_image_invalid(struct image_info *rddm_image)
+{
+	if (rddm_image->entries <= 1 || !rddm_image->mhi_buf) {
+		cnss_pr_err("Invalid RDDM image: entries=%d, mhi_buf=%pK\n",
+			    rddm_image->entries, rddm_image->mhi_buf);
+		return true;
+	}
+
+	return false;
+}
+#endif
+
 u8 **cnss_pci_collect_rddm_seg_info(struct cnss_pci_data *pci_priv,
 				    u32 *rddm_entries,
 				    u32 *rddm_seg_len)
@@ -9668,11 +9697,8 @@ u8 **cnss_pci_collect_rddm_seg_info(struct cnss_pci_data *pci_priv,
 	}
 
 	/* Validate RDDM image entries and buffer */
-	if (rddm_image->entries <= 1 || !rddm_image->mhi_buf) {
-		cnss_pr_err("Invalid RDDM image: entries=%d, mhi_buf=%pK\n",
-			    rddm_image->entries, rddm_image->mhi_buf);
+	if (cnss_pci_rddm_image_invalid(rddm_image))
 		return NULL;
-	}
 
 	/* Allocate array to hold segment pointers */
 	seg_array = vzalloc(sizeof(u8 *) * (rddm_image->entries - 1));
