@@ -7,8 +7,11 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/of.h>
+#include <linux/version.h>
 #include <linux/gpio/consumer.h>
+#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
+#endif
 #include <linux/pinctrl/consumer.h>
 #if IS_ENABLED(CONFIG_PINCTRL_MSM) && !IS_ENABLED(CONFIG_PINCTRL_MSM_NO_EXT)
 #include <linux/pinctrl/qcom-pinctrl.h>
