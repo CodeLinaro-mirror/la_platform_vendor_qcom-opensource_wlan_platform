@@ -378,6 +378,7 @@ void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv)
 
 	switch (pci_priv->pci_dev->device) {
 	case QCA6490_DEVICE_ID:
+	case KIWI_DEVICE_ID:
 		pci_priv->reset_regs = &reset_reg_params;
 		break;
 	default:
