@@ -544,7 +544,8 @@ cnss_pci_smmu_dev_fault_handler(struct iommu_fault *fault,  void *data)
 
 	pci_priv->is_smmu_fault = true;
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
-	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
+	if (cnss_force_fw_assert(&pci_priv->pci_dev->dev) == -EOPNOTSUPP)
+		CNSS_ASSERT(0);
 
 	/* IOMMU driver requires -ENOSYS to print debug info. */
 	return -ENOSYS;
@@ -575,18 +576,29 @@ static int cnss_pci_smmu_fault_handler(struct iommu_domain *domain,
 
 	pci_priv->is_smmu_fault = true;
 	cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
-	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
+	if (cnss_force_fw_assert(&pci_priv->pci_dev->dev) == -EOPNOTSUPP)
+		CNSS_ASSERT(0);
 
 	/* IOMMU driver requires -ENOSYS to print debug info. */
 	return -ENOSYS;
 }
 
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static
+void cnss_register_iommu_fault_handler(struct cnss_pci_data *pci_priv)
+{
+	qcom_iommu_set_fault_handler(pci_priv->iommu_domain,
+				     cnss_pci_smmu_fault_handler, pci_priv);
+}
+#else
 static
 void cnss_register_iommu_fault_handler(struct cnss_pci_data *pci_priv)
 {
 	iommu_set_fault_handler(pci_priv->iommu_domain,
 				cnss_pci_smmu_fault_handler, pci_priv);
 }
+#endif
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
