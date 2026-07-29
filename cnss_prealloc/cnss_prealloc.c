@@ -751,6 +751,7 @@ void cnss_deinitialize_prealloc_pool(void)
 }
 EXPORT_SYMBOL(cnss_deinitialize_prealloc_pool);
 
+#if IS_ENABLED(CONFIG_STACKTRACE)
 /**
  * cnss_record_stack_trace() - Record stack trace for memory allocation
  * @alloc_info: Pointer to allocation info structure
@@ -852,6 +853,25 @@ void cnss_print_stack_trace(struct cnss_alloc_info *alloc_info,
 	for (i = 0; i < alloc_info->nr_entries; i++)
 		pr_info("    %s\n", alloc_info->stack_entries[i].symbol);
 }
+#else
+static inline
+void cnss_record_stack_trace(struct cnss_alloc_info *alloc_info, void *mem,
+					     const char *pool_name)
+{
+}
+
+
+static void cnss_clear_stack_trace(struct cnss_alloc_info *alloc_info,
+						   const char *pool_name)
+{
+}
+
+static inline
+void cnss_print_stack_trace(struct cnss_alloc_info *alloc_info,
+					    const char *pool_name)
+{
+}
+#endif
 
 void wcnss_check_pool_lists(void)
 {
