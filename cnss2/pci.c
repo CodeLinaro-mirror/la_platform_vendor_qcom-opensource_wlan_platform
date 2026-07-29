@@ -15,6 +15,7 @@
 #include <linux/vmalloc.h>
 #include <linux/suspend.h>
 #include <linux/sched.h>
+#include <linux/version.h>
 #include <linux/nmi.h>
 #include <linux/stacktrace.h>
 #include "main.h"
@@ -124,6 +125,17 @@ static DEFINE_SPINLOCK(time_sync_lock);
 
 #define SECOND_DRIVER_SUB_NAME          "cnss2"
 
+/*
+ * struct mhi_channel_config.auto_queue was removed upstream in kernel
+ * v7.0.0. Wrap each struct-literal site with this macro instead of a
+ * repeated inline #if guard.
+ */
+#if (KERNEL_VERSION(7, 0, 0) > LINUX_VERSION_CODE)
+#define CNSS_MHI_AUTO_QUEUE(val) .auto_queue = (val),
+#else
+#define CNSS_MHI_AUTO_QUEUE(val)
+#endif
+
 static const struct mhi_channel_config cnss_mhi_channels[] = {
 	{
 		.num = 0,
@@ -137,7 +149,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 1,
@@ -151,7 +163,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 4,
@@ -165,7 +177,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 5,
@@ -179,7 +191,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 20,
@@ -193,7 +205,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 21,
@@ -207,7 +219,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = true,
+		CNSS_MHI_AUTO_QUEUE(true)
 	},
 /* All MHI satellite config to be at the end of data struct */
 #if IS_ENABLED(CONFIG_MHI_SATELLITE)
@@ -223,7 +235,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 51,
@@ -237,7 +249,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 70,
@@ -251,7 +263,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 71,
@@ -265,7 +277,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 #endif
 };
@@ -283,7 +295,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 1,
@@ -297,7 +309,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 20,
@@ -311,7 +323,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 21,
@@ -325,7 +337,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = true,
+		CNSS_MHI_AUTO_QUEUE(true)
 	},
 /* All MHI satellite config to be at the end of data struct */
 #if IS_ENABLED(CONFIG_MHI_SATELLITE)
@@ -341,7 +353,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 51,
@@ -355,7 +367,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 70,
@@ -369,7 +381,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 71,
@@ -383,7 +395,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 #endif
 };
@@ -401,7 +413,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 1,
@@ -415,7 +427,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 4,
@@ -429,7 +441,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 5,
@@ -443,7 +455,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 16,
@@ -457,7 +469,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 17,
@@ -471,7 +483,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = true,
+		CNSS_MHI_AUTO_QUEUE(true)
 	},
 };
 
