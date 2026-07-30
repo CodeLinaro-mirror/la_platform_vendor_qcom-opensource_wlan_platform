@@ -18,6 +18,9 @@
 #include <linux/version.h>
 #include <linux/nmi.h>
 #include <linux/stacktrace.h>
+#ifdef CONFIG_CNSS_IO_COHERENCY
+#include <linux/tmelcom_ipc.h>
+#endif
 #ifdef CONFIG_DMA_CMA
 #define cnss_dev_get_cma_area(dev) ((dev)->cma_area)
 #else
@@ -7809,6 +7812,114 @@ int cnss_pci_call_driver_uevent(struct cnss_pci_data *pci_priv,
 
 	return driver_ops->update_event(pci_priv->pci_dev, &uevent_data);
 }
+
+#ifdef CONFIG_CNSS_IO_COHERENCY
+int cnss_pci_config_io_coherency(struct cnss_pci_data *pci_priv,
+				 bool reset)
+{
+	struct cnss_plat_data *plat_priv;
+	struct device *dev;
+	struct device_node *np;
+	int ret, num_elem, i = 0;
+	struct tmel_secure_io secure_reg;
+
+	if (!pci_priv || !pci_priv->pci_dev)
+		return -ENODEV;
+
+	plat_priv = pci_priv->plat_priv;
+	dev = &plat_priv->plat_dev->dev;
+	np = dev->of_node;
+
+	/* Compute effective IO coherency: DTS AND (not disabled by quirk).
+	 * Store in plat_priv->io_coherent_enabled as the single source of
+	 * truth for whether to open the aggr-NoC coherent bit below.
+	 */
+	if (!reset) {
+		bool dts_coherent = dev->dma_coherent;
+		bool disable_quirk =
+			test_bit(DISABLE_IO_COHERENCY,
+				 &plat_priv->ctrl_params.quirks);
+
+		plat_priv->io_coherent_enabled =
+			dts_coherent && !disable_quirk;
+
+		cnss_pr_info("IO coherent effective: %s (dts=%d, disable_quirk=%d)\n",
+			plat_priv->io_coherent_enabled ? "enabled" : "disabled",
+			dts_coherent, disable_quirk);
+
+		if (!plat_priv->io_coherent_enabled)
+			return 0;
+	} else {
+		/* Symmetric shutdown: clear endpoint pci_dev flag BEFORE closing
+		 * NoC coherent bit, so kernel iommu-dma layer stops issuing new
+		 * coherent transactions while the fabric can still snoop them.
+		 */
+		if (pci_priv->pci_dev->dev.dma_coherent) {
+			pci_priv->pci_dev->dev.dma_coherent = false;
+			cnss_pr_info("Clear endpoint pci_dev->dma_coherent = false\n");
+		}
+		plat_priv->io_coherent_enabled = false;
+	}
+
+	num_elem = of_property_count_elems_of_size(np, "secure-reg",
+			sizeof(u32));
+
+	/* Read and enable the IO coherency and LLC registers */
+	while (i < num_elem) {
+		ret = of_property_read_u32_index(np,
+				"secure-reg", i++,
+				&secure_reg.reg_addr);
+		if (ret) {
+			cnss_pr_err("Failed to get secure reg %d\n", (i - 1));
+			return -EINVAL;
+		}
+
+		ret = of_property_read_u32_index(np,
+				"secure-reg", i++,
+				&secure_reg.reg_val);
+		if (ret) {
+			cnss_pr_err("Failed to get secure reg val %d\n", (i - 1));
+			return -EINVAL;
+		}
+
+		if (reset)
+			secure_reg.reg_val = 0;
+
+		cnss_pr_info("Configuring secure reg: 0x%x val: 0x%x\n",
+				secure_reg.reg_addr, secure_reg.reg_val);
+
+		ret = tmelcom_secure_io_write(&secure_reg,
+				sizeof(struct tmel_secure_io));
+		if (ret) {
+			cnss_pr_err("Failed to update secure_reg settings, ret = %d reg: 0x%x val: 0x%x\n",
+					ret, secure_reg.reg_addr,
+					secure_reg.reg_val);
+			return ret;
+		}
+	}
+
+	if (!reset) {
+		pci_priv->pci_dev->dev.dma_coherent = true;
+		cnss_pr_info("Set endpoint pci_dev->dma_coherent = true\n");
+		/* Retarget: hand the driver the coherent wlan_fig platform
+		 * device to allocate/free DMA against.
+		 */
+		cnss_pci_call_driver_uevent(pci_priv, CNSS_UPDATE_DMA_DEV, dev);
+	} else {
+		/* Restore: hand the driver back the pci endpoint device. */
+		cnss_pci_call_driver_uevent(pci_priv, CNSS_UPDATE_DMA_DEV,
+					    &pci_priv->pci_dev->dev);
+	}
+
+	return 0;
+}
+#else
+int cnss_pci_config_io_coherency(struct cnss_pci_data *pci_priv,
+				 bool reset)
+{
+	return 0;
+}
+#endif
 
 static void cnss_pci_send_hang_event(struct cnss_pci_data *pci_priv)
 {

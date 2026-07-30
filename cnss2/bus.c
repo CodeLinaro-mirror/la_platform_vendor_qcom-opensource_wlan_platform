@@ -620,6 +620,23 @@ int cnss_bus_update_uevent(struct cnss_plat_data *plat_priv,
 	}
 }
 
+int cnss_bus_config_io_coherency(struct cnss_plat_data *plat_priv,
+				 bool reset)
+{
+	if (!plat_priv)
+		return -ENODEV;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		return cnss_pci_config_io_coherency(plat_priv->bus_priv,
+						    reset);
+	default:
+		cnss_pr_err("Unsupported bus type: %d\n",
+			    plat_priv->bus_type);
+		return -EINVAL;
+	}
+}
+
 int cnss_bus_is_device_down(struct cnss_plat_data *plat_priv)
 {
 	if (!plat_priv)

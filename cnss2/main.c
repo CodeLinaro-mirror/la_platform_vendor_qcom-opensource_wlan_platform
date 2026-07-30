@@ -1002,6 +1002,11 @@ int cnss_wlan_enable(struct device *dev,
 		goto out;
 
 skip_cfg:
+	if ((ret = cnss_bus_config_io_coherency(plat_priv, false))) {
+		cnss_pr_err("Failed to set io coherency regs, ret=%d\n", ret);
+		goto out;
+	}
+
 	plat_priv->driver_mode = mode;
 	if (mode == CNSS_MISSION) {
 		plat_priv->wlan_on_time_usec = cnss_get_monotonic_boottime_us();
@@ -1046,6 +1051,9 @@ int cnss_wlan_disable(struct device *dev, enum cnss_driver_mode mode)
 
 	ret = cnss_wlfw_wlan_mode_send_sync(plat_priv, CNSS_OFF);
 	cnss_bus_free_qdss_mem(plat_priv);
+
+	if (cnss_bus_config_io_coherency(plat_priv, true))
+		cnss_pr_err("Failed to reset io coherency regs\n");
 
 	return ret;
 }
@@ -7386,9 +7394,23 @@ static void cnss_init_board_id_src(struct cnss_plat_data *plat_priv)
 		    val);
 }
 
+#ifdef CONFIG_CNSS_IO_COHERENCY
+static void cnss_init_io_coherency(struct cnss_plat_data *plat_priv)
+{
+	plat_priv->io_coherent_enabled = plat_priv->plat_dev->dev.dma_coherent;
+	cnss_pr_info("IO coherent (DTS default): %s\n",
+		     plat_priv->io_coherent_enabled ? "enabled" : "disabled");
+}
+#else
+static void cnss_init_io_coherency(struct cnss_plat_data *plat_priv)
+{
+}
+#endif
+
 static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
 {
 	plat_priv->ctrl_params.quirks = CNSS_QUIRKS_DEFAULT;
+	cnss_init_io_coherency(plat_priv);
 
 	plat_priv->cbc_enabled = !IS_ENABLED(CONFIG_CNSS_EMULATION) &&
 		of_property_read_bool(plat_priv->plat_dev->dev.of_node,

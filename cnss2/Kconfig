@@ -236,6 +236,20 @@ config CNSS2_BDF_RETRY
 	  Retry failed BDF QMI download segments before giving up.
 	  Enable for platforms that require this recovery.
 
+config CNSS_IO_COHERENCY
+	bool "Enable IPQ5424 fig_v2 IO coherency support"
+	depends on CNSS2
+	depends on PCI
+	help
+	  If enabled, CNSS platform driver opens the aggr-NoC coherent + LLC
+	  cacheable bit via TME-L IPC at wlan_enable time and flips the
+	  fig_v2 pci_dev->dma_coherent flag, then notifies the WLAN driver
+	  (via CNSS_UPDATE_DMA_DEV) to retarget qdf_dev->dma_dev to the
+	  coherent wlan_fig platform device for DMA hot-path allocations.
+	  Requires a kernel build that carries the QCOM TME-L driver and
+	  the tmelcom_ipc.h secure-io header; only enable for targets that
+	  ship both.
+
 config CNSS_QUIRKS_DEFAULT
 	hex "Default value for CNSS debug quirks bitmask"
 	depends on CNSS2

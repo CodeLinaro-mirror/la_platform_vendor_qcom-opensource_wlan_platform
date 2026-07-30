@@ -657,6 +657,9 @@ struct cnss_plat_data {
 	u64 wlan_on_time_usec;
 	u64 wlan_off_time_usec;
 	void *bus_priv;
+#ifdef CONFIG_CNSS_IO_COHERENCY
+	bool io_coherent_enabled;
+#endif
 	enum cnss_dev_bus_type bus_type;
 	struct list_head vreg_list;
 	struct list_head clk_list;

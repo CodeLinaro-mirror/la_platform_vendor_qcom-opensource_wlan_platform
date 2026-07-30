@@ -398,6 +398,8 @@ int cnss_pci_update_status(struct cnss_pci_data *pci_priv,
 			   enum cnss_driver_status status);
 int cnss_pci_call_driver_uevent(struct cnss_pci_data *pci_priv,
 				enum cnss_driver_status status, void *data);
+int cnss_pci_config_io_coherency(struct cnss_pci_data *pci_priv,
+				 bool reset);
 int cnss_pcie_is_device_down(struct cnss_pci_data *pci_priv);
 int cnss_pci_shutdown_cleanup(struct cnss_pci_data *pci_priv);
 int cnss_pci_suspend_bus(struct cnss_pci_data *pci_priv);
