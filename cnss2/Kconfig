@@ -217,6 +217,17 @@ config CNSS_SHUTDOWN_CALLBACK
 	  IOMMU during shutdown and PCIe required this feature, then enabled
 	  it.
 
+config CNSS2_MHI_RDDM_TIMEOUT
+	int "MHI RDDM timeout in microseconds"
+	default 0
+	depends on CNSS2
+	help
+	  Configure the MHI RDDM timeout value in microseconds for WLAN
+	  endpoints. If set to non-zero, the CNSS driver will pass this value
+	  to MHI controller for RDDM dump collection timeout in panic path.
+	  Maximum allowed value is 1000000 (1 second).
+	  If set to 0, MHI will use its default timeout of 200ms.
+
 config AUTO_PROJECT
 	bool "Enable/Disable AUTO SP"
 	depends on CNSS2
