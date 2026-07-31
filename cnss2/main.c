@@ -12,14 +12,18 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_device.h>
+#include <linux/version.h>
+#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
+#else
+#include <linux/gpio/consumer.h>
+#endif
 #include <linux/pm_wakeup.h>
 #include <linux/reboot.h>
 #include <linux/rwsem.h>
 #include <linux/suspend.h>
 #include <linux/timer.h>
 #include <linux/thermal.h>
-#include <linux/version.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 #include <linux/panic_notifier.h>
 #endif
