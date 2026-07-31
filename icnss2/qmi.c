@@ -1606,7 +1606,7 @@ int wlfw_wlan_mode_send_sync_msg(struct icnss_priv *priv,
 	ret = qmi_txn_init(&priv->qmi, &txn,
 			   wlfw_wlan_mode_resp_msg_v01_ei, resp);
 	if (ret < 0) {
-		icnss_qmi_fatal_err("Fail to init txn for Mode resp %d\n", ret);
+		icnss_pr_dbg("Fail to init txn for Mode resp %d\n", ret);
 		goto out;
 	}
 
@@ -1616,7 +1616,7 @@ int wlfw_wlan_mode_send_sync_msg(struct icnss_priv *priv,
 			       wlfw_wlan_mode_req_msg_v01_ei, req);
 	if (ret < 0) {
 		qmi_txn_cancel(&txn);
-		icnss_qmi_fatal_err("Fail to send Mode req %d\n", ret);
+		icnss_pr_dbg("Fail to send Mode req %d\n", ret);
 		goto out;
 	}
 
@@ -1624,10 +1624,10 @@ int wlfw_wlan_mode_send_sync_msg(struct icnss_priv *priv,
 			   priv->ctrl_params.qmi_timeout +
 			   msecs_to_jiffies(priv->wlan_en_delay_ms));
 	if (ret < 0) {
-		icnss_qmi_fatal_err("Mode resp wait failed with ret %d\n", ret);
+		icnss_pr_dbg("Mode resp wait failed with ret %d\n", ret);
 		goto out;
 	} else if (resp->resp.result != QMI_RESULT_SUCCESS_V01) {
-		icnss_qmi_fatal_err(
+		icnss_pr_dbg(
 			"QMI Mode request rejected, result:%d error:%d\n",
 			resp->resp.result, resp->resp.error);
 		ret = -resp->resp.result;
