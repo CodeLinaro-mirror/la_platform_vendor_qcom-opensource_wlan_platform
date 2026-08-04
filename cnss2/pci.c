@@ -8525,6 +8525,10 @@ static int cnss_mhi_bw_scale(struct mhi_controller *mhi_ctrl,
 
 	pci_priv->def_link_speed = link_info->target_link_speed;
 	pci_priv->def_link_width = link_info->target_link_width;
+	/* Keep cur_link_speed in sync too; def_ and cur_ could converge
+	 * into a single field later, but are tracked separately for now.
+	 */
+	pci_priv->cur_link_speed = link_info->target_link_speed;
 
 	return 0;
 }
