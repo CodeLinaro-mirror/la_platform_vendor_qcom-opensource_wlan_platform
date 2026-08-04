@@ -460,6 +460,7 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 
 	cnss_wlfw_host_cap_parse_mlo(plat_priv, req);
 
+	cnss_get_caldb_rddm_reuse_info(plat_priv);
 	ret = cnss_get_feature_list(plat_priv, &feature_list);
 	if (!ret) {
 		req->feature_list_valid = 1;
@@ -475,22 +476,21 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	}
 
 	if (plat_priv->device_id == FIG_DEVICE_ID) {
-		if (plat_priv->cx_mode == CX_DATA_PIN_PDC) {
-			ret = cnss_set_bidirectional_ack_pdc(plat_priv,
-							     ACK_GEN_ENABLED);
-			if (ret < 0) {
-				cnss_pr_err("Failed to set bi-d ack mode\n");
-				goto out;
-			}
-		}
-
 		req->target_attachment_valid = 1;
-		if (plat_priv->cx_mode == CX_DATA_PIN_PMIC)
+
+		/* CX_DATA_PIN_PDC intentionally uses WLFW_PMIC_V01 to disable
+		 * bi-directional ACK until fully validated.
+		 */
+		switch (plat_priv->cx_mode) {
+		case CX_DATA_PIN_PMIC:
+			fallthrough;
+		case CX_DATA_PIN_PDC:
 			req->target_attachment = WLFW_PMIC_V01;
-		else if (plat_priv->cx_mode == CX_DATA_PIN_PDC)
-			req->target_attachment = WLFW_PDC_V01;
-		else
+			break;
+		default:
 			req->target_attachment = WLFW_THIRD_PARTY_V01;
+			break;
+		}
 
 		cnss_pr_info("Sending target attachment info: %d",
 			     req->target_attachment);
