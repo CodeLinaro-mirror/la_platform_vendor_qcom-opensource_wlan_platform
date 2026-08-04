@@ -12,14 +12,18 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_device.h>
+#include <linux/version.h>
+#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
+#else
+#include <linux/gpio/consumer.h>
+#endif
 #include <linux/pm_wakeup.h>
 #include <linux/reboot.h>
 #include <linux/rwsem.h>
 #include <linux/suspend.h>
 #include <linux/timer.h>
 #include <linux/thermal.h>
-#include <linux/version.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 #include <linux/panic_notifier.h>
 #endif
@@ -66,7 +70,6 @@
 #define FW_READY_TIMEOUT		20000
 #define FW_ASSERT_TIMEOUT		5000
 #define CNSS_EVENT_PENDING		2989
-#define POWER_RESET_MIN_DELAY_MS	100
 #define MAX_NAME_LEN			12
 
 #define CNSS_QUIRKS_DEFAULT		0
@@ -93,7 +96,7 @@
 #define CNSS_TIME_SYNC_PERIOD_INVALID	0xFFFFFFFF
 #define CPUMASK_ARRAY_SIZE		2
 #define MAX_SYSFS_USER_COMMAND_SIZE_LENGTH 5
-#define XDUMP_TIMEOUT_MS	20000
+#define XDUMP_TIMEOUT_MS	40000
 #if IS_ENABLED(CONFIG_CNSS2_DIRECT_CX_SDAM)
 #define NOM_VOLTAGE			0x37A /* 890mV */
 #define NOM_V2_VOLTAGE			0x2EE /* 750mV */
@@ -1243,6 +1246,7 @@ static bool cnss_is_aux_support_enabled(struct cnss_plat_data *plat_priv)
 static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
+	u32 board_id;
 
 	if (!plat_priv)
 		return -ENODEV;
@@ -1253,12 +1257,14 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 	if (ret)
 		goto out;
 
-	if (plat_priv->device_id == FIG_DEVICE_ID) {
+	if (plat_priv->board_id_src == CNSS_BOARD_ID_SRC_PCIE_MAP) {
+		if (!cnss_bus_lookup_board_id(plat_priv, &board_id))
+			plat_priv->board_info.board_id = board_id;
+		else
+			cnss_pr_err("Failed to get board-id from PCIe config space\n");
+	}
 
-		ret = cnss_bus_load_tme_patch(plat_priv);
-		if (!ret)
-		    cnss_wlfw_tme_patch_dnld_send_sync(plat_priv,
-				WLFW_TME_LITE_PATCH_FILE_V01);
+	if (plat_priv->device_id == FIG_DEVICE_ID) {
 
 		if (test_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state)) {
 
@@ -1273,8 +1279,12 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 		    cnss_wlfw_soft_sku_dnld_send_sync(plat_priv);
 	}
 
-	if (plat_priv->hds_enabled)
-		cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_HDS);
+	if (plat_priv->hds_enabled) {
+		ret = cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_HDS);
+		/* Bail only if a PCIe reset was actually scheduled. */
+		if (ret == -EHOSTDOWN)
+			goto out;
+	}
 
 	cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_REGDB);
 
@@ -1285,6 +1295,9 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 					   plat_priv->ctrl_params.bdf_type);
 	if (ret)
 		goto out;
+
+	/* Full BDF sequence succeeded; clear the PCIe-reset failure streak. */
+	plat_priv->bdf_dnld_fail_count = 0;
 
 	if (plat_priv->device_id == QCN7605_DEVICE_ID)
 		return 0;
@@ -2310,6 +2323,8 @@ int cnss_enable_dev_sol_irq(struct cnss_plat_data *plat_priv)
 	if (sol_gpio->dev_sol_gpio < 0 || sol_gpio->dev_sol_irq <= 0)
 		return 0;
 
+	enable_irq(sol_gpio->dev_sol_irq);
+
 	ret = enable_irq_wake(sol_gpio->dev_sol_irq);
 	if (ret)
 		cnss_pr_err("Failed to enable device SOL as wake IRQ, err = %d\n",
@@ -2330,6 +2345,8 @@ int cnss_disable_dev_sol_irq(struct cnss_plat_data *plat_priv)
 	if (ret)
 		cnss_pr_err("Failed to disable device SOL as wake IRQ, err = %d\n",
 			    ret);
+
+	disable_irq(sol_gpio->dev_sol_irq);
 
 	return ret;
 }
@@ -2413,10 +2430,14 @@ static int cnss_init_dev_sol_gpio(struct cnss_plat_data *plat_priv)
 		goto free_gpio;
 	}
 
+	/* Keep masked until cnss_power_on_device() enables it. */
+	disable_irq(sol_gpio->dev_sol_irq);
+
 	return 0;
 
 free_gpio:
 	gpio_free(sol_gpio->dev_sol_gpio);
+	sol_gpio->dev_sol_gpio = -EINVAL;
 out:
 	return ret;
 }
@@ -2430,6 +2451,7 @@ static void cnss_deinit_dev_sol_gpio(struct cnss_plat_data *plat_priv)
 
 	free_irq(sol_gpio->dev_sol_irq, plat_priv);
 	gpio_free(sol_gpio->dev_sol_gpio);
+	sol_gpio->dev_sol_gpio = -EINVAL;
 }
 
 int cnss_set_host_sol_value(struct cnss_plat_data *plat_priv, int value)
@@ -2511,6 +2533,7 @@ static void cnss_deinit_host_sol_gpio(struct cnss_plat_data *plat_priv)
 		return;
 
 	gpio_free(sol_gpio->host_sol_gpio);
+	sol_gpio->host_sol_gpio = -EINVAL;
 }
 
 static int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
@@ -2600,6 +2623,7 @@ static void cnss_deinit_direct_cx_host_sol_gpio(struct cnss_plat_data *plat_priv
 		return;
 
 	gpio_free(plat_priv->direct_cx_host_sol_gpio);
+	plat_priv->direct_cx_host_sol_gpio = -EINVAL;
 }
 #else
 int cnss_set_direct_cx_host_sol_value(struct cnss_plat_data *plat_priv, int value)
@@ -7248,7 +7272,7 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 
 	ret = cnss_get_bdf_filename_from_dt(plat_priv);
 	if (ret)
-		cnss_pr_err("Get customer bdf filename error!\n");
+		cnss_pr_dbg("Customer bdf filename prop not present in DT\n");
 
 	return 0;
 }
@@ -7295,6 +7319,27 @@ static void cnss_init_time_sync_period_default(struct cnss_plat_data *plat_priv)
 		CNSS_TIME_SYNC_PERIOD_DEFAULT;
 }
 
+/* Parse qcom,board-id-src DT property. */
+static void cnss_init_board_id_src(struct cnss_plat_data *plat_priv)
+{
+	u32 val = CNSS_BOARD_ID_SRC_FW;
+
+	of_property_read_u32(plat_priv->plat_dev->dev.of_node,
+			     "qcom,board-id-src", &val);
+
+	if (val >= CNSS_BOARD_ID_SRC_MAX) {
+		cnss_pr_dbg("Invalid qcom,board-id-src=%u, using FW default\n",
+			    val);
+		val = CNSS_BOARD_ID_SRC_FW;
+	}
+
+	plat_priv->board_id_src = val;
+
+	cnss_pr_dbg("board_id_src: %s (%u)\n",
+		    val == CNSS_BOARD_ID_SRC_FW ? "FW-QMI" : "PCIe-map",
+		    val);
+}
+
 static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
 {
 	plat_priv->ctrl_params.quirks = CNSS_QUIRKS_DEFAULT;
@@ -7313,6 +7358,7 @@ static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
 	 * enabled by default
 	 */
 	plat_priv->adsp_pc_enabled = true;
+	cnss_init_board_id_src(plat_priv);
 }
 
 static void cnss_get_pm_domain_info(struct cnss_plat_data *plat_priv)
@@ -7406,6 +7452,33 @@ static void cnss_get_rc_pm_control_info(struct cnss_plat_data *plat_priv)
 		of_property_read_bool(plat_priv->plat_dev->dev.of_node,
 				      "wlan-rc-pm-control");
 	cnss_pr_dbg("rc_pm_control: %d\n", plat_priv->rc_pm_control);
+}
+
+static void cnss_get_cx_mode_from_dt(struct cnss_plat_data *plat_priv)
+{
+	u32 cx_mode_dt;
+
+	if (of_property_read_u32(plat_priv->plat_dev->dev.of_node,
+				 "cx-mode", &cx_mode_dt)) {
+		cnss_pr_dbg("cx-mode not found in DT, defaulting to CX_LEGACY\n");
+		plat_priv->cx_mode = CX_LEGACY;
+		return;
+	}
+
+	switch (cx_mode_dt) {
+	case CX_LEGACY:
+	case CX_DATA_PIN:
+	case CX_DATA_PIN_PDC:
+	case CX_DATA_PIN_PMIC:
+		plat_priv->cx_mode = (enum cx_modes)cx_mode_dt;
+		cnss_pr_dbg("CX mode set to %d\n", plat_priv->cx_mode);
+		break;
+	default:
+		cnss_pr_err("Invalid cx-mode value %d, defaulting to CX_LEGACY\n",
+			    cx_mode_dt);
+		plat_priv->cx_mode = CX_LEGACY;
+		break;
+	}
 }
 
 static int cnss_get_dev_cfg_node(struct cnss_plat_data *plat_priv)
@@ -7793,7 +7866,7 @@ cnss_get_cpumask_for_wlan_txrx_intr(struct cnss_plat_data *plat_priv)
 					 "wlan-txrx-intr-cpumask",
 					 cpumask, CPUMASK_ARRAY_SIZE);
 	if (ret) {
-		cnss_pr_err("Failed to get cpumask for wlan txrx interrupts");
+		cnss_pr_dbg("irq affinity not defined in DT, applying default affinity");
 		return;
 	}
 
@@ -7951,7 +8024,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 	const struct of_device_id *of_id;
 	const struct platform_device_id *device_id;
 	static bool prealloc_initialized;
-	u32 cx_mode_dt;
 
 	of_id = of_match_device(cnss_of_match_table, &plat_dev->dev);
 	if (!of_id || !of_id->data) {
@@ -7985,6 +8057,9 @@ static int cnss_probe(struct platform_device *plat_dev)
 		goto out;
 	}
 
+	plat_priv->sol_gpio.dev_sol_gpio = -EINVAL;
+	plat_priv->sol_gpio.host_sol_gpio = -EINVAL;
+	plat_priv->direct_cx_host_sol_gpio = -EINVAL;
 	plat_priv->plat_dev = plat_dev;
 	plat_priv->dev_node = NULL;
 	plat_priv->device_id = device_id->driver_data;
@@ -7993,27 +8068,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 	cnss_pr_dbg("Probing platform driver from dt type: %d\n",
 		    plat_priv->dt_type);
 
-	ret  = of_property_read_u32(plat_priv->plat_dev->dev.of_node,
-				    "cx-mode", &cx_mode_dt);
-	if (ret) {
-		cnss_pr_err("could not find cx mode\n");
-		plat_priv->cx_mode = CX_LEGACY; /* Set to invalid/default value */
-	} else {
-		/* Validate the cx_mode_dt value and set plat_priv->cx_mode */
-		switch (cx_mode_dt) {
-		case CX_LEGACY:
-		case CX_DATA_PIN:
-		case CX_DATA_PIN_PDC:
-		case CX_DATA_PIN_PMIC:
-			plat_priv->cx_mode = (enum cx_modes)cx_mode_dt;
-			cnss_pr_dbg("CX mode set to %d\n", plat_priv->cx_mode);
-			break;
-		default:
-			cnss_pr_err("Invalid cx-mode value %d, setting to CX_LEGACY\n", cx_mode_dt);
-			plat_priv->cx_mode = CX_LEGACY;
-			break;
-		}
-	}
+	cnss_get_cx_mode_from_dt(plat_priv);
 
 	cnss_xdump_init(plat_priv);
 	plat_priv->use_fw_path_with_prefix =
@@ -8051,6 +8106,16 @@ static int cnss_probe(struct platform_device *plat_dev)
 	INIT_LIST_HEAD(&plat_priv->vreg_list);
 	INIT_LIST_HEAD(&plat_priv->clk_list);
 
+	cnss_init_control_params(plat_priv);
+
+	ret = cnss_event_work_init(plat_priv);
+	if (ret)
+		goto out_unset_drvdata;
+
+	ret = cnss_create_sysfs(plat_priv);
+	if (ret)
+		goto deinit_event_work;
+
 	cnss_power_ctrl_mode_init(plat_priv);
 	cnss_enable_direct_cx_pmic_pbs(plat_priv);
 	cnss_get_nvmem_cells(plat_priv);
@@ -8064,13 +8129,12 @@ static int cnss_probe(struct platform_device *plat_dev)
 		cnss_get_tsf_ts_info(plat_priv);
 
 	cnss_aop_interface_init(plat_priv);
-	cnss_init_control_params(plat_priv);
 	cnss_get_cpumask_for_wlan_txrx_intr(plat_priv);
 	cnss_pm_notifier_init(plat_priv);
 
 	ret = cnss_get_resources(plat_priv);
 	if (ret)
-		goto reset_ctx;
+		goto remove_sysfs;
 
 	/* FMD WAR for Ganges/Fig, disable BT_EN GPIO */
 	if (plat_priv &&
@@ -8091,17 +8155,9 @@ static int cnss_probe(struct platform_device *plat_dev)
 	if (ret)
 		goto unreg_esoc;
 
-	ret = cnss_event_work_init(plat_priv);
-	if (ret)
-		goto unreg_bus_scale;
-
-	ret = cnss_create_sysfs(plat_priv);
-	if (ret)
-		goto deinit_event_work;
-
 	ret = cnss_dms_init(plat_priv);
 	if (ret)
-		goto remove_sysfs;
+		goto unreg_bus_scale;
 
 	ret = cnss_debugfs_create(plat_priv);
 	if (ret)
@@ -8149,19 +8205,19 @@ destroy_debugfs:
 deinit_dms:
 	cnss_cancel_dms_work(plat_priv);
 	cnss_dms_deinit(plat_priv);
-remove_sysfs:
-	cnss_remove_sysfs(plat_priv);
-deinit_event_work:
-	cnss_event_work_deinit(plat_priv);
 unreg_bus_scale:
 	cnss_unregister_bus_scale(plat_priv);
 unreg_esoc:
 	cnss_unregister_esoc(plat_priv);
 free_res:
 	cnss_put_resources(plat_priv);
-reset_ctx:
+remove_sysfs:
+	cnss_remove_sysfs(plat_priv);
 	cnss_pm_notifier_deinit(plat_priv);
 	cnss_aop_interface_deinit(plat_priv);
+deinit_event_work:
+	cnss_event_work_deinit(plat_priv);
+out_unset_drvdata:
 	platform_set_drvdata(plat_dev, NULL);
 reset_plat_dev:
 	cnss_clear_plat_priv(plat_priv);

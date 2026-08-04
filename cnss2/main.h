@@ -92,6 +92,7 @@
 #define WLFW_MAX_HANG_EVENT_DATA_SIZE   384
 #define CNSS_MBOX_MSG_MAX_LEN           64
 #define CNSS_IOMMU_NODE_NAME_MAX_LEN    50
+#define POWER_RESET_MIN_DELAY_MS	100
 
 #define CNSS_EVENT_SYNC   BIT(0)
 #define CNSS_EVENT_UNINTERRUPTIBLE BIT(1)
@@ -465,6 +466,13 @@ enum cnss_bdf_type {
 	CNSS_BDF_HDS = 6,
 };
 
+/* board_id source, controlled by qcom,board-id-src DT. */
+enum cnss_board_id_src {
+	CNSS_BOARD_ID_SRC_FW       = 0,
+	CNSS_BOARD_ID_SRC_PCIE_MAP = 1,
+	CNSS_BOARD_ID_SRC_MAX,
+};
+
 enum cnss_cal_status {
 	CNSS_CAL_DONE,
 	CNSS_CAL_TIMEOUT,
@@ -801,6 +809,7 @@ struct cnss_plat_data {
 	bool pm_suspend_in_progress;
 	struct notifier_block pm_notifier;
 	char bdfname_dt[MAX_FIRMWARE_NAME_LEN];
+	enum cnss_board_id_src board_id_src;
 	struct cnss_xo_trim_config xo_trim_conf;
 	struct cnss_xdump_helper xdump_helper;
 	int direct_cx_data_pin_mode;
@@ -819,12 +828,14 @@ struct cnss_plat_data {
 	struct cnss_wlan_host_param *host_param;
 	struct cnss_wlan_tsf_info tsf_info;
 	bool m2_supply_detected;
+	bool msix_supported;
 	bool rc_pm_control;
 	enum cx_modes cx_mode;
 	u32 pmic_auto_headroom;
 	u32 wake_voltage_drop_adjustment;
 	u32 sleep_voltage_drop_adjustment;
 	enum cnss_power_ctrl_mode pwr_ctrl_mode;
+	u32 bdf_dnld_fail_count;
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
