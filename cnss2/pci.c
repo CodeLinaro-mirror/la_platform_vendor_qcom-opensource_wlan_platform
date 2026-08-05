@@ -5260,8 +5260,10 @@ int cnss_pci_load_tme_patch(struct cnss_pci_data *pci_priv)
 	if (!tme_lite_mem->va && !tme_lite_mem->size) {
 		scnprintf(filename, MAX_FIRMWARE_NAME_LEN, "%s", tme_patch_filename);
 
-		ret = firmware_request_nowarn(&fw_entry, filename,
-					      &pci_priv->pci_dev->dev);
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
+
+		ret = cnss_request_firmware_update_timer(plat_priv, &fw_entry, filename);
+
 		if (ret) {
 			cnss_pr_err("Failed to load TME-L patch: %s, ret: %d\n",
 				    filename, ret);
@@ -5345,8 +5347,10 @@ int cnss_pci_load_tme_opt_file(struct cnss_pci_data *pci_priv,
 		cnss_pci_add_fw_prefix_name(pci_priv, filename,
 					    tme_opt_filename);
 
-		ret = firmware_request_nowarn(&fw_entry, filename,
-					      &pci_priv->pci_dev->dev);
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
+
+		ret = cnss_request_firmware_update_timer(plat_priv, &fw_entry, filename);
+
 		if (ret) {
 			cnss_pr_err("Failed to load TME-L opt file: %s, ret: %d\n",
 				    filename, ret);
@@ -5432,8 +5436,10 @@ int cnss_pci_load_m3(struct cnss_pci_data *pci_priv)
 		cnss_pci_add_fw_prefix_name(pci_priv, filename,
 					    phy_filename);
 
-		ret = firmware_request_nowarn(&fw_entry, filename,
-					      &pci_priv->pci_dev->dev);
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
+
+		ret = cnss_request_firmware_update_timer(plat_priv, &fw_entry, filename);
+
 		if (ret) {
 			cnss_pr_err("Failed to load M3 image: %s\n", filename);
 			return ret;
@@ -5498,8 +5504,9 @@ int cnss_pci_load_aux(struct cnss_pci_data *pci_priv)
 		cnss_pci_add_fw_prefix_name(pci_priv, filename,
 					    aux_filename);
 
-		ret = firmware_request_nowarn(&fw_entry, filename,
-					      &pci_priv->pci_dev->dev);
+		cnss_pr_dbg("Invoke firmware_request_nowarn for %s\n", filename);
+
+		ret = cnss_request_firmware_update_timer(plat_priv, &fw_entry, filename);
 		if (ret) {
 			cnss_pr_err("Failed to load AUX image: %s\n", filename);
 			return ret;
