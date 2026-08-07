@@ -5790,7 +5790,11 @@ void cnss_get_cpumask_for_wlan_rx_interrupts(struct device *dev,
 {
 	struct cnss_plat_data *priv = cnss_get_plat_priv(NULL);
 
-	*cpu_mask = priv->cpumask_for_rx_intrs;
+	if (!priv && dev)
+		priv = cnss_bus_dev_to_plat_priv(dev);
+
+	if (priv)
+		*cpu_mask = priv->cpumask_for_rx_intrs;
 }
 EXPORT_SYMBOL(cnss_get_cpumask_for_wlan_rx_interrupts);
 
@@ -5799,7 +5803,11 @@ void cnss_get_cpumask_for_wlan_tx_comp_interrupts(struct device *dev,
 {
 	struct cnss_plat_data *priv = cnss_get_plat_priv(NULL);
 
-	*cpu_mask = priv->cpumask_for_tx_comp_intrs;
+	if (!priv && dev)
+		priv = cnss_bus_dev_to_plat_priv(dev);
+
+	if (priv)
+		*cpu_mask = priv->cpumask_for_tx_comp_intrs;
 }
 EXPORT_SYMBOL(cnss_get_cpumask_for_wlan_tx_comp_interrupts);
 
