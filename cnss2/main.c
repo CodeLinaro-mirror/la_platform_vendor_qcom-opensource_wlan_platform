@@ -2417,6 +2417,7 @@ static int cnss_init_dev_sol_gpio(struct cnss_plat_data *plat_priv)
 	if (ret) {
 		cnss_pr_err("Failed to request device SOL GPIO, err = %d\n",
 			    ret);
+		sol_gpio->dev_sol_gpio = -EINVAL;
 		goto out;
 	}
 
@@ -2514,6 +2515,7 @@ static int cnss_init_host_sol_gpio(struct cnss_plat_data *plat_priv)
 	if (ret) {
 		cnss_pr_err("Failed to request host SOL GPIO, err = %d\n",
 			    ret);
+		sol_gpio->host_sol_gpio = -EINVAL;
 		goto out;
 	}
 
@@ -2604,6 +2606,7 @@ int cnss_init_direct_cx_host_sol_gpio(struct cnss_plat_data *plat_priv)
 	if (ret) {
 		cnss_pr_err("Failed to request Direct CX Host SOL GPIO: %d\n",
 			    ret);
+		plat_priv->direct_cx_host_sol_gpio = -EINVAL;
 		goto out;
 	}
 
@@ -7139,6 +7142,7 @@ static int cnss_wlan_tsf_init(struct cnss_wlan_tsf_info *tsf_info)
 	cnss_pr_dbg("WLAN TSF IRQ: %d\n", tsf_info->irq_num);
 	if (tsf_info->irq_num < 0) {
 		gpio_free(tsf_info->wlan_tsf_gpio);
+		tsf_info->wlan_tsf_gpio = -EINVAL;
 		return -EINVAL;
 	}
 
@@ -7149,6 +7153,7 @@ static int cnss_wlan_tsf_init(struct cnss_wlan_tsf_info *tsf_info)
 				   "wlan_tsf", (void *)tsf_info);
 	if (ret) {
 		gpio_free(tsf_info->wlan_tsf_gpio);
+		tsf_info->wlan_tsf_gpio = -EINVAL;
 		cnss_pr_err("Failed to request TSF IRQ, err = %d\n", ret);
 	}
 
@@ -7161,8 +7166,10 @@ static void cnss_wlan_tsf_deinit(struct cnss_wlan_tsf_info *tsf_info)
 	if (tsf_info->irq_num >= 0)
 		free_irq(tsf_info->irq_num, (void *)tsf_info);
 
-	if (tsf_info->wlan_tsf_gpio >= 0)
+	if (tsf_info->wlan_tsf_gpio >= 0) {
 		gpio_free(tsf_info->wlan_tsf_gpio);
+		tsf_info->wlan_tsf_gpio = -EINVAL;
+	}
 
 	tsf_info->irq_num = -EINVAL;
 	tsf_info->wlan_tsf_handler = NULL;
