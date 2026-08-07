@@ -5025,7 +5025,11 @@ static int cnss_pci_suspend(struct device *dev)
 		/* pcie link will be suspend by pcie PM */
 		goto out;
 
-	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state)) {
+	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_LOADING, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_IDLE_RESTART, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state)) {
 		ret = -EAGAIN;
 		goto out;
 	}
