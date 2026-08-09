@@ -18,6 +18,7 @@
 #if IS_ENABLED(CONFIG_INTERCONNECT)
 #include <linux/interconnect.h>
 #endif
+#include <linux/ktime.h>
 #include <linux/mailbox_client.h>
 #include <linux/pm_qos.h>
 #include <linux/of.h>
@@ -650,6 +651,8 @@ enum cnss_power_ctrl_mode {
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
 	enum cnss_driver_mode driver_mode;
+	u64 wlan_on_time_usec;
+	u64 wlan_off_time_usec;
 	void *bus_priv;
 	enum cnss_dev_bus_type bus_type;
 	struct list_head vreg_list;
@@ -861,6 +864,19 @@ static inline u64 cnss_get_host_timestamp(struct cnss_plat_data *plat_priv)
 	return (ts.tv_sec * 1000000) + (ts.tv_nsec / 1000);
 }
 #endif
+
+/**
+ * cnss_get_monotonic_boottime_us() - get monotonic boottime in microseconds
+ *
+ * Uses CLOCK_BOOTTIME (via ktime_get_boottime()) rather than CLOCK_MONOTONIC
+ * so that the returned value includes any time spent in system suspend.
+ *
+ * Return: current boottime in microseconds
+ */
+static inline u64 cnss_get_monotonic_boottime_us(void)
+{
+	return ktime_to_us(ktime_get_boottime());
+}
 
 int cnss_wlan_hw_disable_check(struct cnss_plat_data *plat_priv);
 int cnss_wlan_hw_enable(void);
