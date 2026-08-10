@@ -107,7 +107,7 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define CNSS_IR_DROP_SLEEP_DEFAULT 10
 #define CNSS_IR_DROP_SLEEP (plat_priv->sleep_voltage_drop_adjustment)
 #define VREG_NOTFOUND 1
-#define AON_REG_SLEEP_VOLTAGE 750
+#define AON_REG_SLEEP_VOLTAGE 780
 
 /**
  * enum cnss_aop_vreg_param: Voltage regulator TCS param
