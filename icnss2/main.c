@@ -5391,6 +5391,82 @@ int icnss_exit_power_save(struct device *dev)
 }
 EXPORT_SYMBOL(icnss_exit_power_save);
 
+int icnss_set_bmps(struct device *dev, bool disable)
+{
+	struct icnss_priv *priv = dev_get_drvdata(dev);
+	struct wlfw_bmps_ctrl_req_msg_v01 *req;
+	struct wlfw_bmps_ctrl_resp_msg_v01 *resp;
+	struct qmi_txn txn;
+	int ret;
+
+	if (!priv)
+		return -ENODEV;
+
+	if (test_bit(ICNSS_FW_DOWN, &priv->state))
+		return -EINVAL;
+
+	if (test_bit(ICNSS_PD_RESTART, &priv->state) ||
+	    !test_bit(ICNSS_MODE_ON, &priv->state))
+		return 0;
+
+	icnss_pr_dbg("Sending BMPS ctrl: disable=%d, state: 0x%lx\n",
+		     disable, priv->state);
+
+	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	if (!req)
+		return -ENOMEM;
+
+	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
+	if (!resp) {
+		kfree(req);
+		return -ENOMEM;
+	}
+
+	req->bmps_state = disable ? QMI_WLFW_BMPS_DISABLE_V01 :
+				    QMI_WLFW_BMPS_ENABLE_V01;
+
+	priv->stats.set_bmps_req++;
+
+	ret = qmi_txn_init(&priv->qmi, &txn,
+			   wlfw_bmps_ctrl_resp_msg_v01_ei, resp);
+	if (ret < 0) {
+		icnss_pr_err("Fail to init txn for BMPS ctrl: %d\n", ret);
+		goto out;
+	}
+
+	ret = qmi_send_request(&priv->qmi, NULL, &txn,
+			       QMI_WLFW_BMPS_CTRL_REQ_V01,
+			       WLFW_BMPS_CTRL_REQ_MSG_V01_MAX_MSG_LEN,
+			       wlfw_bmps_ctrl_req_msg_v01_ei, req);
+	if (ret < 0) {
+		qmi_txn_cancel(&txn);
+		icnss_pr_err("Fail to send BMPS ctrl req: %d\n", ret);
+		goto out;
+	}
+
+	ret = qmi_txn_wait(&txn, priv->ctrl_params.qmi_timeout);
+	if (ret < 0) {
+		icnss_pr_err("BMPS ctrl resp wait failed: %d\n", ret);
+		goto out;
+	}
+
+	if (resp->resp.result != QMI_RESULT_SUCCESS_V01) {
+		icnss_pr_err("BMPS ctrl req rejected: %d\n", resp->resp.error);
+		ret = -resp->resp.error;
+		goto out;
+	}
+
+	priv->stats.set_bmps_resp++;
+
+out:
+	if (ret)
+		priv->stats.set_bmps_err++;
+	kfree(resp);
+	kfree(req);
+	return ret;
+}
+EXPORT_SYMBOL(icnss_set_bmps);
+
 int icnss_prevent_l1(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);

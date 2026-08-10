@@ -360,6 +360,9 @@ struct icnss_stats {
 	u32 exit_power_save_req;
 	u32 exit_power_save_resp;
 	u32 exit_power_save_err;
+	u32 set_bmps_req;
+	u32 set_bmps_resp;
+	u32 set_bmps_err;
 	u32 enter_power_save_req;
 	u32 enter_power_save_resp;
 	u32 enter_power_save_err;
