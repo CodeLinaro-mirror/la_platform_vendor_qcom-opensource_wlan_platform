@@ -1002,6 +1002,13 @@ int cnss_wlan_enable(struct device *dev,
 		goto out;
 
 skip_cfg:
+	plat_priv->driver_mode = mode;
+	if (mode == CNSS_MISSION) {
+		plat_priv->wlan_on_time_usec = cnss_get_monotonic_boottime_us();
+		cnss_pr_dbg("Marked wlan_on_time_usec: %llu\n",
+			    plat_priv->wlan_on_time_usec);
+	}
+
 	ret = cnss_wlfw_wlan_mode_send_sync(plat_priv, mode);
 out:
 	return ret;
@@ -1027,6 +1034,15 @@ int cnss_wlan_disable(struct device *dev, enum cnss_driver_mode mode)
 
 	if (test_bit(QMI_BYPASS, &plat_priv->ctrl_params.quirks))
 		return 0;
+
+	if (plat_priv->driver_mode == CNSS_MISSION) {
+		plat_priv->wlan_off_time_usec = cnss_get_monotonic_boottime_us();
+		cnss_pr_dbg("Marked wlan_off_time_usec: %llu\n",
+			    plat_priv->wlan_off_time_usec);
+	} else {
+		cnss_pr_dbg("Skip wlan_off_time_usec marking, driver_mode: %d\n",
+			    plat_priv->driver_mode);
+	}
 
 	ret = cnss_wlfw_wlan_mode_send_sync(plat_priv, CNSS_OFF);
 	cnss_bus_free_qdss_mem(plat_priv);

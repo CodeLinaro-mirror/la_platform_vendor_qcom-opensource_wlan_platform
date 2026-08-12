@@ -2202,6 +2202,15 @@ int cnss_wlfw_wlan_mode_send_sync(struct cnss_plat_data *plat_priv,
 	req->hw_debug_valid = 1;
 	req->hw_debug = 0;
 
+	if (mode == CNSS_MISSION) {
+		req->wlan_on_time_usec_valid = 1;
+		req->wlan_on_time_usec = plat_priv->wlan_on_time_usec;
+		req->wlan_off_time_usec_valid = 1;
+		req->wlan_off_time_usec = plat_priv->wlan_off_time_usec;
+		cnss_pr_dbg("Populated wlan_on_time_usec: %llu, wlan_off_time_usec: %llu\n",
+			    req->wlan_on_time_usec, req->wlan_off_time_usec);
+	}
+
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
 			   wlfw_wlan_mode_resp_msg_v01_ei, resp);
 	if (ret < 0) {
