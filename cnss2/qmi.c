@@ -889,7 +889,7 @@ static int cnss_get_bdf_file_name(struct cnss_plat_data *plat_priv,
 	switch (bdf_type) {
 	case CNSS_BDF_ELF:
 		if (plat_priv->bdfname_dt[0] != 0) {
-			snprintf(filename_tmp, filename_len,
+			snprintf(filename_tmp, filename_len, "%s",
 				 plat_priv->bdfname_dt);
 			cnss_pr_dbg("filename_tmp:%s len:%d\n",
 				    filename_tmp, filename_len);
