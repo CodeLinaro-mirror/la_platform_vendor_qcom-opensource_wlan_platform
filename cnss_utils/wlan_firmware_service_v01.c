@@ -4,6 +4,7 @@
 
 #include "wlan_firmware_service_v01.h"
 #include <linux/module.h>
+#include <linux/of.h>
 
 static struct qmi_elem_info wlfw_ce_tgt_pipe_cfg_s_v01_ei[] = {
 	{
@@ -8480,5 +8481,37 @@ struct qmi_elem_info wlfw_request_mem_free_ind_msg_v01_ei[] = {
 };
 EXPORT_SYMBOL(wlfw_request_mem_free_ind_msg_v01_ei);
 
+/**
+ * wlfw_is_valid_dt_node_found - Check if valid device tree node present
+ *
+ * Valid device tree node means a node with "qcom,wlan" property present and
+ * "status" property not disabled.
+ *
+ * Return: true if valid device tree node found, false if not found
+ */
+static bool wlfw_is_valid_dt_node_found(void)
+{
+	struct device_node *dn = NULL;
+
+	for_each_node_with_property(dn, "qcom,wlan") {
+		if (of_device_is_available(dn))
+			break;
+	}
+
+	if (dn)
+		return true;
+
+	return false;
+}
+
+static int __init wlfw_init(void)
+{
+	if (!wlfw_is_valid_dt_node_found())
+		return -ENODEV;
+
+	return 0;
+}
+
+module_init(wlfw_init);
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("WLAN FW QMI service");
