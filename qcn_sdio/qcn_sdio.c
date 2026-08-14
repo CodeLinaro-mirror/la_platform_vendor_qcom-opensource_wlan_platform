@@ -736,7 +736,7 @@ void qcn_sw_mode_reset(void)
 EXPORT_SYMBOL(qcn_sw_mode_reset);
 
 
-int qcn_sw_mode_change(enum qcn_sdio_sw_mode mode)
+static int qcn_sw_mode_change(enum qcn_sdio_sw_mode mode)
 {
 	struct qcn_sdio_client_info *cinfo = NULL;
 
