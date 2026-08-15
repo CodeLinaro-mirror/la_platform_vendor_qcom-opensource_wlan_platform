@@ -454,6 +454,7 @@ enum cnss_debug_quirks {
 	FORCE_ONE_MSI,
 	PREVENT_PCI_LINK_RESUME,
 	CNSS_INTERNAL_RESUME,
+	DISABLE_CALDB_RDDM_REUSE,
 	QUIRK_MAX_VALUE
 };
 
@@ -462,6 +463,13 @@ enum cnss_bdf_type {
 	CNSS_BDF_ELF,
 	CNSS_BDF_REGDB = 4,
 	CNSS_BDF_HDS = 6,
+};
+
+/* board_id source, controlled by qcom,board-id-src DT. */
+enum cnss_board_id_src {
+	CNSS_BOARD_ID_SRC_FW       = 0,
+	CNSS_BOARD_ID_SRC_PCIE_MAP = 1,
+	CNSS_BOARD_ID_SRC_MAX,
 };
 
 enum cnss_cal_status {
@@ -800,6 +808,7 @@ struct cnss_plat_data {
 	bool pm_suspend_in_progress;
 	struct notifier_block pm_notifier;
 	char bdfname_dt[MAX_FIRMWARE_NAME_LEN];
+	enum cnss_board_id_src board_id_src;
 	struct cnss_xo_trim_config xo_trim_conf;
 	struct cnss_xdump_helper xdump_helper;
 	int direct_cx_data_pin_mode;
@@ -862,6 +871,7 @@ struct cnss_plat_data *cnss_get_plat_env(int index);
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv);
 void cnss_get_sleep_clk_supported(struct cnss_plat_data *plat_priv);
 void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv);
+void cnss_get_caldb_rddm_reuse_info(struct cnss_plat_data *plat_priv);
 bool cnss_is_dual_wlan_enabled(void);
 int cnss_driver_event_post(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_event_type type,

@@ -6171,6 +6171,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 	struct resource *res;
 	u32 addr_win[2];
 	struct device_node *of_node = dev->of_node;
+	struct device_node *iommu_group_node = NULL;
 
 	ret = of_property_read_u32_array(of_node,
 					 "qcom,iommu-dma-addr-pool",
@@ -6178,13 +6179,15 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 					 ARRAY_SIZE(addr_win));
 
 	if (ret) {
-		of_node = of_parse_phandle(dev->of_node,
-					   "qcom,iommu-group", 0);
-		if (of_node)
+		iommu_group_node = of_parse_phandle(dev->of_node,
+						    "qcom,iommu-group", 0);
+		if (iommu_group_node) {
+			of_node = iommu_group_node;
 			ret = of_property_read_u32_array(of_node,
 							 "qcom,iommu-dma-addr-pool",
 							 addr_win,
 							 ARRAY_SIZE(addr_win));
+		}
 	}
 
 	if (ret)
@@ -6202,8 +6205,10 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		priv->iommu_domain =
 			iommu_get_domain_for_dev(&pdev->dev);
 
-		if (!priv->iommu_domain)
+		if (!priv->iommu_domain) {
+			of_node_put(iommu_group_node);
 			return -EPROBE_DEFER;
+		}
 
 		ret = of_property_read_string(of_node, "qcom,iommu-dma",
 					      &iommu_dma_type);
@@ -6235,8 +6240,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		}
 	}
 
-	if (of_node != dev->of_node)
-		of_node_put(of_node);
+	of_node_put(iommu_group_node);
 
 	return 0;
 }
@@ -6518,7 +6522,7 @@ icnss_get_cpumask_for_wlan_txrx_intr(struct icnss_priv *priv)
 					 "wlan-txrx-intr-cpumask",
 					 cpumask, CPUMASK_ARRAY_SIZE);
 	if (ret) {
-		icnss_pr_err("Failed to get cpumask for wlan txrx interrupts");
+		icnss_pr_dbg("irq affinity not defined in DT, applying default affinity");
 		return;
 	}
 
@@ -6568,6 +6572,7 @@ static void icnss_direct_link_remove(struct platform_device *pdev)
 static int icnss_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	int bt_en_gpio, bt_en_gpio_val;
 	const char *device_name;
 	struct device *dev = &pdev->dev;
 	struct icnss_priv *priv;
@@ -6620,6 +6625,19 @@ static int icnss_probe(struct platform_device *pdev)
 	ret = icnss_resource_parse(priv);
 	if (ret)
 		goto out_reset_drvdata;
+
+	if (priv->device_id == WCN7750_DEVICE_ID &&
+	    gpio_is_valid(priv->pinctrl_info.bt_en_gpio)) {
+		bt_en_gpio = priv->pinctrl_info.bt_en_gpio;
+		bt_en_gpio_val = gpio_get_value(bt_en_gpio);
+		ret = gpio_direction_output(bt_en_gpio, 0);
+		icnss_pr_info("BT_EN GPIO(%d) before: %d after: %d\n",
+			     bt_en_gpio, bt_en_gpio_val, gpio_get_value(bt_en_gpio));
+		if (ret)
+			icnss_pr_err("Failed to reset BT_EN GPIO(%d), err = %d\n",
+				     bt_en_gpio, ret);
+		ret = 0;
+	}
 
 	ret = icnss_msa_dt_parse(priv);
 	if (ret)

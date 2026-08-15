@@ -130,20 +130,23 @@ static struct cnss_pool cnss_pools_default[] = {
 	{256 * 1024, 2, "cnss-pool-256k", NULL, NULL, NULL},
 };
 
+#ifdef CONFIG_CNSS2_DEBUG
+
 static struct cnss_pool cnss_pools_adrastea[] = {
 	{16 * 1024, 8, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 8, "cnss-pool-32k", NULL, NULL, NULL},
 	{64 * 1024, 3, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 1, "cnss-pool-128k", NULL, NULL, NULL},
 };
 
 static struct cnss_pool cnss_pools_wcn6750[] = {
-	{16 * 1024, 8, "cnss-pool-16k", NULL, NULL, NULL},
+	{16 * 1024, 10, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 11, "cnss-pool-32k", NULL, NULL, NULL},
-	{64 * 1024, 15, "cnss-pool-64k", NULL, NULL, NULL},
-	{128 * 1024, 4, "cnss-pool-128k", NULL, NULL, NULL},
+	{64 * 1024, 31, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 8, "cnss-pool-128k", NULL, NULL, NULL},
+	{256 * 1024, 1, "cnss-pool-256k", NULL, NULL, NULL},
 };
 
-#ifdef CONFIG_CNSS2_DEBUG
 static struct cnss_pool cnss_pools_wcn6450[] = {
 	{16 * 1024, 24, "cnss-pool-16k", NULL, NULL, NULL},
 	{32 * 1024, 14, "cnss-pool-32k", NULL, NULL, NULL},
@@ -190,6 +193,20 @@ static struct cnss_pool cnss_pools_wcn8750[] = {
 	{256 * 1024, 2, "cnss-pool-256k", NULL, NULL, NULL},
 };
 #else
+
+static struct cnss_pool cnss_pools_adrastea[] = {
+	{16 * 1024, 8, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 8, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 4, "cnss-pool-64k", NULL, NULL, NULL},
+};
+
+static struct cnss_pool cnss_pools_wcn6750[] = {
+	{16 * 1024, 10, "cnss-pool-16k", NULL, NULL, NULL},
+	{32 * 1024, 10, "cnss-pool-32k", NULL, NULL, NULL},
+	{64 * 1024, 6, "cnss-pool-64k", NULL, NULL, NULL},
+	{128 * 1024, 4, "cnss-pool-128k", NULL, NULL, NULL},
+	{256 * 1024, 1, "cnss-pool-256k", NULL, NULL, NULL},
+};
 
 static struct cnss_pool cnss_pools_wcn6450[] = {
 	{16 * 1024, 14, "cnss-pool-16k", NULL, NULL, NULL},
