@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/module.h>
@@ -192,6 +192,13 @@ static int cnss_wlfw_ind_register_send_sync(struct cnss_plat_data *plat_priv)
 	req->wfc_call_twt_config_enable = 1;
 	req->async_data_enable_valid = 1;
 	req->async_data_enable = 1;
+
+	/* Enable only when XO trim related resources are valid */
+	if (!IS_ERR_OR_NULL(plat_priv->xo_trim_conf.xo_calib_reg) &&
+	    !IS_ERR_OR_NULL(plat_priv->xo_trim_conf.wcal_pbs)) {
+		req->xo_trim_enable_valid = 1;
+		req->xo_trim_enable = 1;
+	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
 			   wlfw_ind_register_resp_msg_v01_ei, resp);
@@ -708,8 +715,13 @@ static int cnss_get_bdf_file_name(struct cnss_plat_data *plat_priv,
 
 	switch (bdf_type) {
 	case CNSS_BDF_ELF:
+		if (plat_priv->bdfname_dt[0] != 0) {
+			snprintf(filename_tmp, filename_len,
+				plat_priv->bdfname_dt);
+			cnss_pr_dbg("filename_tmp:%s len:%d\n",
+				    filename_tmp, filename_len);
 		/* Board ID will be equal or less than 0xFF in GF mask case */
-		if (plat_priv->board_info.board_id == 0xFF) {
+		} else if (plat_priv->board_info.board_id == 0xFF) {
 			if (plat_priv->chip_info.chip_id & CHIP_ID_GF_MASK)
 				snprintf(filename_tmp, filename_len,
 					 ELF_BDF_FILE_NAME_GF);
@@ -733,7 +745,13 @@ static int cnss_get_bdf_file_name(struct cnss_plat_data *plat_priv,
 		}
 		break;
 	case CNSS_BDF_BIN:
-		if (plat_priv->board_info.board_id == 0xFF) {
+		if (plat_priv->bdfname_dt[0] != 0) {
+			snprintf(filename_tmp, filename_len,
+				plat_priv->bdfname_dt);
+			cnss_pr_dbg("filename_tmp:%s len:%d\n",
+				    filename_tmp, filename_len);
+		/* Board ID will be equal or less than 0xFF in GF mask case */
+		} else if (plat_priv->board_info.board_id == 0xFF) {
 			if (plat_priv->chip_info.chip_id & CHIP_ID_GF_MASK)
 				snprintf(filename_tmp, filename_len,
 					 BIN_BDF_FILE_NAME_GF);
@@ -1664,6 +1682,82 @@ int wlfw_qdss_trace_stop(struct cnss_plat_data *plat_priv, unsigned long long op
 {
 	return wlfw_send_qdss_trace_mode_req(plat_priv, QMI_WLFW_QDSS_TRACE_OFF_V01,
 					     option);
+}
+
+
+/**
+ * cnss_wlfw_misc_req_send_sync() - Send QMI_WLFW_MISC_REQ with provided type
+ * @plat_priv: CNSS platform data
+ * @type: subtype for QMI_WLFW_MISC_REQ
+ *
+ * Return: 0 for success, negative values otherwise
+ */
+static int cnss_wlfw_misc_req_send_sync(struct cnss_plat_data *plat_priv,
+					enum wlfw_misc_req_enum_v01 type)
+{
+	int ret = 0;
+	struct wlfw_misc_req_msg_v01 *req;
+	struct wlfw_misc_resp_msg_v01 *resp;
+	struct qmi_txn txn;
+
+	if (type <= WLFW_MISC_REQ_ENUM_MIN_VAL_V01 ||
+	    type >= WLFW_MISC_REQ_ENUM_MAX_VAL_V01) {
+		cnss_pr_err("Invalid type[%d] for MISC_REQ\n", type);
+		return -EINVAL;
+	}
+
+	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	if (!req) {
+		cnss_pr_err("Failed to allocate req for MISC_REQ[%d]\n", type);
+		return -ENOMEM;
+	}
+
+	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
+	if (!resp) {
+		cnss_pr_err("Failed to allocate resp for MISC_REQ[%d]\n", type);
+		kfree(req);
+		return -ENOMEM;
+	}
+
+	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
+			   wlfw_misc_resp_msg_v01_ei, resp);
+
+	if (ret < 0) {
+		cnss_pr_err("Fail to init txn for MISC_REQ[%d]: %d\n",
+			    type, ret);
+		goto end;
+	}
+
+	req->type = type;
+	ret = qmi_send_request(&plat_priv->qmi_wlfw, NULL, &txn,
+			       QMI_WLFW_MISC_REQ_V01,
+			       WLFW_MISC_REQ_MSG_V01_MAX_MSG_LEN,
+			       wlfw_misc_req_msg_v01_ei, req);
+	if (ret < 0) {
+		qmi_txn_cancel(&txn);
+		cnss_pr_err("Fail to send MISC_REQ[%d]: %d\n", type, ret);
+		goto end;
+	}
+
+	ret = qmi_txn_wait(&txn, plat_priv->ctrl_params.qmi_timeout);
+	if (ret < 0) {
+		cnss_pr_err("Failed to wait for resp of MISC_REQ[%d]: %d\n",
+			    type, ret);
+		goto end;
+	} else if (resp->resp.result != QMI_RESULT_SUCCESS_V01) {
+		cnss_pr_err("MISC_REQ[%d] failed, result:%d error:%d\n",
+			    type, resp->resp.result, resp->resp.error);
+		ret = -resp->resp.result;
+		goto end;
+	} else {
+		cnss_pr_dbg("Sent MISC_REQ[%d] successfully\n", type);
+		ret = 0;
+	}
+
+end:
+	kfree(req);
+	kfree(resp);
+	return ret;
 }
 
 int cnss_wlfw_wlan_mode_send_sync(struct cnss_plat_data *plat_priv,
@@ -2708,19 +2802,7 @@ int cnss_wlfw_get_info_send_sync(struct cnss_plat_data *plat_priv, int type,
 		goto out;
 	}
 
-	ret = qmi_txn_wait(&txn, QMI_WLFW_TIMEOUT_JF);
-	if (ret < 0) {
-		cnss_pr_err("Failed to wait for response of get info request, err: %d\n",
-			    ret);
-		goto out;
-	}
-
-	if (resp->resp.result != QMI_RESULT_SUCCESS_V01) {
-		cnss_pr_err("Get info request failed, result: %d, err: %d\n",
-			    resp->resp.result, resp->resp.error);
-		ret = -resp->resp.result;
-		goto out;
-	}
+	qmi_txn_cancel(&txn);
 
 	kfree(req);
 	kfree(resp);
@@ -2736,6 +2818,42 @@ unsigned int cnss_get_qmi_timeout(struct cnss_plat_data *plat_priv)
 {
 	return QMI_WLFW_TIMEOUT_MS;
 }
+
+#if IS_ENABLED(CONFIG_MEM_ALLOC_FALLBACK)
+static void
+cnss_fw_mem_free_check(struct  cnss_plat_data *plat_priv,
+		       const struct wlfw_request_mem_ind_msg_v01 *ind_msg)
+{
+	int i = 0;
+
+	if (plat_priv->device_id != QCA6490_DEVICE_ID)
+		return;
+
+	cnss_pr_dbg("old len %d new len %d", plat_priv->fw_mem_seg_len,
+		    ind_msg->mem_seg_len);
+
+	if (ind_msg->mem_seg_len > plat_priv->fw_mem_seg_len)
+		goto update_para;
+
+	/* free the old unused fw_mem entry */
+	for (i = ind_msg->mem_seg_len; i < plat_priv->fw_mem_seg_len; i++)
+		cnss_bus_free_fw_mem(plat_priv, i);
+
+update_para:
+	for (i = 0; i < plat_priv->fw_mem_seg_len; i++) {
+		if (plat_priv->fw_mem[i].size != 0 &&
+		    ind_msg->mem_seg[i].size != plat_priv->fw_mem[i].size)
+			/* since len is different, need re-alloc later */
+			cnss_bus_free_fw_mem(plat_priv, i);
+	}
+}
+#else
+static void
+cnss_fw_mem_free_check(struct cnss_plat_data *plat_priv,
+		       const struct wlfw_request_mem_ind_msg_v01 *ind_msg)
+{
+}
+#endif
 
 static void cnss_wlfw_request_mem_ind_cb(struct qmi_handle *qmi_wlfw,
 					 struct sockaddr_qrtr *sq,
@@ -2758,8 +2876,9 @@ static void cnss_wlfw_request_mem_ind_cb(struct qmi_handle *qmi_wlfw,
 		return;
 	}
 
-	plat_priv->fw_mem_seg_len = ind_msg->mem_seg_len;
-	for (i = 0; i < plat_priv->fw_mem_seg_len; i++) {
+	cnss_fw_mem_free_check(plat_priv, ind_msg);
+
+	for (i = 0; i < ind_msg->mem_seg_len; i++) {
 		cnss_pr_dbg("FW requests for memory, size: 0x%x, type: %u\n",
 			    ind_msg->mem_seg[i].size, ind_msg->mem_seg[i].type);
 		plat_priv->fw_mem[i].type = ind_msg->mem_seg[i].type;
@@ -2771,6 +2890,7 @@ static void cnss_wlfw_request_mem_ind_cb(struct qmi_handle *qmi_wlfw,
 		if (plat_priv->fw_mem[i].type == CNSS_MEM_CAL_V01)
 			plat_priv->cal_mem = &plat_priv->fw_mem[i];
 	}
+	plat_priv->fw_mem_seg_len = ind_msg->mem_seg_len;
 
 	cnss_driver_event_post(plat_priv, CNSS_DRIVER_EVENT_REQUEST_MEM,
 			       0, NULL);
@@ -3137,6 +3257,34 @@ static void cnss_wlfw_driver_async_data_ind_cb(struct qmi_handle *qmi_wlfw,
 			(void *)ind_msg->data, ind_msg->data_len);
 }
 
+static void cnss_wlfw_xo_trim_ind_cb(struct qmi_handle *qmi_wlfw,
+				     struct sockaddr_qrtr *sq,
+				     struct qmi_txn *txn,
+				     const void *data)
+{
+	struct cnss_plat_data *plat_priv =
+		container_of(qmi_wlfw, struct cnss_plat_data, qmi_wlfw);
+	const struct wlfw_xo_trim_ind_msg_v01 *ind_msg = data;
+	u8 *trim_value;
+
+	if (!txn) {
+		cnss_pr_err("Spurious XO_TRIM indication\n");
+		return;
+	}
+
+	cnss_pr_dbg("Received XO_TRIM with trim val: %d\n", ind_msg->trim_val);
+	trim_value = kzalloc(sizeof(*trim_value), GFP_KERNEL);
+	if (!trim_value) {
+		cnss_pr_err("Failed to allocate memory\n");
+		goto out;
+	}
+
+	*trim_value = ind_msg->trim_val;
+
+out:
+	cnss_driver_event_post(plat_priv, CNSS_DRIVER_EVENT_XO_TRIM_IND,
+			       0, trim_value);
+}
 
 static int cnss_ims_wfc_call_twt_cfg_send_sync
 	(struct cnss_plat_data *plat_priv,
@@ -3356,6 +3504,14 @@ static struct qmi_msg_handler qmi_wlfw_msg_handlers[] = {
 		.decoded_size =
 		sizeof(struct wlfw_driver_async_data_ind_msg_v01),
 		.fn = cnss_wlfw_driver_async_data_ind_cb
+	},
+	{
+		.type = QMI_INDICATION,
+		.msg_id = QMI_WLFW_XO_TRIM_IND_V01,
+		.ei = wlfw_xo_trim_ind_msg_v01_ei,
+		.decoded_size =
+		sizeof(struct wlfw_xo_trim_ind_msg_v01),
+		.fn = cnss_wlfw_xo_trim_ind_cb
 	},
 	{}
 };
@@ -3862,6 +4018,23 @@ out:
 	kfree(resp);
 	kfree(req);
 	return ret;
+}
+
+/**
+ * cnss_wlfw_xo_trim_result_send_sync - Notify the XO trim result to target.
+ * @plat_priv: Pointer to platform driver context.
+ * @result: XO trim result.
+ *
+ * Return: 0 on success, errno othrewise
+ */
+int cnss_wlfw_xo_trim_result_send_sync(struct cnss_plat_data *plat_priv,
+				       int result)
+{
+	enum wlfw_misc_req_enum_v01 type = (result ?
+					    WLFW_REQ_XO_TRIM_FAIL_V01 :
+					    WLFW_REQ_XO_TRIM_SUCCESS_V01);
+
+	return cnss_wlfw_misc_req_send_sync(plat_priv, type);
 }
 
 int cnss_send_subsys_restart_level_msg(struct cnss_plat_data *plat_priv)

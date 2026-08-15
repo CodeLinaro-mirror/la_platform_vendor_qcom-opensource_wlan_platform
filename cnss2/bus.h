@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _CNSS_BUS_H
@@ -30,6 +30,7 @@ int cnss_bus_load_m3(struct cnss_plat_data *plat_priv);
 int cnss_bus_load_aux(struct cnss_plat_data *plat_priv);
 int cnss_bus_handle_dev_sol_irq(struct cnss_plat_data *plat_priv);
 int cnss_bus_alloc_fw_mem(struct cnss_plat_data *plat_priv);
+void cnss_bus_free_fw_mem(struct cnss_plat_data *plat_priv, int k);
 int cnss_bus_alloc_qdss_mem(struct cnss_plat_data *plat_priv);
 void cnss_bus_free_qdss_mem(struct cnss_plat_data *plat_priv);
 u32 cnss_bus_get_wake_irq(struct cnss_plat_data *plat_priv);
@@ -58,6 +59,7 @@ int cnss_bus_is_device_down(struct cnss_plat_data *plat_priv);
 int cnss_bus_shutdown_cleanup(struct cnss_plat_data *plat_priv);
 int cnss_bus_check_link_status(struct cnss_plat_data *plat_priv);
 int cnss_bus_recover_link_down(struct cnss_plat_data *plat_priv);
+int cnss_bus_recover_link_post_sol(struct cnss_plat_data *plat_priv);
 int cnss_bus_debug_reg_read(struct cnss_plat_data *plat_priv, u32 offset,
 			    u32 *val, bool raw_access);
 int cnss_bus_debug_reg_write(struct cnss_plat_data *plat_priv, u32 offset,
