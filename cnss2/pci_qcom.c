@@ -416,19 +416,120 @@ static int cnss_set_pci_link_status(struct cnss_pci_data *pci_priv,
 	return ret;
 }
 
+#define CNSS_PCI_SUSPEND_RETRY_MAX 20
+static inline
+int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up)
+{
+	int ret = -EINVAL, retry = 0;
+	struct device *dev, *host_bridge_dev;
+	struct pci_dev *root_port;
+	bool current_ignore_children;
+
+	root_port = pcie_find_root_port(pdev);
+	if (!root_port) {
+		cnss_pr_err("PCIe root port is null\n");
+		return ret;
+	}
+
+	host_bridge_dev = root_port->dev.parent;
+	if (!host_bridge_dev) {
+		cnss_pr_err("host_bridge_dev is null\n");
+		return ret;
+	}
+
+	dev = host_bridge_dev->parent;
+	if (!dev) {
+		cnss_pr_err("PCIe platform device is null\n");
+		return ret;
+	}
+	current_ignore_children = dev->power.ignore_children;
+
+	cnss_pr_info("PCIe PM Enter: usage_count:%d, runtime_status:%d\n",
+		     atomic_read(&dev->power.usage_count),
+		     dev->power.runtime_status);
+
+	if (link_up) {
+		pm_suspend_ignore_children(dev, false);
+		ret = pm_runtime_get_sync(dev);
+		cnss_pr_info("PCIe resume: ret:%d, usage_count:%d, runtime_status:%d\n",
+			     ret, atomic_read(&dev->power.usage_count),
+			     dev->power.runtime_status);
+
+		if (ret) {
+			/* the return value 1 from the pm_runtime_get_sync() means that
+			 * the PCIe link has already been resumed before set resume.
+			 */
+			if (ret == 1) {
+				cnss_pr_info("PCIe link has already been resumed\n");
+			} else {
+				/* restore the usage_count if the runtime resume fail. */
+				pm_runtime_put_noidle(dev);
+				cnss_pr_info("Failed to resume PCIe link\n");
+			}
+		} else {
+			cnss_pr_info("Resume PCIe link successfully\n");
+		}
+	} else {
+		pm_suspend_ignore_children(dev, true);
+		ret = pm_runtime_put_sync(dev);
+		cnss_pr_info("PCIe suspend: ret:%d, usage_count:%d, runtime_status:%d\n",
+			     ret, atomic_read(&dev->power.usage_count),
+			     dev->power.runtime_status);
+
+		if (ret) {
+			/* restore the usage_count if the runtime suspend fail. */
+			pm_runtime_get_noresume(dev);
+			cnss_pr_info("Failed to suspend PCIe link\n");
+		} else {
+			while (retry < CNSS_PCI_SUSPEND_RETRY_MAX &&
+				dev->power.runtime_status != RPM_SUSPENDED) {
+				retry++;
+				msleep(100);
+			}
+			if (retry == CNSS_PCI_SUSPEND_RETRY_MAX) {
+				/* restore the usage_count after max retry runtime suspend. */
+				pm_runtime_get_noresume(dev);
+				cnss_pr_info("Failed to suspend PCI link after max retry\n");
+				ret = -EINVAL;
+			} else {
+				cnss_pr_info("Suspend PCIe link successfully\n");
+			}
+		}
+	}
+
+	/* restore the ignore_children flag */
+	pm_suspend_ignore_children(dev, current_ignore_children);
+
+	cnss_pr_info("PCIe PM Exit: usage_count:%d, runtime_status:%d\n",
+		     atomic_read(&dev->power.usage_count),
+		     dev->power.runtime_status);
+
+	return ret;
+}
+
 int cnss_set_pci_link(struct cnss_pci_data *pci_priv, bool link_up)
 {
 	int ret = 0, retry = 0;
 	struct cnss_plat_data *plat_priv;
 	int sw_ctrl_gpio;
 
+	if (!pci_priv) {
+		cnss_pr_err("pci_priv is NULL\n");
+		return -ENODEV;
+	}
+
 	plat_priv = pci_priv->plat_priv;
 	sw_ctrl_gpio = plat_priv->pinctrl_info.sw_ctrl_gpio;
 
 	cnss_pr_vdbg("%s PCI link\n", link_up ? "Resuming" : "Suspending");
 
-	if (plat_priv && plat_priv->is_fw_managed_pwr)
+	if (plat_priv && plat_priv->is_fw_managed_pwr) {
+		if (pci_priv->pci_link_down_ind) {
+			ret = cnss_rc_rtpm_mgmt_wrapper(pci_priv->pci_dev, link_up);
+			cnss_pr_info("cnss_rc_rtpm_mgmt_wrapper, ret = %d\n", ret);
+		}
 		return ret;
+	}
 
 	if (link_up) {
 retry:
@@ -820,6 +921,28 @@ struct cnss_sw_reset_reg_params reset_reg_params = {
 	.mhictrl_reset_mask = 0x2,
 };
 
+/* There's no ltssm or int clear regs in qcn7605 */
+struct cnss_sw_reset_reg_params qcn7605_reset_reg_params = {
+	.pcie_txvecdb = 0x360,
+	.pcie_txvecstatus = 0x368,
+	.pcie_rxvecdb = 0x394,
+	.pcie_rxvecstatus = 0x39c,
+	.wlaon_qfprom_pwr_ctrl_reg = 0x01f8031c,
+	.qfprom_pwr_ctrl_vdd4blow_mask = 0x4,
+	.wlaon_warm_sw_entry = 0x1f80504,
+	.wlaon_soc_reset_cause_reg = 0x01f8060c,
+	.pcie_q6_cookie_addr = 0x01f80500,
+	.pcie_soc_global_reset = 0x3008,
+	.pcie_soc_global_reset_v = 0x1,
+	.mhistatus = 0x48,
+	.mhictrl = 0x38,
+	.mhictrl_reset_mask = 0x2,
+};
+
+#define QCN7605_FORCE_WAKE 0x32060
+#define QCN7605_FORCE_WAKE_V_MASK 0x1
+#define QCN7605_FORCE_WAKE_RESET 0x0
+
 void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv)
 {
 	if (!cnss_is_fw_managed_pwr(pci_priv))
@@ -830,6 +953,9 @@ void cnss_init_sw_reset_params(struct cnss_pci_data *pci_priv)
 	case QCA6490_DEVICE_ID:
 	case KIWI_DEVICE_ID:
 		pci_priv->reset_regs = &reset_reg_params;
+		break;
+	case QCN7605_DEVICE_ID:
+		pci_priv->reset_regs = &qcn7605_reset_reg_params;
 		break;
 	default:
 		cnss_pr_err("Not support get device 0x%x reset reg params",
@@ -1015,6 +1141,19 @@ static void cnss_pci_soc_global_reset(struct cnss_pci_data *pci_priv)
 	unsigned int val;
 	int ret = 0;
 	unsigned int soc_global_reset, soc_global_reset_v;
+	bool is_qcn7605 = pci_priv->pci_dev->device == QCN7605_DEVICE_ID;
+
+	/* Explicit wake before poking SOC_GLOBAL_RESET.
+	 * without it the target may scribble over host memory.
+	 */
+	if (is_qcn7605) {
+		ret = cnss_pci_reg_write(pci_priv, QCN7605_FORCE_WAKE,
+					  QCN7605_FORCE_WAKE_V_MASK);
+		if (ret) {
+			cnss_pr_err("Failed to write force wake, err %d\n", ret);
+			return;
+		}
+	}
 
 	soc_global_reset = pci_priv->reset_regs->pcie_soc_global_reset;
 	soc_global_reset_v = pci_priv->reset_regs->pcie_soc_global_reset_v;
@@ -1047,6 +1186,10 @@ static void cnss_pci_soc_global_reset(struct cnss_pci_data *pci_priv)
 		cnss_pr_err("link down error during global reset\n");
 
 	cnss_pr_dbg("soc_global_reset final val 0x%x\n", val);
+
+	if (is_qcn7605)
+		cnss_pci_reg_write(pci_priv, QCN7605_FORCE_WAKE,
+				    QCN7605_FORCE_WAKE_RESET);
 }
 
 static void cnss_mhi_set_mhictrl_reset(struct cnss_pci_data *pci_priv)
@@ -1083,8 +1226,10 @@ void cnss_pci_sw_reset(struct cnss_pci_data *pci_priv, bool power_on)
 	}
 
 	if (power_on) {
-		cnss_pci_enable_ltssm(pci_priv);
-		cnss_pci_clear_all_intrs(pci_priv);
+		if (pci_priv->pci_dev->device != QCN7605_DEVICE_ID) {
+			cnss_pci_enable_ltssm(pci_priv);
+			cnss_pci_clear_all_intrs(pci_priv);
+		}
 		cnss_pci_reset_wlaon_pwr_ctrl(pci_priv);
 	}
 

@@ -564,6 +564,9 @@ static const struct mhi_controller_config cnss_mhi_config_default = {
 	.num_events = ARRAY_SIZE(cnss_mhi_events),
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
+#ifdef CONFIG_CNSS2_MHI_RDDM_TIMEOUT
+	.rddm_timeout_us = CONFIG_CNSS2_MHI_RDDM_TIMEOUT,
+#endif
 };
 
 static const struct mhi_controller_config cnss_mhi_config_genoa = {
@@ -592,6 +595,9 @@ static const struct mhi_controller_config cnss_mhi_config_no_satellite = {
 			CNSS_MHI_SATELLITE_EVT_COUNT,
 	.event_cfg = cnss_mhi_events,
 	.m2_no_db = true,
+#ifdef CONFIG_CNSS2_MHI_RDDM_TIMEOUT
+	.rddm_timeout_us = CONFIG_CNSS2_MHI_RDDM_TIMEOUT,
+#endif
 };
 
 static struct cnss_pci_reg ce_src[] = {
@@ -4243,6 +4249,24 @@ int cnss_pci_dev_shutdown(struct cnss_pci_data *pci_priv)
 	}
 
 	return ret;
+}
+
+bool cnss_pci_is_reboot_dev_shutdown_required(struct cnss_pci_data *pci_priv)
+{
+	if (!pci_priv)
+		return false;
+
+	switch (pci_priv->device_id) {
+	case QCA6390_DEVICE_ID:
+	case QCN7605_DEVICE_ID:
+	case QCA6490_DEVICE_ID:
+	case KIWI_DEVICE_ID:
+		if (test_bit(CNSS_MHI_POWER_ON, &pci_priv->mhi_state))
+			return true;
+		return false;
+	default:
+		return false;
+	}
 }
 
 int cnss_pci_dev_crash_shutdown(struct cnss_pci_data *pci_priv)
@@ -8918,6 +8942,35 @@ static const struct dev_pm_ops cnss_pm_ops = {
 			   cnss_pci_runtime_idle)
 };
 
+static pci_ers_result_t cnss_pci_error_detected(struct pci_dev *pci_dev,
+						pci_channel_state_t state)
+{
+	struct cnss_pci_data *pci_priv;
+
+	if (!pci_dev) {
+		cnss_pr_err("the pci_dev is NULL\n");
+		return PCI_ERS_RESULT_NONE;
+	}
+
+	cnss_pr_dbg("PCI error detected, state = %u\n", state);
+
+	pci_priv = cnss_get_pci_priv(pci_dev);
+	if (!pci_priv) {
+		cnss_pr_err("the cnss_pci_data is NULL\n");
+		return PCI_ERS_RESULT_NONE;
+	}
+
+	cnss_pr_dbg("handle PCI link down\n");
+	cnss_pci_handle_linkdown(pci_priv);
+
+	return PCI_ERS_RESULT_CAN_RECOVER;
+}
+
+
+static const struct pci_error_handlers cnss_pci_err_handler = {
+    .error_detected = cnss_pci_error_detected,
+};
+
 static struct pci_driver cnss_pci_driver = {
 	.name     = "cnss_pci",
 	.id_table = cnss_pci_id_table,
@@ -8926,6 +8979,7 @@ static struct pci_driver cnss_pci_driver = {
 	.driver = {
 		.pm = &cnss_pm_ops,
 	},
+	.err_handler = &cnss_pci_err_handler,
 };
 
 static int cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
