@@ -1205,7 +1205,7 @@ out:
  * cnss_select_pinctrl_enable - select WLAN_GPIO for Active pinctrl status
  * @plat_priv: Platform private data structure pointer
  *
- * For QCA6490, PMU requires minimum 100ms delay between BT_EN_GPIO off and
+ * For QCN7605/QCA6490, PMU requires minimum 100ms delay between BT_EN_GPIO off and
  * WLAN_EN_GPIO on. This is done to avoid power up issues.
  *
  * Return: Status of pinctrl select operation. 0 - Success.
@@ -1215,8 +1215,15 @@ static int cnss_select_pinctrl_enable(struct cnss_plat_data *plat_priv)
 	int ret = 0, bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
 	u8 wlan_en_state = 0;
 
-	if (bt_en_gpio < 0 || plat_priv->device_id != QCA6490_DEVICE_ID)
+	if (bt_en_gpio < 0)
 		goto set_wlan_en;
+	switch (plat_priv->device_id) {
+	case QCN7605_DEVICE_ID:
+	case QCA6490_DEVICE_ID:
+		break;
+	default:
+		goto set_wlan_en;
+	}
 
 	if (gpio_get_value(bt_en_gpio)) {
 		cnss_pr_dbg("BT_EN_GPIO State: On\n");
@@ -2317,7 +2324,8 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 		u32 lsvs;
 		u32 svsL1_v;
 	} plat_vreg_param[QMI_WLFW_PMU_PARAMS_MAX_V01] = {0};
-	int cx_pin_idx = 0;
+	int cx_pin_idx = -1;
+	int mx_pin_idx = -1;
 	static bool config_done;
 
 	if (config_done)
@@ -2366,6 +2374,8 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			pmu_pin = plat_priv->pmu_vreg_map[j];
 			if (strcmp(pmu_pin, "VDDD_WLCX_0P9") == 0)
 				cx_pin_idx = j;
+			if (strcmp(pmu_pin, "VDDD_WLMX_0P9") == 0)
+				mx_pin_idx = j;
 			if (strnstr(pmu_pin, fw_pmu_param_ext[i].pin_name,
 				    strlen(pmu_pin))) {
 				vreg = plat_priv->pmu_vreg_map[j + 1];
@@ -2463,7 +2473,8 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 
 	for (i = 0; i <= plat_vreg_param_len; i++) {
 		if (plat_vreg_param[i].wake_volt > 0) {
-			if (strcmp(plat_vreg_param[i].vreg,
+			if (cx_pin_idx >= 0 &&
+			    strcmp(plat_vreg_param[i].vreg,
 				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_NOM,
@@ -2478,22 +2489,36 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			}
 		}
 		if (plat_vreg_param[i].sleep_volt > 0) {
-			if (strcmp(plat_vreg_param[i].vreg,
+			if (cx_pin_idx >= 0 &&
+			    strcmp(plat_vreg_param[i].vreg,
 				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_RET_V,
 								 plat_vreg_param[i].sleep_volt);
 			} else {
+				u32 dwnval = plat_vreg_param[i].sleep_volt;
+
+				/* For regulator mapped to WLMX rail, set
+				 * sleep_volt equal to wake_volt to maintain
+				 * sufficient retention voltage for chip state
+				 * during DRV sleep.
+				 */
+				if (mx_pin_idx >= 0 &&
+				    strcmp(plat_vreg_param[i].vreg,
+					   plat_priv->pmu_vreg_map[mx_pin_idx + 1]) == 0)
+					dwnval = plat_vreg_param[i].wake_volt;
+
 				ret =
 				cnss_aop_set_vreg_param(plat_priv,
 							plat_vreg_param[i].vreg,
 							CNSS_VREG_VOLTAGE,
 							CNSS_TCS_DOWN_SEQ,
-							plat_vreg_param[i].sleep_volt);
+							dwnval);
 			}
 		}
 		if (plat_vreg_param[i].svs_v > 0) {
-			if (strcmp(plat_vreg_param[i].vreg,
+			if (cx_pin_idx >= 0 &&
+			    strcmp(plat_vreg_param[i].vreg,
 				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_SVS,
@@ -2501,7 +2526,8 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 			}
 		}
 		if (plat_vreg_param[i].svsL1_v > 0) {
-			if (strcmp(plat_vreg_param[i].vreg,
+			if (cx_pin_idx >= 0 &&
+			    strcmp(plat_vreg_param[i].vreg,
 				   plat_priv->pmu_vreg_map[cx_pin_idx + 1]) == 0) {
 				ret = cnss_set_cx_voltage_corner(plat_priv,
 								 CX_SVSL1,
