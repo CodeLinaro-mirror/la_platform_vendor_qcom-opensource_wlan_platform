@@ -10,8 +10,8 @@ _default_module_enablement_list = [
     "wlan_firmware_service",
 ]
 
-_cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "canoe", "hamoa", "hamoa_la", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art", "art16k", "sa510m", "sa510m.1g", "glymur"]
-_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "parrot", "sun", "canoe", "lahaina", "chora", "art", "art16k", "alor-le", "bengal", "malabar", "shikra", "pebble-le"]
+_cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "canoe", "hamoa", "hamoa_la", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art", "art16k", "sa510m", "sa510m.1g", "glymur", "waipio"]
+_icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "parrot", "sun", "canoe", "lahaina", "chora", "art", "art16k", "alor-le", "bengal", "malabar", "shikra", "pebble-le", "waipio"]
 
 def matching_la_variant(target_16k):
     for target in targets:
@@ -152,7 +152,7 @@ def _define_modules_for_target_variant(target, variant):
         else:
             deps += [ kernel_header ]
 
-        if target != "autogvm" and target != "x1e80100" and target != "sdxkova" and target != "art" and target != "art16k" and target != "sa510m" and target != "sa510m.1g":
+        if target != "autogvm" and target != "x1e80100" and target != "sdxkova" and target != "art" and target != "art16k" and target != "sa510m" and target != "sa510m.1g" and target != "waipio":
             deps += select({
                   "//build/qcom_build_extensions:qtisocrepo_true": [
                     "//vendor/qcom/opensource/securemsm-kernel:{}_smcinvoke_dlkm".format(tv),
