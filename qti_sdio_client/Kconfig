@@ -1,0 +1,22 @@
+config CNSS_OUT_OF_TREE
+	bool "Enable Out of Tree Usage"
+	help
+	  If enabled, CNSS platform driver modules would be able to access
+	  functions from the other modules in the platform driver.
+
+config SDIO_QCN
+	tristate "Qualcomm Technologies, Inc SDIO Function 1 Driver"
+	default n
+	help
+	  This module adds the support for SDIO based Wi-Fi devices with QCN7605
+	  chipsets. This module interfaces the diag, IPC router, Qsahara and
+	  WLAN driver with the external sdio based soc.
+
+config WCNSS_MEM_PRE_ALLOC
+	tristate "WCNSS pre-alloc memory support"
+	help
+	  Pre-allocate memory for the WLAN driver module.
+	  This feature enable cld wlan driver to use pre allocated memory
+	  for it's internal usage and release it to back to pre allocated pool.
+	  This memory is allocated at the cold boot time.
+

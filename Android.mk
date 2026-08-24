@@ -36,6 +36,12 @@ ifeq ($(ENABLE_ICNSS2), true)
 LOCAL_MODULE_KO_DIRS += icnss2/icnss2.ko
 endif
 
+ifeq ($(ENABLE_CNSS2_SDIO), true)
+LOCAL_MODULE_KO_DIRS += cnss2_sdio/cnss2_sdio.ko
+LOCAL_MODULE_KO_DIRS += qcn_sdio/qcn_sdio.ko
+LOCAL_MODULE_KO_DIRS += qti_sdio_client/qti_sdio_client.ko
+endif
+
 BOARD_COMMON_DIR ?= device/qcom/common
 DLKM_DIR := $(TOP)/$(BOARD_COMMON_DIR)/dlkm
 
