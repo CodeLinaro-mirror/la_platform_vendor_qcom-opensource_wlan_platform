@@ -6018,7 +6018,8 @@ static int icnss_smmu_fault_handler(struct iommu_domain *domain,
 }
 
 #if defined(CONFIG_CNSS2_SMMU_DB_SUPPORT) && \
-    (LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0))
+    ((LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0)) || \
+     (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)))
 #define PCIE_LOCAL_REG_APPS_TO_Q6	0x3224
 #define PCIE_LOCAL_REG_WCSS_IE_IRQ	0x3228
 
@@ -6080,7 +6081,8 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_EXIT);
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)) && \
+     (LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0))
 static void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 {
 	struct platform_device *pdev = priv->pdev;
@@ -6161,6 +6163,19 @@ static inline int icnss_dt_parse_iommu_address(struct device *dev, u32 *addr_win
 }
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static void icnss_set_smmu_fault_handler(struct icnss_priv *priv)
+{
+	qcom_iommu_set_fault_handler(priv->iommu_domain,
+				     icnss_smmu_fault_handler, priv);
+}
+#else
+static void icnss_set_smmu_fault_handler(struct icnss_priv *priv)
+{
+	iommu_set_fault_handler(priv->iommu_domain,
+				icnss_smmu_fault_handler, priv);
+}
+#endif
 
 static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 {
@@ -6217,9 +6232,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 			priv->smmu_s1_enable = true;
 			if (priv->device_id == WCN6750_DEVICE_ID ||
 			    priv->device_id == WCN6450_DEVICE_ID)
-				iommu_set_fault_handler(priv->iommu_domain,
-						icnss_smmu_fault_handler,
-						priv);
+				icnss_set_smmu_fault_handler(priv);
 			else if (priv->device_id == WCN7750_DEVICE_ID ||
 				 priv->device_id == WCN8750_DEVICE_ID)
 				icnss_register_iommu_fault_handler_irq(priv);

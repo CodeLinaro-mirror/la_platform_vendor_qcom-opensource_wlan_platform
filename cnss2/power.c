@@ -2106,7 +2106,7 @@ int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv)
 	cnss_pr_dbg("PDC init table length: %d\n",
 		    plat_priv->pdc_init_table_len);
 
-	cnss_aop_pdc_disable_cx(plat_priv);
+	ret = cnss_aop_pdc_disable_cx(plat_priv);
 	if (ret < 0) {
 		cnss_pr_err("Failed to disable PDC control of CX, err = %d\n",
 			    ret);
@@ -2566,6 +2566,23 @@ static void cnss_detect_m2_supply(struct cnss_plat_data *plat_priv)
 	}
 }
 
+/**
+ * cnss_detect_msix_support - Detect MSI-X support from dt prop
+ * @plat_priv: Platform private data structure pointer
+ */
+static void cnss_detect_msix_support(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+
+	if (of_find_property(dev->of_node, "msix-match-addr", NULL)) {
+		plat_priv->msix_supported = true;
+		cnss_pr_info("MSI-X supported\n");
+	} else {
+		plat_priv->msix_supported = false;
+		cnss_pr_dbg("MSI-X not supported\n");
+	}
+}
+
 void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv)
 {
 	struct device *dev = &plat_priv->plat_dev->dev;
@@ -2718,6 +2735,7 @@ void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv)
 	}
 
 	cnss_detect_m2_supply(plat_priv);
+	cnss_detect_msix_support(plat_priv);
 }
 
 int cnss_update_cpr_info(struct cnss_plat_data *plat_priv)

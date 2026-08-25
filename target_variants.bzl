@@ -6,6 +6,7 @@ targets = [
     "canoe",
     "chora",
     "gen3auto",
+    "glymur",
     "hamoa",
     "hamoa_la",
     "lahaina",
@@ -68,6 +69,7 @@ vm_types = [
 vm_target_bases = [
     "sun",
     "canoe",
+    "glymur",
     "hamoa",
     "hamoa_la",
 ]

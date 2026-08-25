@@ -5104,7 +5104,7 @@ static int cnss_pci_resume(struct device *dev)
 		goto out;
 
 	if (plat_priv->pwr_ctrl_mode == CNSS_POWER_CTRL_SCMI) {
-		/* pcie link have been resume by pcie bus pm */
+		/* pcie link has been resumed by pcie bus pm */
 		pci_priv->pci_link_state = PCI_LINK_UP;
 		goto out;
 	}
@@ -5117,11 +5117,12 @@ static int cnss_pci_resume(struct device *dev)
 		ret = cnss_pci_resume_bus(pci_priv);
 		mutex_unlock(&pci_priv->bus_lock);
 		if (ret)
-			goto out;
+			goto clear_flag;
 	}
 
 	ret = cnss_pci_resume_driver(pci_priv);
 
+clear_flag:
 	pci_priv->drv_connected_last = 0;
 	clear_bit(CNSS_IN_SUSPEND_RESUME, &plat_priv->driver_state);
 
@@ -6981,8 +6982,10 @@ static int cnss_pci_enable_msi(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
 	struct pci_dev *pci_dev = pci_priv->pci_dev;
+	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	int num_vectors;
 	struct cnss_msi_config *msi_config;
+	unsigned int irq_flag = PCI_IRQ_MSI;
 
 	if (pci_priv->device_id == QCA6174_DEVICE_ID)
 		return 0;
@@ -7005,19 +7008,13 @@ static int cnss_pci_enable_msi(struct cnss_pci_data *pci_priv)
 		goto out;
 	}
 
-	switch (pci_priv->device_id) {
-	case COLOGNE_DEVICE_ID:
-		num_vectors = pci_alloc_irq_vectors(pci_dev,
-						    msi_config->total_vectors,
-						    msi_config->total_vectors,
-						    PCI_IRQ_MSI | PCI_IRQ_MSIX);
-		break;
-	default:
-		num_vectors = pci_alloc_irq_vectors(pci_dev,
-						    msi_config->total_vectors,
-						    msi_config->total_vectors,
-						    PCI_IRQ_MSI);
-	}
+	if (plat_priv && plat_priv->msix_supported)
+		irq_flag |= PCI_IRQ_MSIX;
+
+	num_vectors = pci_alloc_irq_vectors(pci_dev,
+					    msi_config->total_vectors,
+					    msi_config->total_vectors,
+					    irq_flag);
 	if ((num_vectors != msi_config->total_vectors) &&
 	    !cnss_pci_fallback_one_msi(pci_priv, &num_vectors)) {
 		cnss_pr_err("Failed to get enough MSI vectors (%d), available vectors = %d",
@@ -9487,6 +9484,35 @@ static const struct dev_pm_ops cnss_pm_ops = {
 			   cnss_pci_runtime_idle)
 };
 
+static pci_ers_result_t cnss_pci_error_detected(struct pci_dev *pci_dev,
+						pci_channel_state_t state)
+{
+	struct cnss_pci_data *pci_priv;
+
+	if (!pci_dev) {
+		cnss_pr_err("the pci_dev is NULL\n");
+		return PCI_ERS_RESULT_NONE;
+	}
+
+	cnss_pr_dbg("PCI error detected, state = %u\n", state);
+
+	pci_priv = cnss_get_pci_priv(pci_dev);
+	if (!pci_priv) {
+		cnss_pr_err("the cnss_pci_data is NULL\n");
+		return PCI_ERS_RESULT_NONE;
+	}
+
+	cnss_pr_dbg("handle PCI link down\n");
+	cnss_pci_handle_linkdown(pci_priv);
+
+	return PCI_ERS_RESULT_CAN_RECOVER;
+}
+
+
+static const struct pci_error_handlers cnss_pci_err_handler = {
+    .error_detected = cnss_pci_error_detected,
+};
+
 static struct pci_driver cnss_pci_driver = {
 	.name     = "cnss_pci",
 	.id_table = cnss_pci_id_table,
@@ -9495,6 +9521,7 @@ static struct pci_driver cnss_pci_driver = {
 	.driver = {
 		.pm = &cnss_pm_ops,
 	},
+	.err_handler = &cnss_pci_err_handler,
 };
 
 static int cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
