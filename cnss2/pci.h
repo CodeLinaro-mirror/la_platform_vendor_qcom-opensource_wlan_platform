@@ -314,6 +314,7 @@ int cnss_pci_call_driver_probe(struct cnss_pci_data *pci_priv);
 int cnss_pci_call_driver_remove(struct cnss_pci_data *pci_priv);
 int cnss_pci_dev_powerup(struct cnss_pci_data *pci_priv);
 int cnss_pci_dev_shutdown(struct cnss_pci_data *pci_priv);
+bool cnss_pci_is_reboot_dev_shutdown_required(struct cnss_pci_data *pci_priv);
 int cnss_pci_dev_crash_shutdown(struct cnss_pci_data *pci_priv);
 int cnss_pci_dev_ramdump(struct cnss_pci_data *pci_priv);
 int cnss_pci_register_driver_hdlr(struct cnss_pci_data *pci_priv, void *data);
