@@ -923,6 +923,10 @@ static int cnss_smc_them_notifier_nb(struct notifier_block *nb,
 		break;
 
 	case QCOM_SMC_BEFORE_SHUTDOWN:
+		if (!plat_data) {
+			cnss_pr_err("plat_data is NULL, ignore SMC shutdown\n");
+			return 0;
+		}
 		if (test_bit(CNSS_POWER_OFF, &plat_data->driver_state)) {
 			cnss_pr_info("Ignore SMC shutdown, driver state 0x%x",
 				      plat_data->driver_state);
