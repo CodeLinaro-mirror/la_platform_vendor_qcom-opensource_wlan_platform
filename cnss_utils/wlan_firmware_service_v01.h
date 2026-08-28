@@ -123,6 +123,8 @@
 #define QMI_WLFW_WFC_CALL_TWT_CONFIG_IND_V01 0x0051
 #define QMI_WLFW_WLAN_MODE_RESP_V01 0x0022
 #define QMI_WLFW_DDR_DUMP_UPLOAD_DONE_REQ_V01 0x0067
+#define QMI_WLFW_DUMMY_WAKE_REQ_V01 0x006B
+#define QMI_WLFW_DUMMY_WAKE_RESP_V01 0x006B
 #define QMI_WLFW_WFC_CALL_STATUS_REQ_V01 0x0049
 #define QMI_WLFW_DEVICE_INFO_RESP_V01 0x004C
 #define QMI_WLFW_MSA_READY_RESP_V01 0x002E
@@ -1977,6 +1979,18 @@ struct wlfw_ddr_dump_upload_done_resp_msg_v01 {
 };
 #define WLFW_DDR_DUMP_UPLOAD_DONE_RESP_MSG_V01_MAX_MSG_LEN 7
 extern struct qmi_elem_info wlfw_ddr_dump_upload_done_resp_msg_v01_ei[];
+
+struct wlfw_dummy_wake_req_msg_v01 {
+	char placeholder;
+};
+#define WLFW_DUMMY_WAKE_REQ_MSG_V01_MAX_MSG_LEN 0
+extern struct qmi_elem_info wlfw_dummy_wake_req_msg_v01_ei[];
+
+struct wlfw_dummy_wake_resp_msg_v01 {
+	struct qmi_response_type_v01 resp;
+};
+#define WLFW_DUMMY_WAKE_RESP_MSG_V01_MAX_MSG_LEN 7
+extern struct qmi_elem_info wlfw_dummy_wake_resp_msg_v01_ei[];
 
 struct wlfw_request_mem_free_ind_msg_v01 {
 	struct wlfw_mem_seg_info_s_v01 mem_seg;
