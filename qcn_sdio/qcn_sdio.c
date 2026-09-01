@@ -488,31 +488,38 @@ disable_oob:
 
 static int qcn_sdio_suspend(struct device *dev)
 {
+	u64 ts_tmp, ts_pm = 0, ts_bus = 0;
 	int ret = 0;
 
 	if (!atomic_read(&meson_card_state)) {
 		ret = sdio_set_host_pm_flags(sdio_ctxt->func,
 					     MMC_PM_KEEP_POWER);
-		if (ret) {
+		if (ret)
 			qcn_pr_err("Failed to set PM flags: %d\n", ret);
-			return ret;
-		}
-		return 0;
+		goto done;
 	}
 
 	reinit_completion(&meson_suspend_allowed);
 
+	ts_tmp = qcn_sdio_get_timestamp();
 	ret = qcn_sdio_pm(LPM_ENTER);
+	ts_pm = qcn_sdio_get_timestamp() - ts_tmp;
 	if (ret) {
 		qcn_pr_err("Failed to suspend\n");
-		return ret;
+		goto done;
 	}
 
+	ts_tmp = qcn_sdio_get_timestamp();
 	ret = qcn_sdio_bus_suspend(dev);
+	ts_bus = qcn_sdio_get_timestamp() - ts_tmp;
 	if (ret) {
 		pr_err("SDIO bus suspend failed\n");
 		qcn_sdio_pm(LPM_EXIT);
 	}
+
+done:
+	qcn_pr_info("wlan_suspend=%llu us bus_suspend=%llu us ret=%d\n",
+		    ts_pm, ts_bus, ret);
 	return ret;
 }
 
@@ -578,55 +585,80 @@ static int qcn_sdio_bus_resume(struct device *dev)
 
 static int qcn_sdio_resume(struct device *dev)
 {
+	u64 ts_tmp, ts_bus = 0, ts_pm = 0;
 	int ret = 0;
 
+	ts_tmp = qcn_sdio_get_timestamp();
 	ret = qcn_sdio_bus_resume(dev);
+	ts_bus = qcn_sdio_get_timestamp() - ts_tmp;
 	if (ret) {
 		pr_err("Failed to resume SDIO bus\n");
-		return ret;
+		goto done;
 	}
 
-	return qcn_sdio_pm(LPM_EXIT);
+	ts_tmp = qcn_sdio_get_timestamp();
+	ret = qcn_sdio_pm(LPM_EXIT);
+	ts_pm = qcn_sdio_get_timestamp() - ts_tmp;
+
+done:
+	qcn_pr_info("bus_resume=%llu us wlan_resume=%llu us ret=%d\n",
+		    ts_bus, ts_pm, ret);
+	return ret;
 }
 
 static int qcn_sdio_runtime_resume(struct device *dev)
 {
+	u64 ts_tmp, ts_bus = 0, ts_pm = 0;
 	int ret = 0;
 
 	qcn_pr_info("runtime resume enter\n");
+
+	ts_tmp = qcn_sdio_get_timestamp();
 	ret = qcn_sdio_bus_resume(dev);
+	ts_bus = qcn_sdio_get_timestamp() - ts_tmp;
 	if (ret) {
 		pr_err("Failed to runtime resume SDIO bus\n");
-		return ret;
+		goto done;
 	}
 	atomic_set(&rtpm_suspend, 0);
-	return qcn_sdio_pm(LPM_RUNTIME_SUSPEND_EXIT);
+
+	ts_tmp = qcn_sdio_get_timestamp();
+	ret = qcn_sdio_pm(LPM_RUNTIME_SUSPEND_EXIT);
+	ts_pm = qcn_sdio_get_timestamp() - ts_tmp;
+
+done:
+	qcn_pr_info("bus_resume=%llu us wlan_resume=%llu us ret=%d\n",
+		    ts_bus, ts_pm, ret);
+	return ret;
 }
 
 static int qcn_sdio_runtime_suspend(struct device *dev)
 {
+	u64 ts_tmp, ts_pm = 0, ts_bus = 0;
 	int ret = 0;
 
 	qcn_pr_info("runtime suspend enter\n");
 	if (!atomic_read(&meson_card_state)) {
 		ret = sdio_set_host_pm_flags(sdio_ctxt->func,
 					     MMC_PM_KEEP_POWER);
-		if (ret) {
+		if (ret)
 			pr_err("Failed to set PM flags: %d\n", ret);
-			return ret;
-		}
-		return 0;
+		goto done;
 	}
 
 	reinit_completion(&meson_suspend_allowed);
 
+	ts_tmp = qcn_sdio_get_timestamp();
 	ret = qcn_sdio_pm(LPM_RUNTIME_SUSPEND_ENTER);
+	ts_pm = qcn_sdio_get_timestamp() - ts_tmp;
 	if (ret) {
 		pr_err("Failed to do runtime suspend\n");
-		return ret;
+		goto done;
 	}
 
+	ts_tmp = qcn_sdio_get_timestamp();
 	ret = qcn_sdio_bus_suspend(dev);
+	ts_bus = qcn_sdio_get_timestamp() - ts_tmp;
 	if (ret) {
 		pr_err("SDIO bus runtime suspend failed\n");
 		qcn_sdio_pm(LPM_RUNTIME_SUSPEND_EXIT);
@@ -634,6 +666,10 @@ static int qcn_sdio_runtime_suspend(struct device *dev)
 
 	if (!ret)
 		atomic_set(&rtpm_suspend, 1);
+
+done:
+	qcn_pr_info("wlan_suspend=%llu us bus_suspend=%llu us ret=%d\n",
+		    ts_pm, ts_bus, ret);
 	return ret;
 }
 
