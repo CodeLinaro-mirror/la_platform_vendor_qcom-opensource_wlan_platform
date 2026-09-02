@@ -42,6 +42,7 @@ le_targets = [
     "alor-le",
     "pebble-le",
     "sun-allyes",
+    "vienna-le",
 ]
 
 le_32_targets = [
