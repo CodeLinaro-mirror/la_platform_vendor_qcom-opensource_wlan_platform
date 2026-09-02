@@ -1849,7 +1849,7 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 			  size_t num_entries_loaded)
 {
 	struct qcom_dump_segment *seg;
-	struct cnss_host_dump_meta_info meta_info = {0};
+	struct cnss_host_dump_meta_info *meta_info;
 	struct list_head head;
 	int dev_ret = -1;
 	struct device *new_device;
@@ -1862,9 +1862,15 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		return ret;
 	}
 
+	/* Allocate meta_info on heap to avoid large on-stack allocation */
+	meta_info = kzalloc(sizeof(*meta_info), GFP_KERNEL);
+	if (!meta_info)
+		return -ENOMEM;
+
 	new_device = kcalloc(1, sizeof(*new_device), GFP_KERNEL);
 	if (!new_device) {
 		icnss_pr_err("Failed to alloc device mem\n");
+		kfree(meta_info);
 		return -ENOMEM;
 	}
 
@@ -1888,7 +1894,7 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		 * So initialize type with -1(Invalid) to avoid such issues.
 		 */
 
-		meta_info.entry[i].type = -1;
+		meta_info->entry[i].type = -1;
 		seg = kcalloc(1, sizeof(*seg), GFP_KERNEL);
 		if (!seg) {
 			icnss_pr_err("Failed to alloc seg entry %d\n", i);
@@ -1902,10 +1908,10 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		for (dump_type_id = 0; dump_type_id < CNSS_HOST_DUMP_TYPE_MAX;
 			 dump_type_id++) {
 			if (strcmp(ssr_entry[i].region_name, icnss_get_wlan_str(dump_type_id)) == 0)
-				meta_info.entry[i].type = dump_type_id;
+				meta_info->entry[i].type = dump_type_id;
 		}
-		meta_info.entry[i].entry_start = i + 1;
-		meta_info.entry[i].entry_num++;
+		meta_info->entry[i].entry_start = i + 1;
+		meta_info->entry[i].entry_num++;
 
 		list_add_tail(&seg->node, &head);
 	}
@@ -1918,14 +1924,14 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		goto skip_host_dump;
 	}
 
-	meta_info.magic = ICNSS_RAMDUMP_MAGIC;
-	meta_info.version = ICNSS_RAMDUMP_VERSION;
-	meta_info.chipset = priv->device_id;
-	meta_info.total_entries = num_entries_loaded;
+	meta_info->magic = ICNSS_RAMDUMP_MAGIC;
+	meta_info->version = ICNSS_RAMDUMP_VERSION;
+	meta_info->chipset = priv->device_id;
+	meta_info->total_entries = num_entries_loaded;
 
-	seg->va = &meta_info;
-	seg->da = (dma_addr_t)&meta_info;
-	seg->size = sizeof(meta_info);
+	seg->va = meta_info;
+	seg->da = (dma_addr_t)meta_info;
+	seg->size = sizeof(*meta_info);
 
 	list_add(&seg->node, &head);
 
@@ -1941,6 +1947,7 @@ skip_host_dump:
 put_device:
 	put_device(new_device);
 	icnss_pr_dbg("host ramdump result %d\n", ret);
+	kfree(meta_info);
 	return ret;
 }
 
@@ -6011,7 +6018,8 @@ static int icnss_smmu_fault_handler(struct iommu_domain *domain,
 }
 
 #if defined(CONFIG_CNSS2_SMMU_DB_SUPPORT) && \
-    (LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0))
+    ((LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0)) || \
+     (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)))
 #define PCIE_LOCAL_REG_APPS_TO_Q6	0x3224
 #define PCIE_LOCAL_REG_WCSS_IE_IRQ	0x3228
 
@@ -6073,7 +6081,8 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_EXIT);
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)) && \
+     (LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0))
 static void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 {
 	struct platform_device *pdev = priv->pdev;
@@ -6154,6 +6163,19 @@ static inline int icnss_dt_parse_iommu_address(struct device *dev, u32 *addr_win
 }
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static void icnss_set_smmu_fault_handler(struct icnss_priv *priv)
+{
+	qcom_iommu_set_fault_handler(priv->iommu_domain,
+				     icnss_smmu_fault_handler, priv);
+}
+#else
+static void icnss_set_smmu_fault_handler(struct icnss_priv *priv)
+{
+	iommu_set_fault_handler(priv->iommu_domain,
+				icnss_smmu_fault_handler, priv);
+}
+#endif
 
 static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 {
@@ -6164,6 +6186,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 	struct resource *res;
 	u32 addr_win[2];
 	struct device_node *of_node = dev->of_node;
+	struct device_node *iommu_group_node = NULL;
 
 	ret = of_property_read_u32_array(of_node,
 					 "qcom,iommu-dma-addr-pool",
@@ -6171,13 +6194,15 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 					 ARRAY_SIZE(addr_win));
 
 	if (ret) {
-		of_node = of_parse_phandle(dev->of_node,
-					   "qcom,iommu-group", 0);
-		if (of_node)
+		iommu_group_node = of_parse_phandle(dev->of_node,
+						    "qcom,iommu-group", 0);
+		if (iommu_group_node) {
+			of_node = iommu_group_node;
 			ret = of_property_read_u32_array(of_node,
 							 "qcom,iommu-dma-addr-pool",
 							 addr_win,
 							 ARRAY_SIZE(addr_win));
+		}
 	}
 
 	if (ret)
@@ -6195,8 +6220,10 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		priv->iommu_domain =
 			iommu_get_domain_for_dev(&pdev->dev);
 
-		if (!priv->iommu_domain)
+		if (!priv->iommu_domain) {
+			of_node_put(iommu_group_node);
 			return -EPROBE_DEFER;
+		}
 
 		ret = of_property_read_string(of_node, "qcom,iommu-dma",
 					      &iommu_dma_type);
@@ -6205,9 +6232,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 			priv->smmu_s1_enable = true;
 			if (priv->device_id == WCN6750_DEVICE_ID ||
 			    priv->device_id == WCN6450_DEVICE_ID)
-				iommu_set_fault_handler(priv->iommu_domain,
-						icnss_smmu_fault_handler,
-						priv);
+				icnss_set_smmu_fault_handler(priv);
 			else if (priv->device_id == WCN7750_DEVICE_ID ||
 				 priv->device_id == WCN8750_DEVICE_ID)
 				icnss_register_iommu_fault_handler_irq(priv);
@@ -6228,8 +6253,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		}
 	}
 
-	if (of_node != dev->of_node)
-		of_node_put(of_node);
+	of_node_put(iommu_group_node);
 
 	return 0;
 }
@@ -6511,7 +6535,7 @@ icnss_get_cpumask_for_wlan_txrx_intr(struct icnss_priv *priv)
 					 "wlan-txrx-intr-cpumask",
 					 cpumask, CPUMASK_ARRAY_SIZE);
 	if (ret) {
-		icnss_pr_err("Failed to get cpumask for wlan txrx interrupts");
+		icnss_pr_dbg("irq affinity not defined in DT, applying default affinity");
 		return;
 	}
 
@@ -6561,6 +6585,7 @@ static void icnss_direct_link_remove(struct platform_device *pdev)
 static int icnss_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	int bt_en_gpio, bt_en_gpio_val;
 	const char *device_name;
 	struct device *dev = &pdev->dev;
 	struct icnss_priv *priv;
@@ -6613,6 +6638,19 @@ static int icnss_probe(struct platform_device *pdev)
 	ret = icnss_resource_parse(priv);
 	if (ret)
 		goto out_reset_drvdata;
+
+	if (priv->device_id == WCN7750_DEVICE_ID &&
+	    gpio_is_valid(priv->pinctrl_info.bt_en_gpio)) {
+		bt_en_gpio = priv->pinctrl_info.bt_en_gpio;
+		bt_en_gpio_val = gpio_get_value(bt_en_gpio);
+		ret = gpio_direction_output(bt_en_gpio, 0);
+		icnss_pr_info("BT_EN GPIO(%d) before: %d after: %d\n",
+			     bt_en_gpio, bt_en_gpio_val, gpio_get_value(bt_en_gpio));
+		if (ret)
+			icnss_pr_err("Failed to reset BT_EN GPIO(%d), err = %d\n",
+				     bt_en_gpio, ret);
+		ret = 0;
+	}
 
 	ret = icnss_msa_dt_parse(priv);
 	if (ret)
