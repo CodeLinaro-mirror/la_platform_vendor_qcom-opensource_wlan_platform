@@ -470,14 +470,15 @@ static int qcn_sdio_bus_suspend(struct device *dev)
 	if (ret)
 		goto disable_oob;
 
+	reinit_completion(&meson_resume_complete);
+
 	ret = wait_for_completion_timeout(&meson_suspend_allowed,
 			msecs_to_jiffies(QCN_SDIO_LP_LHI_LEVENT_TIMEOUT));
 	if (!ret) {
 		pr_err("Didn't get allow response from Meson\n");
+		ret = -ETIMEDOUT;
 		goto disable_oob;
 	}
-	atomic_set(&target_suspended, 1);
-	reinit_completion(&meson_resume_complete);
 
 	return 0;
 
@@ -656,16 +657,15 @@ static int qcn_sdio_runtime_suspend(struct device *dev)
 		goto done;
 	}
 
+	atomic_set(&rtpm_suspend, 1);
 	ts_tmp = qcn_sdio_get_timestamp();
 	ret = qcn_sdio_bus_suspend(dev);
 	ts_bus = qcn_sdio_get_timestamp() - ts_tmp;
 	if (ret) {
 		pr_err("SDIO bus runtime suspend failed\n");
+		atomic_set(&rtpm_suspend, 0);
 		qcn_sdio_pm(LPM_RUNTIME_SUSPEND_EXIT);
 	}
-
-	if (!ret)
-		atomic_set(&rtpm_suspend, 1);
 
 done:
 	qcn_pr_info("wlan_suspend=%llu us bus_suspend=%llu us ret=%d\n",
@@ -954,6 +954,7 @@ static int qcn_read_meta_info(void)
 			qcn_sdio_suspend(&sdio_ctxt->func->dev);
 			break;
 		case LHI_LP_EVENT_RSP_ALLOW:
+			atomic_set(&target_suspended, 1);
 			complete(&meson_suspend_allowed);
 			break;
 		case LHI_LP_EVENT_RSP_REJECT:
@@ -1090,6 +1091,7 @@ static void qcn_sdio_gpio_irq_work_handler(struct work_struct *work)
 		return;
 	}
 
+	/* Receive SUSPEND_ALLOW via OOB */
 	qcn_sdio_irq_handler(sdio_ctxt->func);
 	qcn_pr_info("OOB intr done, re-enabling OOB intr pid %d\n",
 		!in_interrupt() ? current->pid : 0);
@@ -1106,7 +1108,7 @@ static irqreturn_t _qcn_sdio_irq_handler(int irq, void *dev_id)
 
 	/* FW triggered resume:
 	 * Case1: full APPS suspended:  wakeup the SDIO dev, dpm_resume()
-	 * Case2: RTPM suspend: need to runtime resume sdio dev bus it
+	 * Case2: RTPM suspend: need to runtime resume sdio dev but it
 	 * can't be called in IRQ context, so called from worker context.
 	 */
 
