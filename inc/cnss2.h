@@ -314,6 +314,7 @@ extern int cnss_get_soc_info(struct device *dev, struct cnss_soc_info *info);
 extern int cnss_request_bus_bandwidth(struct device *dev, int bandwidth);
 extern int cnss_power_up(struct device *dev);
 extern int cnss_power_down(struct device *dev);
+extern int cnss_set_bmps(struct device *dev, bool disable);
 extern int cnss_idle_restart(struct device *dev);
 extern int cnss_idle_shutdown(struct device *dev);
 extern void cnss_request_pm_qos(struct device *dev, u32 qos_val);
