@@ -3989,6 +3989,15 @@ static int cnss_pci_resume(struct device *dev)
 	if (!cnss_is_device_powered_on(pci_priv->plat_priv))
 		goto out;
 
+        if (pci_priv->mhi_state == CNSS_MHI_INIT) {
+		cnss_power_on_device(plat_priv, false);
+		ret = cnss_resume_pci_link(pci_priv);
+		if (ret)
+			cnss_pr_err("Failed to resume PCI link, err = %d\n",
+				ret);
+		goto out;
+	}
+
 	if (!pci_priv->disable_pc) {
 		mutex_lock(&pci_priv->bus_lock);
 		ret = cnss_pci_resume_bus(pci_priv);
