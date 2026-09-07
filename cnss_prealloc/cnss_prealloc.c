@@ -11,6 +11,9 @@
 #include <linux/err.h>
 #include <linux/of.h>
 #include <linux/version.h>
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+#include <linux/skbuff.h>
+#endif
 #include <linux/kallsyms.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
@@ -95,6 +98,16 @@ struct cnss_pool {
 	struct cnss_pool_stats stats;
 	struct kobject kobj;
 };
+
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+struct cnss_skb_pool {
+	size_t size;
+	int min;
+	const char name[50];
+	void **ptr;
+	bool *occupied;
+};
+#endif
 
 /*
  * Memory pool
@@ -255,11 +268,31 @@ static struct cnss_pool cnss_pools_wcn8750[] = {
 };
 #endif
 
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+static struct cnss_skb_pool cnss_skb_pools_default[] = {
+	{20 * 1024, 28, "cnss-skb-pool-20k", NULL, NULL},
+	{64 * 1024, 2, "cnss-skb-pool-64k", NULL, NULL},
+	{128 * 1024, 2, "cnss-skb-pool-128k", NULL, NULL},
+};
+
+static struct cnss_skb_pool cnss_skb_pools_qcn7605[] = {
+	{20 * 1024, 28, "cnss-skb-pool-20k", NULL, NULL},
+	{64 * 1024, 4, "cnss-skb-pool-64k", NULL, NULL},
+};
+#endif
+
 struct cnss_pool *cnss_pools;
 unsigned int cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
 spinlock_t pool_table_lock;
 bool mempool_initialization_done;
 bool cnss_force_prealloc_pool;
+
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+struct cnss_skb_pool *cnss_skb_pool;
+unsigned int cnss_prealloc_skb_pool_size;
+spinlock_t skb_alloc_lock;
+bool skb_initialization_done;
+#endif
 
 /* Kobject for the cnss_prealloc module sysfs entry */
 static struct kobject *cnss_prealloc_kobj;
@@ -682,6 +715,81 @@ static void cnss_pool_deinit(void)
 	mempool_initialization_done = false;
 }
 
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+static void cnss_skb_pool_init(void)
+{
+	int i, j;
+
+	for (i = 0; i < cnss_prealloc_skb_pool_size; i++) {
+		cnss_skb_pool[i].ptr = kmalloc(cnss_skb_pool[i].min * sizeof(void *),
+					       GFP_KERNEL);
+		if (!cnss_skb_pool[i].ptr) {
+			pr_err("cnss_prealloc: skb pool %s ptr alloc failed\n",
+			       cnss_skb_pool[i].name);
+			continue;
+		}
+
+		cnss_skb_pool[i].occupied = kmalloc(cnss_skb_pool[i].min * sizeof(bool),
+						    GFP_KERNEL);
+		if (!cnss_skb_pool[i].occupied) {
+			pr_err("cnss_prealloc: skb pool %s occupied alloc failed\n",
+			       cnss_skb_pool[i].name);
+			kfree(cnss_skb_pool[i].ptr);
+			cnss_skb_pool[i].ptr = NULL;
+			continue;
+		}
+
+		for (j = 0; j < cnss_skb_pool[i].min; j++) {
+			cnss_skb_pool[i].ptr[j] = dev_alloc_skb(cnss_skb_pool[i].size);
+			if (!cnss_skb_pool[i].ptr[j]) {
+				pr_err("cnss_prealloc: skb pool %s skb alloc failed at %d\n",
+				       cnss_skb_pool[i].name, j);
+				while (j--)
+					dev_kfree_skb(cnss_skb_pool[i].ptr[j]);
+				kfree(cnss_skb_pool[i].occupied);
+				cnss_skb_pool[i].occupied = NULL;
+				kfree(cnss_skb_pool[i].ptr);
+				cnss_skb_pool[i].ptr = NULL;
+				break;
+			}
+			cnss_skb_pool[i].occupied[j] = false;
+		}
+
+		if (!cnss_skb_pool[i].ptr)
+			continue;
+
+		pr_info("cnss_prealloc: created skb pool %s of min size %d * %zu\n",
+			cnss_skb_pool[i].name, cnss_skb_pool[i].min,
+			cnss_skb_pool[i].size);
+	}
+
+	skb_initialization_done = true;
+	spin_lock_init(&skb_alloc_lock);
+}
+
+static void cnss_skb_pool_deinit(void)
+{
+	int i, j;
+
+	for (i = 0; i < cnss_prealloc_skb_pool_size; i++) {
+		if (cnss_skb_pool[i].ptr) {
+			for (j = 0; j < cnss_skb_pool[i].min; j++) {
+				if (cnss_skb_pool[i].ptr[j]) {
+					dev_kfree_skb(cnss_skb_pool[i].ptr[j]);
+					cnss_skb_pool[i].ptr[j] = NULL;
+				}
+			}
+			kfree(cnss_skb_pool[i].ptr);
+			cnss_skb_pool[i].ptr = NULL;
+		}
+
+		kfree(cnss_skb_pool[i].occupied);
+		cnss_skb_pool[i].occupied = NULL;
+	}
+	skb_initialization_done = false;
+}
+#endif /* CONFIG_WCNSS_SKB_PRE_ALLOC */
+
 static void cnss_assign_prealloc_pool(unsigned long device_id)
 {
 	cnss_force_prealloc_pool = false;
@@ -726,12 +834,24 @@ static void cnss_assign_prealloc_pool(unsigned long device_id)
 		cnss_pools = cnss_pools_kiwi;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_kiwi);
 		break;
+	case QCN7605_SDIO_DEVICE_ID:
+		cnss_pools = cnss_pools_default;
+		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+		cnss_skb_pool = cnss_skb_pools_qcn7605;
+		cnss_prealloc_skb_pool_size = ARRAY_SIZE(cnss_skb_pools_qcn7605);
+#endif
+		break;
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
 	case MANGO_DEVICE_ID:
 	default:
 		cnss_pools = cnss_pools_default;
 		cnss_prealloc_pool_size = ARRAY_SIZE(cnss_pools_default);
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+		cnss_skb_pool = cnss_skb_pools_default;
+		cnss_prealloc_skb_pool_size = ARRAY_SIZE(cnss_skb_pools_default);
+#endif
 	}
 
 	pr_info("cnss_prealloc: assign cnss pool for device id 0x%lx with force_prealloc:%s\n",
@@ -742,12 +862,18 @@ void cnss_initialize_prealloc_pool(unsigned long device_id)
 {
 	cnss_assign_prealloc_pool(device_id);
 	cnss_pool_init();
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+	cnss_skb_pool_init();
+#endif
 }
 EXPORT_SYMBOL(cnss_initialize_prealloc_pool);
 
 void cnss_deinitialize_prealloc_pool(void)
 {
 	cnss_pool_deinit();
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+	cnss_skb_pool_deinit();
+#endif
 }
 EXPORT_SYMBOL(cnss_deinitialize_prealloc_pool);
 
@@ -1186,6 +1312,73 @@ EXPORT_SYMBOL(wcnss_prealloc_check_memory_leak);
 /* Not implemented. Make use of Linux SLAB features. */
 int wcnss_pre_alloc_reset(void) { return -EOPNOTSUPP; }
 EXPORT_SYMBOL(wcnss_pre_alloc_reset);
+
+#ifdef CONFIG_WCNSS_SKB_PRE_ALLOC
+struct sk_buff *wcnss_skb_prealloc_get(unsigned int size)
+{
+	int i, j;
+	unsigned long flags;
+
+	if (!cnss_skb_pool || !skb_initialization_done)
+		return NULL;
+
+	spin_lock_irqsave(&skb_alloc_lock, flags);
+	for (i = 0; i < cnss_prealloc_skb_pool_size; i++) {
+		if (!cnss_skb_pool[i].ptr || !cnss_skb_pool[i].occupied)
+			continue;
+
+		if (cnss_skb_pool[i].size < size)
+			continue;
+
+		for (j = 0; j < cnss_skb_pool[i].min; j++) {
+			if (cnss_skb_pool[i].occupied[j])
+				continue;
+
+			cnss_skb_pool[i].occupied[j] = true;
+			spin_unlock_irqrestore(&skb_alloc_lock, flags);
+			return cnss_skb_pool[i].ptr[j];
+		}
+	}
+	spin_unlock_irqrestore(&skb_alloc_lock, flags);
+
+	pr_err("%s: prealloc not available for size: %u\n", __func__, size);
+
+	return NULL;
+}
+EXPORT_SYMBOL(wcnss_skb_prealloc_get);
+
+int wcnss_skb_prealloc_put(struct sk_buff *skb)
+{
+	int i, j;
+	unsigned long flags;
+
+	if (!skb || !cnss_skb_pool || !skb_initialization_done)
+		return 0;
+
+	spin_lock_irqsave(&skb_alloc_lock, flags);
+	for (i = 0; i < cnss_prealloc_skb_pool_size; i++) {
+		if (!cnss_skb_pool[i].ptr || !cnss_skb_pool[i].occupied)
+			continue;
+
+		for (j = 0; j < cnss_skb_pool[i].min; j++) {
+			if (cnss_skb_pool[i].ptr[j] == skb) {
+				cnss_skb_pool[i].occupied[j] = false;
+				skb->data = skb->head;
+				skb_trim(skb, 0);
+				skb_reset_tail_pointer(skb);
+				memset(skb->cb, 0, sizeof(skb->cb));
+				skb->dev = NULL;
+				spin_unlock_irqrestore(&skb_alloc_lock, flags);
+				return 1;
+			}
+		}
+	}
+	spin_unlock_irqrestore(&skb_alloc_lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL(wcnss_skb_prealloc_put);
+#endif /* CONFIG_WCNSS_SKB_PRE_ALLOC */
 
 /**
  * cnss_prealloc_is_valid_dt_node_found - Check if valid device tree node
