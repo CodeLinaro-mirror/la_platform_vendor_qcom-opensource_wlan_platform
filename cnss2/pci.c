@@ -2746,6 +2746,7 @@ static void cnss_pci_set_mhi_state_bit(struct cnss_pci_data *pci_priv,
 		clear_bit(CNSS_MHI_POWER_ON, &pci_priv->mhi_state);
 		clear_bit(CNSS_MHI_POWERING_OFF, &pci_priv->mhi_state);
 		clear_bit(CNSS_MHI_TRIGGER_RDDM, &pci_priv->mhi_state);
+		clear_bit(CNSS_MHI_RDDM, &pci_priv->mhi_state);
 		clear_bit(CNSS_MHI_RDDM_DONE, &pci_priv->mhi_state);
 		break;
 	case CNSS_MHI_SUSPEND:
@@ -7544,8 +7545,10 @@ retry:
 	if (mhi_ee == MHI_EE_RDDM) {
 		cnss_del_rddm_timer(pci_priv);
 		cnss_pr_info("Device in RDDM after link recovery, try to collect dump\n");
-		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
-				       CNSS_REASON_RDDM);
+		/* Dedup: another concurrent recovery path may detect the same RDDM */
+		if (!test_and_set_bit(CNSS_MHI_RDDM, &pci_priv->mhi_state))
+			cnss_schedule_recovery(&pci_priv->pci_dev->dev,
+					       CNSS_REASON_RDDM);
 		return 0;
 	} else if (retry++ < RDDM_LINK_RECOVERY_RETRY) {
 		cnss_pr_dbg("Wait for RDDM after link recovery, retry #%d, Device EE: %d\n",
@@ -7634,8 +7637,10 @@ retry:
 	if (mhi_ee == MHI_EE_RDDM) {
 		cnss_del_rddm_timer(pci_priv);
 		cnss_pr_info("Device in RDDM after link recovery, try to collect dump\n");
-		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
-				       CNSS_REASON_RDDM);
+		/* Dedup: another concurrent recovery path may detect the same RDDM */
+		if (!test_and_set_bit(CNSS_MHI_RDDM, &pci_priv->mhi_state))
+			cnss_schedule_recovery(&pci_priv->pci_dev->dev,
+					       CNSS_REASON_RDDM);
 		return 0;
 	} else if (retry++ < RDDM_LINK_RECOVERY_RETRY) {
 		cnss_pr_dbg("Wait for RDDM after link recovery, retry #%d, Device EE: %d\n",
@@ -8337,8 +8342,10 @@ static void cnss_dev_rddm_timeout_hdlr(struct timer_list *t)
 
 	if (mhi_ee == MHI_EE_RDDM) {
 		cnss_pr_info("Device MHI EE is RDDM, try to collect dump\n");
-		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
-				       CNSS_REASON_RDDM);
+		/* Dedup: another concurrent recovery path may detect the same RDDM */
+		if (!test_and_set_bit(CNSS_MHI_RDDM, &pci_priv->mhi_state))
+			cnss_schedule_recovery(&pci_priv->pci_dev->dev,
+					       CNSS_REASON_RDDM);
 	} else {
 		cnss_mhi_debug_reg_dump(pci_priv);
 		cnss_pci_bhi_debug_reg_dump(pci_priv);
@@ -8447,6 +8454,9 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 		cnss_timer_delete(&plat_priv->fw_boot_timer);
 		cnss_del_rddm_timer(pci_priv);
 		cnss_pci_update_status(pci_priv, CNSS_FW_DOWN);
+		/* Dedup: another concurrent recovery path may detect the same RDDM */
+		if (test_and_set_bit(CNSS_MHI_RDDM, &pci_priv->mhi_state))
+			return;
 		cnss_reason = CNSS_REASON_RDDM;
 		break;
 #if IS_ENABLED(CONFIG_MHI_BUS_MISC) && \
