@@ -18,6 +18,7 @@
 #include <linux/version.h>
 #include <linux/nmi.h>
 #include <linux/stacktrace.h>
+#include <linux/dma-map-ops.h>
 #include "main.h"
 #include "bus.h"
 #include "debug.h"
@@ -8925,7 +8926,7 @@ static int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv)
 				    ret);
 	}
 
-	if (!dev_pci->cma_area)
+	if (!dev_get_cma_area(dev_pci))
 		cnss_pr_info("Invalid CMA area\n");
 
 	return ret;
