@@ -2291,7 +2291,9 @@ out:
 		cnss_pr_dbg("WLFW service is disconnected while sending mode off request\n");
 		ret = 0;
 	} else {
-		CNSS_QMI_ASSERT();
+		/* WLAN mode request failed — trigger RDDM to collect FW dump instead of BUG() */
+		cnss_pr_err("WLAN mode request failed, trigger FW assert for dump collection\n");
+		cnss_force_fw_assert(&plat_priv->plat_dev->dev);
 	}
 	kfree(req);
 	kfree(resp);
