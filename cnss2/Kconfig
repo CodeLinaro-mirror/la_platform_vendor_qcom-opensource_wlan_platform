@@ -235,3 +235,14 @@ config CNSS2_BDF_RETRY
 	help
 	  Retry failed BDF QMI download segments before giving up.
 	  Enable for platforms that require this recovery.
+
+config CNSS_QUIRKS_DEFAULT
+	hex "Default value for CNSS debug quirks bitmask"
+	depends on CNSS2
+	default 0x0
+	help
+	  Set the default bitmask for CNSS debug quirks at driver init.
+	  Each bit corresponds to a cnss_debug_quirks enum value.
+	  For example, set BIT(NO_TME_PATCH) | BIT(NO_TME_OPT_FILES) |
+	  BIT(NO_SKU_LICENSE) to disable loading those FW files on platforms
+	  that do not require them.

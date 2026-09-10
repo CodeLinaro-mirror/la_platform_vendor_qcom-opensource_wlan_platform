@@ -146,6 +146,11 @@ int cnss_bus_load_tme_patch(struct cnss_plat_data *plat_priv)
 	if (!plat_priv)
 		return -ENODEV;
 
+	if (test_bit(NO_TME_PATCH, &plat_priv->ctrl_params.quirks)) {
+		cnss_pr_dbg("TME patch loading disabled by quirk\n");
+		return -EPERM;
+	}
+
 	switch (plat_priv->bus_type) {
 	case CNSS_BUS_PCI:
 		return cnss_pci_load_tme_patch(plat_priv->bus_priv);
@@ -160,6 +165,11 @@ int cnss_bus_load_sku_license(struct cnss_plat_data *plat_priv)
 {
 	if (!plat_priv)
 		return -ENODEV;
+
+	if (test_bit(NO_SKU_LICENSE, &plat_priv->ctrl_params.quirks)) {
+		cnss_pr_dbg("SKU license loading disabled by quirk\n");
+		return -EPERM;
+	}
 
 	switch (plat_priv->bus_type) {
 	case CNSS_BUS_PCI:
@@ -176,6 +186,11 @@ int cnss_bus_load_tme_opt_file(struct cnss_plat_data *plat_priv,
 {
 	if (!plat_priv)
 		return -ENODEV;
+
+	if (test_bit(NO_TME_OPT_FILES, &plat_priv->ctrl_params.quirks)) {
+		cnss_pr_dbg("TME opt file loading disabled by quirk\n");
+		return -EPERM;
+	}
 
 	switch (plat_priv->bus_type) {
 	case CNSS_BUS_PCI:
