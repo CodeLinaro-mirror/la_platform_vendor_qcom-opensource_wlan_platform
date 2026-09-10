@@ -68,7 +68,11 @@
 #define CNSS_EVENT_PENDING		2989
 #define MAX_NAME_LEN			12
 
+#ifdef CONFIG_CNSS_QUIRKS_DEFAULT
+#define CNSS_QUIRKS_DEFAULT		CONFIG_CNSS_QUIRKS_DEFAULT
+#else
 #define CNSS_QUIRKS_DEFAULT		0
+#endif
 #ifdef CONFIG_CNSS_EMULATION
 #define CNSS_MHI_TIMEOUT_DEFAULT	90000
 #define CNSS_MHI_M2_TIMEOUT_DEFAULT	2000
@@ -1280,8 +1284,11 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 
 		if (test_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state)) {
 
-			cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
-			cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+			ret = cnss_bus_load_tme_opt_file(plat_priv,
+					WLFW_TME_LITE_OEM_FUSE_FILE_V01);
+			if (!ret)
+				cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv,
+					WLFW_TME_LITE_OEM_FUSE_FILE_V01);
 
 			clear_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state);
 		}
@@ -6534,6 +6541,7 @@ static ssize_t tme_opt_file_download_store(struct device *dev,
 {
 	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
 	char cmd[MAX_SYSFS_USER_COMMAND_SIZE_LENGTH + 1];
+	int ret;
 
 	if (count > MAX_SYSFS_USER_COMMAND_SIZE_LENGTH) {
 		cnss_pr_err("Cmd length is larger than %zu bytes, count: %zu ",
@@ -6558,11 +6566,17 @@ static ssize_t tme_opt_file_download_store(struct device *dev,
 	if (strcmp(cmd, "sec") == 0) {
 		set_bit(CNSS_SEC_DOWNLOAD, &plat_priv->driver_state);
 	} else if (strcmp(cmd, "rpr") == 0) {
-		cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_RPR_FILE_V01);
-		cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_RPR_FILE_V01);
+		ret = cnss_bus_load_tme_opt_file(plat_priv,
+						 WLFW_TME_LITE_RPR_FILE_V01);
+		if (!ret)
+			cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv,
+					WLFW_TME_LITE_RPR_FILE_V01);
 	} else if (strcmp(cmd, "dpr") == 0) {
-		cnss_bus_load_tme_opt_file(plat_priv, WLFW_TME_LITE_DPR_FILE_V01);
-		cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv, WLFW_TME_LITE_DPR_FILE_V01);
+		ret = cnss_bus_load_tme_opt_file(plat_priv,
+						 WLFW_TME_LITE_DPR_FILE_V01);
+		if (!ret)
+			cnss_wlfw_tme_opt_file_dnld_send_sync(plat_priv,
+					WLFW_TME_LITE_DPR_FILE_V01);
 	}
 
 	cnss_pr_dbg("Received tme_opt_file_download indication cmd: %s\n", cmd);
