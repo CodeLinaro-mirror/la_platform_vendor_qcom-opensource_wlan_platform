@@ -889,7 +889,7 @@ static int cnss_get_bdf_file_name(struct cnss_plat_data *plat_priv,
 	switch (bdf_type) {
 	case CNSS_BDF_ELF:
 		if (plat_priv->bdfname_dt[0] != 0) {
-			snprintf(filename_tmp, filename_len,
+			snprintf(filename_tmp, filename_len, "%s",
 				 plat_priv->bdfname_dt);
 			cnss_pr_dbg("filename_tmp:%s len:%d\n",
 				    filename_tmp, filename_len);
@@ -2201,6 +2201,15 @@ int cnss_wlfw_wlan_mode_send_sync(struct cnss_plat_data *plat_priv,
 	req->mode = (enum wlfw_driver_mode_enum_v01)mode;
 	req->hw_debug_valid = 1;
 	req->hw_debug = 0;
+
+	if (mode == CNSS_MISSION) {
+		req->wlan_on_time_usec_valid = 1;
+		req->wlan_on_time_usec = plat_priv->wlan_on_time_usec;
+		req->wlan_off_time_usec_valid = 1;
+		req->wlan_off_time_usec = plat_priv->wlan_off_time_usec;
+		cnss_pr_dbg("Populated wlan_on_time_usec: %llu, wlan_off_time_usec: %llu\n",
+			    req->wlan_on_time_usec, req->wlan_off_time_usec);
+	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
 			   wlfw_wlan_mode_resp_msg_v01_ei, resp);

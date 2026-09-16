@@ -11,12 +11,7 @@
 #include <linux/module.h>
 #include <linux/msi.h>
 #include <linux/of.h>
-#include <linux/version.h>
-#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
-#else
-#include <linux/gpio/consumer.h>
-#endif
 #include <linux/vmalloc.h>
 #include <linux/suspend.h>
 #include <linux/sched.h>
@@ -2559,8 +2554,13 @@ static void cnss_pci_dump_sram(struct cnss_pci_data *pci_priv)
 static int cnss_pci_handle_mhi_poweron_timeout(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+	int ret = 0;
 
 	cnss_fatal_err("MHI power up returns timeout\n");
+
+	ret = cnss_pci_check_link_status(pci_priv);
+	if (ret)
+		return ret;
 
 	if (cnss_mhi_scan_rddm_cookie(pci_priv, DEVICE_RDDM_COOKIE) ||
 	    cnss_get_dev_sol_value(plat_priv) > 0) {
@@ -5025,7 +5025,11 @@ static int cnss_pci_suspend(struct device *dev)
 		/* pcie link will be suspend by pcie PM */
 		goto out;
 
-	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state)) {
+	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_LOADING, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_IDLE_RESTART, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state)) {
 		ret = -EAGAIN;
 		goto out;
 	}

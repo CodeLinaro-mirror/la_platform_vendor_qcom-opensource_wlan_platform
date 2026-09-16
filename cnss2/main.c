@@ -12,18 +12,14 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_device.h>
-#include <linux/version.h>
-#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
-#else
-#include <linux/gpio/consumer.h>
-#endif
 #include <linux/pm_wakeup.h>
 #include <linux/reboot.h>
 #include <linux/rwsem.h>
 #include <linux/suspend.h>
 #include <linux/timer.h>
 #include <linux/thermal.h>
+#include <linux/version.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 #include <linux/panic_notifier.h>
 #endif
@@ -1002,6 +998,13 @@ int cnss_wlan_enable(struct device *dev,
 		goto out;
 
 skip_cfg:
+	plat_priv->driver_mode = mode;
+	if (mode == CNSS_MISSION) {
+		plat_priv->wlan_on_time_usec = cnss_get_monotonic_boottime_us();
+		cnss_pr_dbg("Marked wlan_on_time_usec: %llu\n",
+			    plat_priv->wlan_on_time_usec);
+	}
+
 	ret = cnss_wlfw_wlan_mode_send_sync(plat_priv, mode);
 out:
 	return ret;
@@ -1027,6 +1030,15 @@ int cnss_wlan_disable(struct device *dev, enum cnss_driver_mode mode)
 
 	if (test_bit(QMI_BYPASS, &plat_priv->ctrl_params.quirks))
 		return 0;
+
+	if (plat_priv->driver_mode == CNSS_MISSION) {
+		plat_priv->wlan_off_time_usec = cnss_get_monotonic_boottime_us();
+		cnss_pr_dbg("Marked wlan_off_time_usec: %llu\n",
+			    plat_priv->wlan_off_time_usec);
+	} else {
+		cnss_pr_dbg("Skip wlan_off_time_usec marking, driver_mode: %d\n",
+			    plat_priv->driver_mode);
+	}
 
 	ret = cnss_wlfw_wlan_mode_send_sync(plat_priv, CNSS_OFF);
 	cnss_bus_free_qdss_mem(plat_priv);
@@ -2417,6 +2429,7 @@ static int cnss_init_dev_sol_gpio(struct cnss_plat_data *plat_priv)
 	if (ret) {
 		cnss_pr_err("Failed to request device SOL GPIO, err = %d\n",
 			    ret);
+		sol_gpio->dev_sol_gpio = -EINVAL;
 		goto out;
 	}
 
@@ -2514,6 +2527,7 @@ static int cnss_init_host_sol_gpio(struct cnss_plat_data *plat_priv)
 	if (ret) {
 		cnss_pr_err("Failed to request host SOL GPIO, err = %d\n",
 			    ret);
+		sol_gpio->host_sol_gpio = -EINVAL;
 		goto out;
 	}
 
@@ -2604,6 +2618,7 @@ int cnss_init_direct_cx_host_sol_gpio(struct cnss_plat_data *plat_priv)
 	if (ret) {
 		cnss_pr_err("Failed to request Direct CX Host SOL GPIO: %d\n",
 			    ret);
+		plat_priv->direct_cx_host_sol_gpio = -EINVAL;
 		goto out;
 	}
 
@@ -7139,6 +7154,7 @@ static int cnss_wlan_tsf_init(struct cnss_wlan_tsf_info *tsf_info)
 	cnss_pr_dbg("WLAN TSF IRQ: %d\n", tsf_info->irq_num);
 	if (tsf_info->irq_num < 0) {
 		gpio_free(tsf_info->wlan_tsf_gpio);
+		tsf_info->wlan_tsf_gpio = -EINVAL;
 		return -EINVAL;
 	}
 
@@ -7149,6 +7165,7 @@ static int cnss_wlan_tsf_init(struct cnss_wlan_tsf_info *tsf_info)
 				   "wlan_tsf", (void *)tsf_info);
 	if (ret) {
 		gpio_free(tsf_info->wlan_tsf_gpio);
+		tsf_info->wlan_tsf_gpio = -EINVAL;
 		cnss_pr_err("Failed to request TSF IRQ, err = %d\n", ret);
 	}
 
@@ -7161,8 +7178,10 @@ static void cnss_wlan_tsf_deinit(struct cnss_wlan_tsf_info *tsf_info)
 	if (tsf_info->irq_num >= 0)
 		free_irq(tsf_info->irq_num, (void *)tsf_info);
 
-	if (tsf_info->wlan_tsf_gpio >= 0)
+	if (tsf_info->wlan_tsf_gpio >= 0) {
 		gpio_free(tsf_info->wlan_tsf_gpio);
+		tsf_info->wlan_tsf_gpio = -EINVAL;
+	}
 
 	tsf_info->irq_num = -EINVAL;
 	tsf_info->wlan_tsf_handler = NULL;
@@ -7855,6 +7874,19 @@ void cnss_get_cpumask_for_wlan_tx_comp_interrupts(struct device *dev,
 }
 EXPORT_SYMBOL(cnss_get_cpumask_for_wlan_tx_comp_interrupts);
 
+bool cnss_get_napi_ipi_redirect_enabled(struct device *dev)
+{
+	struct cnss_plat_data *priv = cnss_get_plat_priv(NULL);
+
+	if (!priv) {
+		cnss_pr_err("Platform driver is not initialized!\n");
+		return false;
+	}
+
+	return priv->napi_ipi_redirect_enable;
+}
+EXPORT_SYMBOL(cnss_get_napi_ipi_redirect_enabled);
+
 static void
 cnss_get_cpumask_for_wlan_txrx_intr(struct cnss_plat_data *plat_priv)
 {
@@ -8017,6 +8049,21 @@ static int cnss_get_bdf_filename_from_dt(struct cnss_plat_data *plat_priv)
 	return ret;
 }
 
+static void
+cnss_get_napi_ipi_redirect_info(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev;
+
+	if (!plat_priv || !plat_priv->plat_dev)
+		return;
+
+	dev = &plat_priv->plat_dev->dev;
+
+	plat_priv->napi_ipi_redirect_enable =
+		of_property_read_bool(dev->of_node,
+				      "qcom,napi-ipi-redirect-enable");
+}
+
 static int cnss_probe(struct platform_device *plat_dev)
 {
 	int ret = 0;
@@ -8130,6 +8177,7 @@ static int cnss_probe(struct platform_device *plat_dev)
 
 	cnss_aop_interface_init(plat_priv);
 	cnss_get_cpumask_for_wlan_txrx_intr(plat_priv);
+	cnss_get_napi_ipi_redirect_info(plat_priv);
 	cnss_pm_notifier_init(plat_priv);
 
 	ret = cnss_get_resources(plat_priv);
