@@ -43,6 +43,7 @@
 #define ADRASTEA_PATH_PREFIX   "adrastea/"
 #define WCN6450_PATH_PREFIX    "wcn6450/"
 #define WCN7750_PATH_PREFIX    "wcn7750/"
+#define WCN8750_PATH_PREFIX    "wcn8750/"
 #define ICNSS_MAX_FILE_NAME      45
 #define ICNSS_PCI_EP_WAKE_OFFSET 4
 #define ICNSS_DISABLE_M3_SSR 0
@@ -262,6 +263,7 @@ struct icnss_pinctrl_info {
 	struct pinctrl_state *wlan_en_sleep;
 	int wlan_en_gpio;
 	int sw_ctrl_gpio;
+	int bt_en_gpio;
 };
 
 struct icnss_fw_mem {

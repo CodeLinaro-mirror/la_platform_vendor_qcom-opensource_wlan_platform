@@ -18,6 +18,7 @@
 #if IS_ENABLED(CONFIG_INTERCONNECT)
 #include <linux/interconnect.h>
 #endif
+#include <linux/ktime.h>
 #include <linux/mailbox_client.h>
 #include <linux/pm_qos.h>
 #include <linux/of.h>
@@ -32,8 +33,12 @@
 #include <net/cnss2.h>
 #endif
 #if IS_ENABLED(CONFIG_QCOM_MEMORY_DUMP_V2) || IS_ENABLED(CONFIG_QCOM_MINIDUMP)
-#ifdef CONFIG_QLI
+#if defined(__has_include)
+#if __has_include(<linux/firmware/qcom/memory_dump.h>)
 #include <linux/firmware/qcom/memory_dump.h>
+#else
+#include <soc/qcom/memory_dump.h>
+#endif
 #else
 #include <soc/qcom/memory_dump.h>
 #endif
@@ -82,10 +87,13 @@
 #define CNSS_FS_NAME_SIZE		15
 #define CNSS_DEVICE_NAME_SIZE		16
 #define QRTR_NODE_FW_ID_BASE		7
+#define QRTR_NODE_FW_ID_BASE_FIG	1
 
 #define POWER_ON_RETRY_DELAY_MS         500
 #define WLFW_MAX_HANG_EVENT_DATA_SIZE   384
 #define CNSS_MBOX_MSG_MAX_LEN           64
+#define CNSS_IOMMU_NODE_NAME_MAX_LEN    50
+#define POWER_RESET_MIN_DELAY_MS	100
 
 #define CNSS_EVENT_SYNC   BIT(0)
 #define CNSS_EVENT_UNINTERRUPTIBLE BIT(1)
@@ -175,6 +183,8 @@ struct cnss_pinctrl_info {
 	int xo_clk_gpio; /*qca6490 only */
 	int sw_ctrl_gpio;
 	int wlan_sw_ctrl_gpio;
+	int sw_ctrl_data_0_gpio;
+	int sw_ctrl_data_1_gpio;
 };
 
 #if IS_ENABLED(CONFIG_MSM_SUBSYSTEM_RESTART)
@@ -365,6 +375,8 @@ enum cnss_driver_event_type {
 	CNSS_DRIVER_EVENT_XO_TRIM_IND,
 	CNSS_DRIVER_EVENT_XDUMP_BT_ARRIVAL,
 	CNSS_DRIVER_EVENT_XDUMP_BT_OVER_WL_REQ,
+	CNSS_DRIVER_EVENT_CALDB_RDDM_SAVE,
+	CNSS_DRIVER_EVENT_CALDB_RDDM_RESTORE,
 	CNSS_DRIVER_EVENT_MAX,
 };
 
@@ -444,6 +456,7 @@ enum cnss_debug_quirks {
 	FORCE_ONE_MSI,
 	PREVENT_PCI_LINK_RESUME,
 	CNSS_INTERNAL_RESUME,
+	DISABLE_CALDB_RDDM_REUSE,
 	QUIRK_MAX_VALUE
 };
 
@@ -452,6 +465,13 @@ enum cnss_bdf_type {
 	CNSS_BDF_ELF,
 	CNSS_BDF_REGDB = 4,
 	CNSS_BDF_HDS = 6,
+};
+
+/* board_id source, controlled by qcom,board-id-src DT. */
+enum cnss_board_id_src {
+	CNSS_BOARD_ID_SRC_FW       = 0,
+	CNSS_BOARD_ID_SRC_PCIE_MAP = 1,
+	CNSS_BOARD_ID_SRC_MAX,
 };
 
 enum cnss_cal_status {
@@ -612,9 +632,27 @@ struct cnss_wlan_tsf_info {
 	struct cnss_irq_ts_info irq_ts_info;
 };
 
+/**
+ * enum cnss_power_ctrl_mode - WLAN power control modes
+ * @CNSS_POWER_CTRL_HOST: Power rails are controlled by the host platform driver
+ * @CNSS_POWER_CTRL_SCMI: Power rails are controlled via SCMI
+ *  (System Control and Management Interface)
+ * @CNSS_POWER_CTRL_ALWAYS_ON: Power rails remain always on;
+ */
+enum cnss_power_ctrl_mode {
+	CNSS_POWER_CTRL_HOST = 0,
+	CNSS_POWER_CTRL_SCMI,
+	CNSS_POWER_CTRL_ALWAYS_ON,
+
+	/* keep last */
+	CNSS_POWER_CTRL_LAST,
+};
+
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
 	enum cnss_driver_mode driver_mode;
+	u64 wlan_on_time_usec;
+	u64 wlan_off_time_usec;
 	void *bus_priv;
 	enum cnss_dev_bus_type bus_type;
 	struct list_head vreg_list;
@@ -721,6 +759,7 @@ struct cnss_plat_data {
 	u8 use_pm_domain;
 	u8 use_nv_mac;
 	u8 set_wlaon_pwr_ctrl;
+	u8 wlaon_pwr_ctrl_otp_supported;
 	struct cnss_tcs_info tcs_info;
 	bool fw_pcie_gen_switch;
 	bool fw_aux_uc_support;
@@ -736,7 +775,7 @@ struct cnss_plat_data {
 	struct mbox_client mbox_client_data;
 	struct mbox_chan *mbox_chan;
 	struct qmp *qmp;
-	const char *vreg_ol_cpr, *vreg_ipa;
+	const char *vreg_ol_cpr, *vreg_ipa, *cx_reg_name;
 	const char **pdc_init_table, **vreg_pdc_map, **pmu_vreg_map;
 	int pdc_init_table_len, vreg_pdc_map_len, pmu_vreg_map_len;
 	const char **pdc_mode_vote_table;
@@ -765,14 +804,16 @@ struct cnss_plat_data {
 	struct wlchip_serial_id_v01 serial_id;
 	u32 cpumask_for_rx_intrs;
 	u32 cpumask_for_tx_comp_intrs;
+	bool napi_ipi_redirect_enable;
 	bool ipa_shared_cb_enable;
 	struct task_struct *cnss_event_work_task;
 	u64 pcie_time_sync_offset;
-	bool is_fw_managed_pwr;
 	struct device **pd_devs;
 	int pd_count;
 	bool pm_suspend_in_progress;
 	struct notifier_block pm_notifier;
+	char bdfname_dt[MAX_FIRMWARE_NAME_LEN];
+	enum cnss_board_id_src board_id_src;
 	struct cnss_xo_trim_config xo_trim_conf;
 	struct cnss_xdump_helper xdump_helper;
 	int direct_cx_data_pin_mode;
@@ -790,8 +831,15 @@ struct cnss_plat_data {
 #endif
 	struct cnss_wlan_host_param *host_param;
 	struct cnss_wlan_tsf_info tsf_info;
+	bool m2_supply_detected;
+	bool msix_supported;
 	bool rc_pm_control;
 	enum cx_modes cx_mode;
+	u32 pmic_auto_headroom;
+	u32 wake_voltage_drop_adjustment;
+	u32 sleep_voltage_drop_adjustment;
+	enum cnss_power_ctrl_mode pwr_ctrl_mode;
+	u32 bdf_dnld_fail_count;
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
@@ -818,6 +866,19 @@ static inline u64 cnss_get_host_timestamp(struct cnss_plat_data *plat_priv)
 }
 #endif
 
+/**
+ * cnss_get_monotonic_boottime_us() - get monotonic boottime in microseconds
+ *
+ * Uses CLOCK_BOOTTIME (via ktime_get_boottime()) rather than CLOCK_MONOTONIC
+ * so that the returned value includes any time spent in system suspend.
+ *
+ * Return: current boottime in microseconds
+ */
+static inline u64 cnss_get_monotonic_boottime_us(void)
+{
+	return ktime_to_us(ktime_get_boottime());
+}
+
 int cnss_wlan_hw_disable_check(struct cnss_plat_data *plat_priv);
 int cnss_wlan_hw_enable(void);
 struct cnss_plat_data *cnss_get_plat_priv(struct platform_device *plat_dev);
@@ -830,6 +891,7 @@ struct cnss_plat_data *cnss_get_plat_env(int index);
 void cnss_get_qrtr_info(struct cnss_plat_data *plat_priv);
 void cnss_get_sleep_clk_supported(struct cnss_plat_data *plat_priv);
 void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv);
+void cnss_get_caldb_rddm_reuse_info(struct cnss_plat_data *plat_priv);
 bool cnss_is_dual_wlan_enabled(void);
 int cnss_driver_event_post(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_event_type type,
@@ -908,6 +970,7 @@ int cnss_clear_feature_list(struct cnss_plat_data *plat_priv,
 int cnss_get_feature_list(struct cnss_plat_data *plat_priv,
 			  u64 *feature_list);
 int cnss_get_input_gpio_value(struct cnss_plat_data *plat_priv, int gpio_num);
+void cnss_read_gpio_status_on_link_down(struct cnss_plat_data *plat_priv);
 bool cnss_check_driver_loading_allowed(void);
 int cnss_dev_specific_power_on(struct cnss_plat_data *plat_priv);
 void cnss_recovery_handler(struct cnss_plat_data *plat_priv);
@@ -940,6 +1003,7 @@ int cnss_set_bidirectional_ack_pdc(struct cnss_plat_data *plat_priv,
 u8 *cnss_debug_direct_cx(struct cnss_plat_data *plat_priv);
 int cnss_cx_voltage_corners_init(struct cnss_plat_data *plat_priv);
 int cnss_xo_trim_perform(struct cnss_xo_trim_config *conf);
+int cnss_caldb_rddm_reuse(struct cnss_plat_data *plat_priv, bool save);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
 static inline int cnss_timer_delete(struct timer_list *timer)
@@ -962,4 +1026,6 @@ static inline int cnss_timer_delete_sync(struct timer_list *timer)
 	return del_timer_sync(timer);
 }
 #endif
+
+void cnss_power_ctrl_mode_init(struct cnss_plat_data *plat_priv);
 #endif /* _CNSS_MAIN_H */

@@ -194,7 +194,7 @@ config CNSS2_FMD_FEATURE_ENABLE
 
 config MHI_BUF_LEN
 	int "Mhi buffer size"
-	default "32768"
+	default "16384"
 	depends on CNSS2
 	help
 	  If configured, CNSS platform driver set mhi buffer size with external value.
@@ -228,3 +228,10 @@ config CNSS_SHUTDOWN_CALLBACK
 	  called and then cnss_remove be called. If target or system disabled
 	  IOMMU during shutdown and PCIe required this feature, then enabled
 	  it.
+
+config CNSS2_BDF_RETRY
+	bool "Enable BDF segment retry on QMI download failure"
+	depends on CNSS2
+	help
+	  Retry failed BDF QMI download segments before giving up.
+	  Enable for platforms that require this recovery.

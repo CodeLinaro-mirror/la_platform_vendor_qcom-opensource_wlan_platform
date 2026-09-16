@@ -236,6 +236,7 @@ enum cnss_fw_caps {
 	CNSS_FW_CAP_CALDB_SEG_DDR_SUPPORT,
 	CNSS_FW_CAP_WLAN_DUMP_OVER_BT_SUPPORT,
 	CNSS_FW_CAP_BT_DUMP_OVER_WLAN_SUPPORT,
+	CNSS_FW_CAP_DIRECT_REFILL_SUPPORT,
 };
 
 enum cnss_remote_mem_type {
@@ -374,4 +375,5 @@ extern void cnss_get_cpumask_for_wlan_tx_comp_interrupts(struct device *dev,
 extern int cnss_set_cxpc(struct device *dev, enum cxpc_status arg);
 extern int cnss_pci_get_iova_info(struct device *dev, u64 *addr, u64 *size);
 extern int cnss_set_vendor_wonder_priv_data(const void *priv_data);
+extern bool cnss_get_napi_ipi_redirect_enabled(struct device *dev);
 #endif /* _NET_CNSS2_H */

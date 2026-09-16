@@ -6,7 +6,12 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/of.h>
+#include <linux/version.h>
+#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
+#else
+#include <linux/gpio/consumer.h>
+#endif
 #include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/qcom-pinctrl.h>
 #include <linux/regulator/consumer.h>
@@ -35,6 +40,14 @@ static struct icnss_vreg_cfg icnss_wcn7750_vreg_list[] = {
 	{"vdd-1.2-io", 1200000, 1200000, 0, 0, 0, false, true},
 	{"vdd-2p2", 2200000, 2200000, 0, 0, 0, false, true},
 	{"vdd-2p2-ext", 2200000, 2200000, 0, 0, 0, false, false},
+};
+
+static struct icnss_vreg_cfg icnss_wcn8750_vreg_list[] = {
+	{"vdd-cx-mx", 824000, 952000, 0, 0, 0, false, true},
+	{"vdd-1.8-xo", 1872000, 1872000, 0, 0, 0, false, true},
+	{"vdd-1.3-rfa", 1256000, 1352000, 0, 0, 0, false, true},
+	{"vdd-1.8-io", 1800000, 1800000, 0, 0, 0, false, true},
+	{"vdd-1.2-io", 1200000, 1200000, 0, 0, 0, false, true},
 };
 
 static struct icnss_vreg_cfg icnss_adrestea_vreg_list[] = {
@@ -75,6 +88,7 @@ static struct icnss_clk_cfg icnss_adrestea_clk_list[] = {
 #define ICNSS_VREG_ADRESTEA_LIST_SIZE	ARRAY_SIZE(icnss_adrestea_vreg_list)
 #define ICNSS_VREG_EVROS_LIST_SIZE	ARRAY_SIZE(icnss_wcn6450_vreg_list)
 #define ICNSS_VREG_WCN7750_LIST_SIZE    ARRAY_SIZE(icnss_wcn7750_vreg_list)
+#define ICNSS_VREG_WCN8750_LIST_SIZE    ARRAY_SIZE(icnss_wcn8750_vreg_list)
 #define ICNSS_CLK_LIST_SIZE		ARRAY_SIZE(icnss_clk_list)
 #define ICNSS_CLK_ADRESTEA_LIST_SIZE	ARRAY_SIZE(icnss_adrestea_clk_list)
 
@@ -85,6 +99,7 @@ static struct icnss_clk_cfg icnss_adrestea_clk_list[] = {
 
 #define SW_CTRL_GPIO			"pin_sw-ctrl-gpio"
 #define WLAN_EN_GPIO			"pin_wlan-en-gpio"
+#define BT_EN_GPIO			"pin_bt-en-gpio"
 #define PIN_CTRL			"pin-ctrl-support"
 #define WLAN_EN_ACTIVE			"wlan_en_active"
 #define WLAN_EN_SLEEP			"wlan_en_sleep"
@@ -191,7 +206,8 @@ static int icnss_get_vreg_single(struct icnss_priv *priv,
 			break;
 		case 4:
 			if (priv->device_id == WCN6750_DEVICE_ID ||
-			    priv->device_id == WCN7750_DEVICE_ID)
+			    priv->device_id == WCN7750_DEVICE_ID ||
+			    priv->device_id == WCN8750_DEVICE_ID)
 				vreg->cfg.need_unvote = be32_to_cpup(&prop[4]);
 			else
 				vreg->cfg.need_unvote = 0;
@@ -207,8 +223,11 @@ static int icnss_get_vreg_single(struct icnss_priv *priv,
 		if (!strcmp(vreg->cfg.name, ICNSS_2P2_REGULATOR))
 			vreg->cfg.is_supported = false;
 
-		if (!strcmp(vreg->cfg.name, ICNSS_2P2_EXT_REGULATOR))
+		if (!strcmp(vreg->cfg.name, ICNSS_2P2_EXT_REGULATOR)) {
 			vreg->cfg.is_supported = true;
+			icnss_set_feature_list(priv, CNSS_EXT_2P2RFA_SUPPORT_V01);
+			icnss_pr_dbg("2p2_ext regulator feature supported\n");
+		}
 	}
 
 done:
@@ -362,6 +381,10 @@ static struct icnss_vreg_cfg *get_vreg_list(u32 *vreg_list_size,
 	case WCN7750_DEVICE_ID:
 		*vreg_list_size = ICNSS_VREG_WCN7750_LIST_SIZE;
 		return icnss_wcn7750_vreg_list;
+
+	case WCN8750_DEVICE_ID:
+		*vreg_list_size = ICNSS_VREG_WCN8750_LIST_SIZE;
+		return icnss_wcn8750_vreg_list;
 
 	default:
 		icnss_pr_err("Unsupported device_id 0x%lx\n", device_id);
@@ -570,7 +593,8 @@ int icnss_get_clk(struct icnss_priv *priv)
 		clk_list_size = ICNSS_CLK_ADRESTEA_LIST_SIZE;
 	} else if (priv->device_id == WCN6750_DEVICE_ID ||
 		   priv->device_id == WCN6450_DEVICE_ID ||
-		   priv->device_id == WCN7750_DEVICE_ID) {
+		   priv->device_id == WCN7750_DEVICE_ID ||
+		   priv->device_id == WCN8750_DEVICE_ID) {
 		clk_cfg = icnss_clk_list;
 		clk_list_size = ICNSS_CLK_LIST_SIZE;
 	}
@@ -681,12 +705,16 @@ int icnss_get_pinctrl(struct icnss_priv *priv)
 	dev = &priv->pdev->dev;
 	pinctrl_info = &priv->pinctrl_info;
 
-	if (of_property_read_bool(dev->of_node, PIN_CTRL)) {
-		gpio_id = of_get_named_gpio(dev->of_node, SW_CTRL_GPIO, 0);
-		pinctrl_info->sw_ctrl_gpio = gpio_id;
-		icnss_pr_dbg("Switch control GPIO: %d\n",
-			     pinctrl_info->sw_ctrl_gpio);
+	pinctrl_info->sw_ctrl_gpio = of_get_named_gpio(dev->of_node, SW_CTRL_GPIO, 0);
+	icnss_pr_dbg("Switch control GPIO: %d\n", pinctrl_info->sw_ctrl_gpio);
 
+	pinctrl_info->wlan_en_gpio = of_get_named_gpio(dev->of_node, WLAN_EN_GPIO, 0);
+	icnss_pr_dbg("WLAN_EN GPIO: %d\n", pinctrl_info->wlan_en_gpio);
+
+	pinctrl_info->bt_en_gpio = of_get_named_gpio(dev->of_node, BT_EN_GPIO, 0);
+	icnss_pr_dbg("BT_EN GPIO: %d\n", pinctrl_info->bt_en_gpio);
+
+	if (of_property_read_bool(dev->of_node, PIN_CTRL)) {
 		pinctrl_info->pinctrl = devm_pinctrl_get(dev);
 		if (IS_ERR_OR_NULL(pinctrl_info->pinctrl)) {
 			ret = PTR_ERR(pinctrl_info->pinctrl);
@@ -709,10 +737,6 @@ int icnss_get_pinctrl(struct icnss_priv *priv)
 					     ret);
 		}
 
-		pinctrl_info->wlan_en_gpio = of_get_named_gpio(dev->of_node,
-							       WLAN_EN_GPIO, 0);
-		icnss_pr_dbg("WLAN_EN GPIO: %d\n", pinctrl_info->wlan_en_gpio);
-
 		pinctrl_info->wlan_en_active =
 			pinctrl_lookup_state(pinctrl_info->pinctrl, WLAN_EN_ACTIVE);
 
@@ -729,9 +753,6 @@ int icnss_get_pinctrl(struct icnss_priv *priv)
 			icnss_pr_err("Failed to get wlan_en sleep state, err = %d\n",
 				     ret);
 		}
-	} else {
-		pinctrl_info->sw_ctrl_gpio = -EINVAL;
-		pinctrl_info->wlan_en_gpio = -EINVAL;
 	}
 
 	/* Find out and configure all those GPIOs which need to be setup
@@ -1128,28 +1149,39 @@ int icnss_aop_pdc_reconfig(struct icnss_priv *priv)
 void icnss_power_misc_params_init(struct icnss_priv *priv)
 {
 	struct device *dev = &priv->pdev->dev;
+	const char *prop_name;
 	int ret;
 
 	/* common DT Entries */
-	priv->pdc_init_table_len =
-				of_property_count_strings(dev->of_node,
-							  "qcom,pdc_init_table");
-	if (priv->pdc_init_table_len > 0) {
-		priv->pdc_init_table =
-			kcalloc(priv->pdc_init_table_len,
-				sizeof(char *), GFP_KERNEL);
-		if (priv->pdc_init_table) {
-			ret = of_property_read_string_array(dev->of_node,
-						"qcom,pdc_init_table",
-						priv->pdc_init_table,
-						priv->pdc_init_table_len);
-			if (ret < 0)
-				icnss_pr_err("Failed to get PDC Init Table\n");
-		} else {
-			icnss_pr_err("Failed to alloc PDC Init Table mem\n");
-		}
-	} else {
+	if (priv->wcn_ktb_info_buf &&
+	    *priv->wcn_ktb_info_buf == WCN_KTB_EXT_RAIL)
+		prop_name = "qcom,pdc_init_table_v1";
+	else
+		prop_name = "qcom,pdc_init_table";
+
+	priv->pdc_init_table_len = of_property_count_strings(dev->of_node, prop_name);
+
+	if (priv->pdc_init_table_len <= 0) {
 		icnss_pr_dbg("PDC Init Table not configured\n");
+	} else {
+		priv->pdc_init_table = kcalloc(priv->pdc_init_table_len,
+					       sizeof(char *), GFP_KERNEL);
+
+		if (!priv->pdc_init_table) {
+			icnss_pr_err("Failed to alloc PDC Init Table mem\n");
+			priv->pdc_init_table_len = 0;
+		} else {
+			ret = of_property_read_string_array(dev->of_node, prop_name,
+							    priv->pdc_init_table,
+							    priv->pdc_init_table_len);
+
+			if (ret < 0) {
+				icnss_pr_err("Failed to get PDC Init Table\n");
+				kfree(priv->pdc_init_table);
+				priv->pdc_init_table = NULL;
+				priv->pdc_init_table_len = 0;
+			}
+		}
 	}
 }
 

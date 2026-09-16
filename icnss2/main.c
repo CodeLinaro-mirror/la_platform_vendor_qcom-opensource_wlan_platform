@@ -55,6 +55,7 @@
 #endif
 #include <linux/regulator/consumer.h>
 #include <linux/nvmem-consumer.h>
+#include <linux/component.h>
 
 #include <linux/qcom-iommu-util.h>
 #include <soc/qcom/of_common.h>
@@ -85,19 +86,33 @@
 
 #define ICNSS_BDF_TYPE_DEFAULT         ICNSS_BDF_ELF
 
-#define PROBE_TIMEOUT                 15000
-#define SMP2P_SOC_WAKE_TIMEOUT        500
+/*
+ * Increase various FW communication timeouts when running on emulation.
+ */
+
+#ifdef CONFIG_ICNSS_EMULATION
+#define PROBE_TIMEOUT			15000000
+#define SMP2P_SOC_WAKE_TIMEOUT		5000000
+#define ICNSS_QMI_TIMEOUT		90000
+#define ICNSS_RECOVERY_TIMEOUT		90000000
+#define ICNSS_WPSS_SSR_TIMEOUT		90000000
+#define ICNSS_CAL_TIMEOUT		90000000
+#else
+#define PROBE_TIMEOUT			15000
+#define SMP2P_SOC_WAKE_TIMEOUT		500
+#define ICNSS_QMI_TIMEOUT		3000
+#define ICNSS_RECOVERY_TIMEOUT		60000
+#define ICNSS_WPSS_SSR_TIMEOUT		5000
+#define ICNSS_CAL_TIMEOUT		40000
+#endif
+
 #ifdef CONFIG_ICNSS2_DEBUG
-static unsigned long qmi_timeout = 3000;
+static unsigned long qmi_timeout = ICNSS_QMI_TIMEOUT;
 module_param(qmi_timeout, ulong, 0600);
 #define WLFW_TIMEOUT                    msecs_to_jiffies(qmi_timeout)
 #else
-#define WLFW_TIMEOUT                    msecs_to_jiffies(3000)
+#define WLFW_TIMEOUT                    msecs_to_jiffies(ICNSS_QMI_TIMEOUT)
 #endif
-
-#define ICNSS_RECOVERY_TIMEOUT		60000
-#define ICNSS_WPSS_SSR_TIMEOUT          5000
-#define ICNSS_CAL_TIMEOUT		40000
 
 static struct icnss_priv *penv;
 static struct work_struct wpss_loader;
@@ -179,7 +194,8 @@ static ssize_t icnss_sysfs_store(struct kobject *kobj,
 	if (((priv->wpss_supported || priv->rproc_fw_download) &&
 	      priv->device_id == ADRASTEA_DEVICE_ID) ||
 	      priv->device_id == WCN7750_DEVICE_ID ||
-	      priv->device_id == WCN6450_DEVICE_ID)
+	      priv->device_id == WCN6450_DEVICE_ID ||
+	      priv->device_id == WCN8750_DEVICE_ID)
 		icnss_wpss_unload(priv);
 	return count;
 }
@@ -235,6 +251,10 @@ bool icnss_get_fw_cap(struct device *dev, enum icnss_fw_caps fw_cap)
 	case ICNSS_FW_CAP_CE_CMN_CFG_SUPPORT:
 		is_supported = !!(priv->fw_caps &
 				  QMI_WLFW_CE_CMN_CFG_SUPPORT_V01);
+		break;
+	case ICNSS_FW_CAP_DIRECT_REFILL_SUPPORT:
+		is_supported = !!(priv->fw_caps &
+				  QMI_WLFW_DIRECT_REFILL_SUPPORT_V01);
 		break;
 	default:
 		icnss_pr_err("Invalid FW Capability: 0x%x\n", fw_cap);
@@ -751,6 +771,7 @@ static bool icnss_is_smp2p_valid(struct icnss_priv *priv,
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->wpss_supported)
 		return IS_ERR_OR_NULL(priv->smp2p_info[smp2p_entry].smem_state);
 	else
@@ -874,6 +895,7 @@ static irqreturn_t fw_crash_indication_handler(int irq, void *ctx)
 		icnss_ignore_fw_timeout(true);
 		if (priv->device_id == WCN6750_DEVICE_ID ||
 		    priv->device_id == WCN7750_DEVICE_ID ||
+		    priv->device_id == WCN8750_DEVICE_ID ||
 		    priv->device_id == WCN6450_DEVICE_ID) {
 			clear_bit(ICNSS_SOC_WAKE_DONE, &priv->state);
 			complete(&priv->smp2p_soc_wake_wait);
@@ -1288,7 +1310,8 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 	set_bit(ICNSS_WLFW_CONNECTED, &priv->state);
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID ||
-	    priv->device_id == WCN7750_DEVICE_ID) {
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID) {
 		ret = icnss_hw_power_on(priv);
 		if (ret)
 			goto fail;
@@ -1319,6 +1342,7 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) {
 		if (!icnss_get_temperature(priv, &temp)) {
 			icnss_pr_dbg("Temperature: %d\n", temp);
@@ -1377,6 +1401,7 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) {
 
 		ret = wlfw_device_info_send_msg(priv);
@@ -1434,7 +1459,8 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 			goto cleanup_hw_poweroff;
 	}
 
-	if (priv->device_id == WCN7750_DEVICE_ID) {
+	if (priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID) {
 		ret = icnss_load_phy_ucode(priv);
 		if (ret < 0) {
 			icnss_pr_err("Phy ucode image loading failed, ret = %d\n", ret);
@@ -1463,7 +1489,8 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 	}
 
 	if (priv->device_id == WCN6450_DEVICE_ID ||
-	    priv->device_id == WCN7750_DEVICE_ID) {
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID) {
 		ret = icnss_wlfw_qdss_dnld_send_sync(priv);
 		if (ret < 0)
 			icnss_pr_info("Failed to download qdss config file, ret = %d\n",
@@ -1472,6 +1499,7 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 
 	if ((priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) &&
 	    !priv->legacy_ipc_transport) {
 		if (!priv->fw_soc_wake_ack_irq)
@@ -1822,7 +1850,7 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 			  size_t num_entries_loaded)
 {
 	struct qcom_dump_segment *seg;
-	struct cnss_host_dump_meta_info meta_info = {0};
+	struct cnss_host_dump_meta_info *meta_info;
 	struct list_head head;
 	int dev_ret = -1;
 	struct device *new_device;
@@ -1835,9 +1863,15 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		return ret;
 	}
 
+	/* Allocate meta_info on heap to avoid large on-stack allocation */
+	meta_info = kzalloc(sizeof(*meta_info), GFP_KERNEL);
+	if (!meta_info)
+		return -ENOMEM;
+
 	new_device = kcalloc(1, sizeof(*new_device), GFP_KERNEL);
 	if (!new_device) {
 		icnss_pr_err("Failed to alloc device mem\n");
+		kfree(meta_info);
 		return -ENOMEM;
 	}
 
@@ -1861,7 +1895,7 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		 * So initialize type with -1(Invalid) to avoid such issues.
 		 */
 
-		meta_info.entry[i].type = -1;
+		meta_info->entry[i].type = -1;
 		seg = kcalloc(1, sizeof(*seg), GFP_KERNEL);
 		if (!seg) {
 			icnss_pr_err("Failed to alloc seg entry %d\n", i);
@@ -1875,10 +1909,10 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		for (dump_type_id = 0; dump_type_id < CNSS_HOST_DUMP_TYPE_MAX;
 			 dump_type_id++) {
 			if (strcmp(ssr_entry[i].region_name, icnss_get_wlan_str(dump_type_id)) == 0)
-				meta_info.entry[i].type = dump_type_id;
+				meta_info->entry[i].type = dump_type_id;
 		}
-		meta_info.entry[i].entry_start = i + 1;
-		meta_info.entry[i].entry_num++;
+		meta_info->entry[i].entry_start = i + 1;
+		meta_info->entry[i].entry_num++;
 
 		list_add_tail(&seg->node, &head);
 	}
@@ -1891,14 +1925,14 @@ static int icnss_do_host_ramdump(struct icnss_priv *priv,
 		goto skip_host_dump;
 	}
 
-	meta_info.magic = ICNSS_RAMDUMP_MAGIC;
-	meta_info.version = ICNSS_RAMDUMP_VERSION;
-	meta_info.chipset = priv->device_id;
-	meta_info.total_entries = num_entries_loaded;
+	meta_info->magic = ICNSS_RAMDUMP_MAGIC;
+	meta_info->version = ICNSS_RAMDUMP_VERSION;
+	meta_info->chipset = priv->device_id;
+	meta_info->total_entries = num_entries_loaded;
 
-	seg->va = &meta_info;
-	seg->da = (dma_addr_t)&meta_info;
-	seg->size = sizeof(meta_info);
+	seg->va = meta_info;
+	seg->da = (dma_addr_t)meta_info;
+	seg->size = sizeof(*meta_info);
 
 	list_add(&seg->node, &head);
 
@@ -1914,6 +1948,7 @@ skip_host_dump:
 put_device:
 	put_device(new_device);
 	icnss_pr_dbg("host ramdump result %d\n", ret);
+	kfree(meta_info);
 	return ret;
 }
 
@@ -2062,7 +2097,8 @@ static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data,
 	 * If we turn off 1.8 AON power rail which is supplying power, it will result into pci
 	 * enumeration failure. So, avoid doing power off in this case.
 	 */
-	if (!(priv->device_id == WCN7750_DEVICE_ID))
+	if (!(priv->device_id == WCN7750_DEVICE_ID ||
+	      priv->device_id == WCN8750_DEVICE_ID))
 		icnss_hw_power_off(priv);
 	else if (cold_boot)
 		icnss_hw_power_off(priv);
@@ -2535,6 +2571,7 @@ static int icnss_driver_event_pd_service_down(struct icnss_priv *priv,
 
 	if ((priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) &&
 	    !priv->legacy_ipc_transport) {
 		icnss_send_smp2p(priv, ICNSS_RESET_MSG,
@@ -3149,10 +3186,12 @@ static void icnss_update_shutdown_state_to_fw(struct icnss_priv *priv,
 				icnss_pr_err("FW block shutdown timeout\n");
 		}
 
-		ret = wlfw_send_fw_shutdown_msg(priv);
-		if (ret < 0)
-			icnss_pr_err("Fail to send FW shutdown Indication %d\n",
-				     ret);
+		if (!atomic_read(&priv->is_idle_shutdown)) {
+			ret = wlfw_send_fw_shutdown_msg(priv);
+			if (ret < 0)
+				icnss_pr_err("Fail to send FW shutdown Indication %d\n",
+					     ret);
+		}
 	}
 }
 
@@ -3187,6 +3226,7 @@ static int icnss_wpss_early_notifier_nb(struct notifier_block *nb,
 		icnss_ignore_fw_timeout(true);
 		if (priv->device_id == WCN6750_DEVICE_ID ||
 		    priv->device_id == WCN7750_DEVICE_ID ||
+		    priv->device_id == WCN8750_DEVICE_ID ||
 		    priv->device_id == WCN6450_DEVICE_ID) {
 			clear_bit(ICNSS_SOC_WAKE_DONE, &priv->state);
 			complete(&priv->smp2p_soc_wake_wait);
@@ -3239,7 +3279,8 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 			icnss_msa0_ramdump(priv);
 			priv->notif_crashed = false;
 		} else {
-			if (priv->device_id == WCN7750_DEVICE_ID) {
+			if (priv->device_id == WCN7750_DEVICE_ID ||
+			    priv->device_id == WCN8750_DEVICE_ID) {
 
 				if (priv->pinctrl_info.wlan_en_gpio) {
 					gpio_val = gpio_get_value(priv->pinctrl_info.wlan_en_gpio);
@@ -3273,7 +3314,8 @@ static int icnss_wpss_notifier_nb(struct notifier_block *nb,
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
-	    priv->device_id == WCN6450_DEVICE_ID)
+	    priv->device_id == WCN6450_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID)
 		icnss_update_shutdown_state_to_fw(priv, data);
 
 	set_bit(ICNSS_FW_DOWN, &priv->state);
@@ -3875,6 +3917,7 @@ static int icnss_register_ramdump_devices(struct icnss_priv *priv)
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) {
 		priv->m3_dump_phyareg = icnss_create_ramdump_device(priv,
 						ICNSS_M3_SEGMENT(
@@ -4280,6 +4323,15 @@ static struct icnss_msi_config msi_config_wcn7750 = {
 	},
 };
 
+static struct icnss_msi_config msi_config_wcn8750 = {
+	.total_vectors = 28,
+	.total_users = MSI_USERS,
+	.users = (struct icnss_msi_user[]) {
+		{ .name = "CE", .num_vectors = 10, .base_vector = 0 },
+		{ .name = "DP", .num_vectors = 18, .base_vector = 10 },
+	},
+};
+
 static struct icnss_msi_config msi_config_wcn6450 = {
 	.total_vectors = 14,
 	.total_users = MSI_USERS,
@@ -4297,6 +4349,8 @@ static int icnss_get_msi_assignment(struct icnss_priv *priv)
 		priv->msi_config = &msi_config_wcn6450;
 	else if (priv->device_id == WCN7750_DEVICE_ID)
 		priv->msi_config = &msi_config_wcn7750;
+	else if (priv->device_id == WCN8750_DEVICE_ID)
+		priv->msi_config = &msi_config_wcn8750;
 
 	return 0;
 }
@@ -4785,7 +4839,8 @@ int icnss_wlan_enable(struct device *dev, struct icnss_wlan_enable_cfg *config,
 		icnss_setup_dms_mac(priv);
 
 	if (priv->device_id == WCN6750_DEVICE_ID  ||
-	    priv->device_id == WCN7750_DEVICE_ID) {
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID) {
 		if (!icnss_get_temperature(priv, &temp)) {
 			icnss_pr_dbg("Temperature: %d\n", temp);
 			if (temp < WLAN_EN_TEMP_THRESHOLD)
@@ -5742,7 +5797,8 @@ static int icnss_resource_parse(struct icnss_priv *priv)
 	}
 
 	if (priv->device_id == WCN6450_DEVICE_ID ||
-	    priv->device_id == WCN7750_DEVICE_ID)
+	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID)
 		icnss_parse_gpio_config(priv);
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID) {
@@ -5797,6 +5853,7 @@ static int icnss_resource_parse(struct icnss_priv *priv)
 		}
 	} else if (priv->device_id == WCN6750_DEVICE_ID ||
 		   priv->device_id == WCN7750_DEVICE_ID ||
+		   priv->device_id == WCN8750_DEVICE_ID ||
 		   priv->device_id == WCN6450_DEVICE_ID) {
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						   "msi_addr");
@@ -5962,7 +6019,8 @@ static int icnss_smmu_fault_handler(struct iommu_domain *domain,
 }
 
 #if defined(CONFIG_CNSS2_SMMU_DB_SUPPORT) && \
-    (LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0))
+    ((LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0)) || \
+     (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)))
 #define PCIE_LOCAL_REG_APPS_TO_Q6	0x3224
 #define PCIE_LOCAL_REG_WCSS_IE_IRQ	0x3228
 
@@ -6024,7 +6082,8 @@ static void icnss_pci_smmu_fault_handler_irq(struct iommu_domain *domain,
 	icnss_record_smmu_fault_timestamp(priv, SMMU_CB_EXIT);
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)) && \
+     (LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0))
 static void icnss_register_iommu_fault_handler_irq(struct icnss_priv *priv)
 {
 	struct platform_device *pdev = priv->pdev;
@@ -6105,6 +6164,19 @@ static inline int icnss_dt_parse_iommu_address(struct device *dev, u32 *addr_win
 }
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static void icnss_set_smmu_fault_handler(struct icnss_priv *priv)
+{
+	qcom_iommu_set_fault_handler(priv->iommu_domain,
+				     icnss_smmu_fault_handler, priv);
+}
+#else
+static void icnss_set_smmu_fault_handler(struct icnss_priv *priv)
+{
+	iommu_set_fault_handler(priv->iommu_domain,
+				icnss_smmu_fault_handler, priv);
+}
+#endif
 
 static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 {
@@ -6115,6 +6187,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 	struct resource *res;
 	u32 addr_win[2];
 	struct device_node *of_node = dev->of_node;
+	struct device_node *iommu_group_node = NULL;
 
 	ret = of_property_read_u32_array(of_node,
 					 "qcom,iommu-dma-addr-pool",
@@ -6122,13 +6195,15 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 					 ARRAY_SIZE(addr_win));
 
 	if (ret) {
-		of_node = of_parse_phandle(dev->of_node,
-					   "qcom,iommu-group", 0);
-		if (of_node)
+		iommu_group_node = of_parse_phandle(dev->of_node,
+						    "qcom,iommu-group", 0);
+		if (iommu_group_node) {
+			of_node = iommu_group_node;
 			ret = of_property_read_u32_array(of_node,
 							 "qcom,iommu-dma-addr-pool",
 							 addr_win,
 							 ARRAY_SIZE(addr_win));
+		}
 	}
 
 	if (ret)
@@ -6146,8 +6221,10 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		priv->iommu_domain =
 			iommu_get_domain_for_dev(&pdev->dev);
 
-		if (!priv->iommu_domain)
+		if (!priv->iommu_domain) {
+			of_node_put(iommu_group_node);
 			return -EPROBE_DEFER;
+		}
 
 		ret = of_property_read_string(of_node, "qcom,iommu-dma",
 					      &iommu_dma_type);
@@ -6156,10 +6233,9 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 			priv->smmu_s1_enable = true;
 			if (priv->device_id == WCN6750_DEVICE_ID ||
 			    priv->device_id == WCN6450_DEVICE_ID)
-				iommu_set_fault_handler(priv->iommu_domain,
-						icnss_smmu_fault_handler,
-						priv);
-			else if (priv->device_id == WCN7750_DEVICE_ID)
+				icnss_set_smmu_fault_handler(priv);
+			else if (priv->device_id == WCN7750_DEVICE_ID ||
+				 priv->device_id == WCN8750_DEVICE_ID)
 				icnss_register_iommu_fault_handler_irq(priv);
 		}
 
@@ -6178,8 +6254,7 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		}
 	}
 
-	if (of_node != dev->of_node)
-		of_node_put(of_node);
+	of_node_put(iommu_group_node);
 
 	return 0;
 }
@@ -6241,6 +6316,9 @@ void icnss_add_fw_prefix_name(struct icnss_priv *priv, char *prefix_name,
 	else if (priv->device_id == WCN7750_DEVICE_ID)
 		scnprintf(prefix_name, ICNSS_MAX_FILE_NAME,
 			  WCN7750_PATH_PREFIX "%s", name);
+	else if (priv->device_id == WCN8750_DEVICE_ID)
+		scnprintf(prefix_name, ICNSS_MAX_FILE_NAME,
+			  WCN8750_PATH_PREFIX "%s", name);
 	icnss_pr_dbg("File added with prefix: %s\n", prefix_name);
 }
 
@@ -6249,6 +6327,7 @@ static const struct platform_device_id icnss_platform_id_table[] = {
 	{ .name = "adrastea", .driver_data = ADRASTEA_DEVICE_ID, },
 	{ .name = "wcn6450", .driver_data = WCN6450_DEVICE_ID, },
 	{ .name = "wcn7750", .driver_data = WCN7750_DEVICE_ID, },
+	{ .name = "wcn8750", .driver_data = WCN8750_DEVICE_ID, },
 	{ },
 };
 
@@ -6265,6 +6344,9 @@ static const struct of_device_id icnss_dt_match[] = {
 	{
 		.compatible = "qcom,wcn7750",
 		.data = (void *)&icnss_platform_id_table[3]},
+	{
+		.compatible = "qcom,wcn8750",
+		.data = (void *)&icnss_platform_id_table[4]},
 	{ },
 };
 
@@ -6285,6 +6367,21 @@ static const struct of_device_id icnss_direct_link_dt_match[] = {
 
 MODULE_DEVICE_TABLE(of, icnss_direct_link_dt_match);
 
+static const struct platform_device_id icnss_wonder_platform_id_table[] = {
+	{ .name = "vendor-wlan-wonder",
+	  .driver_data = WONDER_VENDOR_DEVICE_ID, },
+	{ },
+};
+
+static const struct of_device_id icnss_wonder_dt_match[] = {
+	{
+		.compatible = "qcom,icnss-vendor-wlan-wonder",
+		.data = (void *)&icnss_wonder_platform_id_table[0]},
+	{ },
+};
+
+MODULE_DEVICE_TABLE(of, icnss_wonder_dt_match);
+
 static void icnss_init_control_params(struct icnss_priv *priv)
 {
 	const char *hw_version;
@@ -6296,6 +6393,7 @@ static void icnss_init_control_params(struct icnss_priv *priv)
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID ||
 	    of_property_read_bool(priv->pdev->dev.of_node,
 				  "wpss-support-enable"))
@@ -6303,6 +6401,7 @@ static void icnss_init_control_params(struct icnss_priv *priv)
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) {
 		ret = of_property_read_string(priv->pdev->dev.of_node,
 					      "wcn-hw-version",
@@ -6322,7 +6421,8 @@ static void icnss_init_control_params(struct icnss_priv *priv)
 	if (priv->bdf_download_support && priv->device_id == ADRASTEA_DEVICE_ID)
 		priv->ctrl_params.bdf_type = ICNSS_BDF_BIN;
 
-	if (priv->device_id == WCN7750_DEVICE_ID)
+	if (priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID)
 		icnss_set_feature_list(priv, CNSS_AUX_UC_SUPPORT_V01);
 
 	if (of_property_read_bool(priv->pdev->dev.of_node,
@@ -6451,7 +6551,7 @@ icnss_get_cpumask_for_wlan_txrx_intr(struct icnss_priv *priv)
 					 "wlan-txrx-intr-cpumask",
 					 cpumask, CPUMASK_ARRAY_SIZE);
 	if (ret) {
-		icnss_pr_err("Failed to get cpumask for wlan txrx interrupts");
+		icnss_pr_dbg("irq affinity not defined in DT, applying default affinity");
 		return;
 	}
 
@@ -6473,6 +6573,9 @@ static const char *icnss_get_device_name(const struct platform_device_id *device
 
 	case WCN7750_DEVICE_ID:
 		return "ORNE";
+
+	case WCN8750_DEVICE_ID:
+		return "KASAI";
 	}
 	return "UNKNOWN";
 }
@@ -6495,9 +6598,116 @@ static void icnss_direct_link_remove(struct platform_device *pdev)
 #endif
 }
 
+/**
+ * icnss_vendor_wonder_comp_bind - vendor wonder device component bind
+ *  callback
+ * @comp: vendor wonder device
+ * @master: master device
+ * @master_data: master data
+ *
+ * Return: 0 on success else errno
+ */
+static
+int icnss_vendor_wonder_comp_bind(struct device *comp, struct device *master,
+				  void *master_data)
+{
+	icnss_pr_info("vendor wonder bound to master device %s\n",
+		      dev_name(master));
+	return 0;
+}
+
+/**
+ * icnss_vendor_wonder_comp_unbind - vendor wonder device component unbind
+ *  callback
+ * @comp: vendor wonder device
+ * @master: master device
+ * @master_data: master data
+ *
+ * Return: None
+ */
+static
+void icnss_vendor_wonder_comp_unbind(struct device *comp,
+				     struct device *master, void *master_data)
+{
+	icnss_pr_info("vendor wonder unbound to master device\n");
+}
+
+static struct platform_device *wonder_plat_dev;
+static const void *wonder_priv_data;
+
+static const struct component_ops wonder_comp_ops = {
+	.bind = icnss_vendor_wonder_comp_bind,
+	.unbind = icnss_vendor_wonder_comp_unbind,
+};
+
+static inline int icnss_add_vendor_wonder_component(void)
+{
+	platform_set_drvdata(wonder_plat_dev, (void *)wonder_priv_data);
+
+	return component_add(&wonder_plat_dev->dev, &wonder_comp_ops);
+}
+
+static inline void icnss_del_vendor_wonder_component(void)
+{
+	component_del(&wonder_plat_dev->dev, &wonder_comp_ops);
+	platform_set_drvdata(wonder_plat_dev, NULL);
+}
+
+int icnss_set_vendor_wonder_priv_data(const void *priv_data)
+{
+	wonder_priv_data = priv_data;
+
+	if (!wonder_plat_dev) {
+		icnss_pr_info("vendor wonder plat device not available\n");
+		return 0;
+	}
+
+	if (wonder_priv_data)
+		return icnss_add_vendor_wonder_component();
+
+	icnss_del_vendor_wonder_component();
+
+	return 0;
+}
+EXPORT_SYMBOL(icnss_set_vendor_wonder_priv_data);
+
+static int icnss_wonder_probe(struct platform_device *pdev)
+{
+	if (!wonder_plat_dev) {
+		icnss_pr_info("wlan vendor wonder device probed!\n");
+		wonder_plat_dev = pdev;
+
+		if (wonder_priv_data)
+			return icnss_add_vendor_wonder_component();
+
+		return 0;
+	}
+
+	icnss_pr_info("wlan vendor wonder device already exists!\n");
+	return -EEXIST;
+}
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
+static int icnss_wonder_remove(struct platform_device *pdev)
+#else
+static void icnss_wonder_remove(struct platform_device *pdev)
+#endif
+{
+	if (wonder_plat_dev && wonder_priv_data)
+		icnss_del_vendor_wonder_component();
+
+	icnss_pr_info("wlan vendor wonder device removed!\n");
+	wonder_plat_dev = NULL;
+	wonder_priv_data = NULL;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
+	return 0;
+#endif
+}
+
 static int icnss_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	int bt_en_gpio, bt_en_gpio_val;
 	const char *device_name;
 	struct device *dev = &pdev->dev;
 	struct icnss_priv *priv;
@@ -6550,6 +6760,19 @@ static int icnss_probe(struct platform_device *pdev)
 	ret = icnss_resource_parse(priv);
 	if (ret)
 		goto out_reset_drvdata;
+
+	if (priv->device_id == WCN7750_DEVICE_ID &&
+	    gpio_is_valid(priv->pinctrl_info.bt_en_gpio)) {
+		bt_en_gpio = priv->pinctrl_info.bt_en_gpio;
+		bt_en_gpio_val = gpio_get_value(bt_en_gpio);
+		ret = gpio_direction_output(bt_en_gpio, 0);
+		icnss_pr_info("BT_EN GPIO(%d) before: %d after: %d\n",
+			     bt_en_gpio, bt_en_gpio_val, gpio_get_value(bt_en_gpio));
+		if (ret)
+			icnss_pr_err("Failed to reset BT_EN GPIO(%d), err = %d\n",
+				     bt_en_gpio, ret);
+		ret = 0;
+	}
 
 	ret = icnss_msa_dt_parse(priv);
 	if (ret)
@@ -6607,6 +6830,7 @@ static int icnss_probe(struct platform_device *pdev)
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) {
 		priv->soc_wake_wq = alloc_workqueue("icnss_soc_wake_event",
 						    WQ_UNBOUND|WQ_HIGHPRI, 1);
@@ -6632,7 +6856,8 @@ static int icnss_probe(struct platform_device *pdev)
 	}
 
 	if (priv->device_id == WCN7750_DEVICE_ID ||
-	    priv->device_id == WCN6450_DEVICE_ID) {
+	    priv->device_id == WCN6450_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID) {
 		icnss_reboot_register_notifier(priv);
 	}
 
@@ -6748,12 +6973,14 @@ static void icnss_remove(struct platform_device *pdev)
 		icnss_pdr_unregister_notifier(priv);
 	}
 
-	if (priv->device_id == WCN7750_DEVICE_ID) {
+	if (priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID) {
 		icnss_reboot_unregister_notifier(priv);
 	}
 
 	if (priv->device_id == WCN6750_DEVICE_ID ||
 	    priv->device_id == WCN7750_DEVICE_ID ||
+	    priv->device_id == WCN8750_DEVICE_ID ||
 	    priv->device_id == WCN6450_DEVICE_ID) {
 		icnss_genl_exit();
 		icnss_runtime_pm_deinit(priv);
@@ -6844,6 +7071,7 @@ static int icnss_pm_suspend(struct device *dev)
 	if (ret == 0) {
 		if (priv->device_id == WCN6750_DEVICE_ID ||
 		    priv->device_id == WCN7750_DEVICE_ID ||
+		    priv->device_id == WCN8750_DEVICE_ID ||
 		    priv->device_id == WCN6450_DEVICE_ID) {
 			if (test_bit(ICNSS_PD_RESTART, &priv->state) ||
 			    !test_bit(ICNSS_MODE_ON, &priv->state))
@@ -7088,6 +7316,15 @@ static struct platform_driver icnss_direct_link_driver = {
 	},
 };
 
+static struct platform_driver icnss_wonder_driver = {
+	.probe  = icnss_wonder_probe,
+	.remove = icnss_wonder_remove,
+	.driver = {
+		.name = "icnss2_vendor_wlan_wonder",
+		.of_match_table = icnss_wonder_dt_match,
+	},
+};
+
 /**
  * icnss_has_valid_dt_node() - Check if valid device tree node present
  *
@@ -7122,6 +7359,19 @@ static bool icnss_direct_link_has_valid_dt_node(void)
 	return false;
 }
 
+static bool icnss_wonder_has_valid_dt_node(void)
+{
+	struct device_node *dn = NULL;
+
+	for_each_matching_node(dn, icnss_wonder_dt_match) {
+		if (of_device_is_available(dn))
+			return true;
+	}
+
+	icnss_pr_dbg("No valid icnss2 vendor wonder dtsi entry\n");
+	return false;
+}
+
 static int __init icnss_initialize(void)
 {
 	int ret;
@@ -7138,6 +7388,17 @@ static int __init icnss_initialize(void)
 		if (ret) {
 			platform_driver_unregister(&icnss_driver);
 			icnss_debug_deinit();
+			return ret;
+		}
+	}
+
+	if (!ret && icnss_wonder_has_valid_dt_node()) {
+		ret = platform_driver_register(&icnss_wonder_driver);
+		icnss_pr_info("Vendor wonder driver register status:%d", ret);
+		if (ret) {
+			platform_driver_unregister(&icnss_direct_link_driver);
+			platform_driver_unregister(&icnss_driver);
+			icnss_debug_deinit();
 		}
 	}
 
@@ -7148,6 +7409,7 @@ static void __exit icnss_exit(void)
 {
 	platform_driver_unregister(&icnss_driver);
 	platform_driver_unregister(&icnss_direct_link_driver);
+	platform_driver_unregister(&icnss_wonder_driver);
 	icnss_debug_deinit();
 }
 
