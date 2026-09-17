@@ -7,11 +7,8 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/of.h>
-#include <linux/version.h>
 #include <linux/gpio/consumer.h>
-#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
-#endif
 #include <linux/pinctrl/consumer.h>
 #if IS_ENABLED(CONFIG_PINCTRL_MSM) && !IS_ENABLED(CONFIG_PINCTRL_MSM_NO_EXT)
 #include <linux/pinctrl/qcom-pinctrl.h>
@@ -107,7 +104,7 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define CNSS_IR_DROP_SLEEP_DEFAULT 10
 #define CNSS_IR_DROP_SLEEP (plat_priv->sleep_voltage_drop_adjustment)
 #define VREG_NOTFOUND 1
-#define AON_REG_SLEEP_VOLTAGE 750
+#define AON_REG_SLEEP_VOLTAGE 780
 
 /**
  * enum cnss_aop_vreg_param: Voltage regulator TCS param

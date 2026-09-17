@@ -653,6 +653,43 @@ out:
 	return ret;
 }
 
+int cnss_wlfw_bmps_ctrl_send_sync(struct cnss_plat_data *plat_priv,
+				  bool disable)
+{
+	struct wlfw_bmps_ctrl_req_msg_v01 *req;
+	struct wlfw_bmps_ctrl_resp_msg_v01 *resp;
+	int ret;
+
+	cnss_pr_dbg("Sending BMPS ctrl: disable=%d, state: 0x%lx\n",
+		    disable, plat_priv->driver_state);
+
+	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	if (!req)
+		return -ENOMEM;
+
+	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
+	if (!resp) {
+		kfree(req);
+		return -ENOMEM;
+	}
+
+	req->bmps_state = disable ? QMI_WLFW_BMPS_DISABLE_V01 :
+				    QMI_WLFW_BMPS_ENABLE_V01;
+
+	ret = qmi_send_wait(&plat_priv->qmi_wlfw, req, resp,
+			    wlfw_bmps_ctrl_req_msg_v01_ei,
+			    wlfw_bmps_ctrl_resp_msg_v01_ei,
+			    QMI_WLFW_BMPS_CTRL_REQ_V01,
+			    WLFW_BMPS_CTRL_REQ_MSG_V01_MAX_MSG_LEN,
+			    QMI_WLFW_TIMEOUT_MS);
+	if (ret < 0)
+		cnss_pr_err("Failed to send BMPS ctrl req, err: %d\n", ret);
+
+	kfree(resp);
+	kfree(req);
+	return ret;
+}
+
 int cnss_wlfw_tgt_cap_send_sync(struct cnss_plat_data *plat_priv)
 {
 	struct wlfw_cap_req_msg_v01 *req;

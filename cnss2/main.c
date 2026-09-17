@@ -12,18 +12,14 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_device.h>
-#include <linux/version.h>
-#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
-#else
-#include <linux/gpio/consumer.h>
-#endif
 #include <linux/pm_wakeup.h>
 #include <linux/reboot.h>
 #include <linux/rwsem.h>
 #include <linux/suspend.h>
 #include <linux/timer.h>
 #include <linux/thermal.h>
+#include <linux/version.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
 #include <linux/panic_notifier.h>
 #endif
@@ -1942,6 +1938,19 @@ int cnss_power_down(struct device *dev)
 				      CNSS_EVENT_SYNC, NULL);
 }
 EXPORT_SYMBOL(cnss_power_down);
+
+int cnss_set_bmps(struct device *dev, bool disable)
+{
+	struct cnss_plat_data *plat_priv = cnss_bus_dev_to_plat_priv(dev);
+
+	if (!plat_priv) {
+		cnss_pr_err("plat_priv is NULL\n");
+		return -ENODEV;
+	}
+
+	return cnss_wlfw_bmps_ctrl_send_sync(plat_priv, disable);
+}
+EXPORT_SYMBOL(cnss_set_bmps);
 
 int cnss_idle_restart(struct device *dev)
 {

@@ -8,6 +8,15 @@ config WCNSS_MEM_PRE_ALLOC
 	  for it's internal usage and release it to back to pre allocated pool.
 	  This memory is allocated at the cold boot time.
 
+config WCNSS_SKB_PRE_ALLOC
+	tristate "WCNSS SKB pre-alloc support"
+	depends on WCNSS_MEM_PRE_ALLOC
+	help
+	  Pre-allocate SKB buffers for the WLAN driver module.
+	  This feature pre-allocates sk_buff structures to use when there
+	  is memory constraint and avoid allocation failures. Used for
+	  SDIO-based WLAN targets (e.g. QCN7605).
+
 config CNSS_OUT_OF_TREE
 	bool "Build module out-of-tree"
 	help
