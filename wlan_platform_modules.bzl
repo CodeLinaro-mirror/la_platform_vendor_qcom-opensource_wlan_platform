@@ -12,6 +12,7 @@ _default_module_enablement_list = [
 
 _cnss2_enabled_target = ["seraph", "niobe", "pineapple", "sun", "x1e80100", "canoe", "hamoa", "hamoa_la", "sdxkova", "autogvm", "autoghgvm", "lahaina", "parrot", "art", "art16k", "sa510m", "sa510m.1g", "glymur", "waipio"]
 _icnss2_enabled_target = ["blair", "pineapple", "monaco", "pitti", "parrot", "sun", "canoe", "lahaina", "chora", "art", "art16k", "alor-le", "bengal", "malabar", "shikra", "pebble-le", "waipio"]
+_cnss2_sdio_enabled_target = ["vienna", "vienna-le"]
 
 def matching_la_variant(target_16k):
     for target in targets:
@@ -39,6 +40,10 @@ def _get_module_list(target, variant):
 
     if target in _icnss2_enabled_target:
         ret.extend(["icnss2"])
+        is_wlan_platform_enabled = True
+
+    if target in _cnss2_sdio_enabled_target:
+        ret.extend(["cnss2_sdio", "qcn_sdio", "qti_sdio_client"])
         is_wlan_platform_enabled = True
 
     if is_wlan_platform_enabled:
@@ -111,6 +116,7 @@ def _define_modules_for_target_variant(target, variant):
     cnss2_enabled = 0
     plat_ipc_qmi_svc_enabled = 0
     icnss2_enabled = 0
+    cnss2_sdio_enabled = 0
 
     if target in _cnss2_enabled_target:
         cnss2_enabled = 1
@@ -118,6 +124,9 @@ def _define_modules_for_target_variant(target, variant):
 
     if target in _icnss2_enabled_target:
         icnss2_enabled = 1
+
+    if target in _cnss2_sdio_enabled_target:
+        cnss2_sdio_enabled = 1
 
     if target != "sa510m" and target != "sa510m.1g":
         kernel_header = "//msm-kernel:all_headers"
@@ -276,6 +285,106 @@ def _define_modules_for_target_variant(target, variant):
                 ":wlan-platform-headers",
             ],
         )
+
+    if cnss2_sdio_enabled:
+        module = "qcn_sdio"
+        _define_platform_config_rule(module, target, variant)
+        defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
+        qcn_sdio_deps = [
+            ":wlan-platform-headers",
+        ]
+        qcn_sdio_deps += select({
+            "//build/qcom_build_extensions:qtisocrepo_true": [
+                "//soc-repo:all_headers",
+                "//vendor/qcom/opensource/coproc-kernel:weartech-headers",
+                "//soc-repo:{}/kernel/trace/qcom_ipc_logging".format(tv),
+                "//soc-repo:{}/drivers/mmc/host/sdhci-msm".format(tv),
+            ],
+            "//build/qcom_build_extensions:qtisocrepo_false": [
+                "//msm-kernel:all_headers",
+            ],
+        })
+        ddk_module(
+            name = "{}_qcn_sdio".format(tv),
+            srcs = native.glob([
+                "qcn_sdio/qcn_sdio.c",
+                "qcn_sdio/*.h",
+            ]),
+            includes = ["qcn_sdio"],
+            kconfig = "qcn_sdio/Kconfig",
+            defconfig = defconfig,
+            out = "qcn_sdio.ko",
+            kernel_build = kernel_build,
+            deps = qcn_sdio_deps,
+        )
+
+        module = "qti_sdio_client"
+        _define_platform_config_rule(module, target, variant)
+        defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
+        ddk_module(
+            name = "{}_qti_sdio_client".format(tv),
+            srcs = native.glob([
+                "qti_sdio_client/qti_sdio_client.c",
+            ]),
+            includes = ["inc"],
+            kconfig = "qti_sdio_client/Kconfig",
+            defconfig = defconfig,
+            out = "qti_sdio_client.ko",
+            kernel_build = kernel_build,
+            deps = [
+                ":{}_cnss_prealloc".format(tv),
+                ":{}_qcn_sdio".format(tv),
+                ":wlan-platform-headers",
+            ] + select({
+                "//build/qcom_build_extensions:qtisocrepo_true": [
+                    "//soc-repo:all_headers",
+                    "//soc-repo:{}/kernel/trace/qcom_ipc_logging".format(tv),
+                ],
+                "//build/qcom_build_extensions:qtisocrepo_false": ["//msm-kernel:all_headers"],
+            }),
+        )
+
+        module = "cnss2_sdio"
+        _define_platform_config_rule(module, target, variant)
+        defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
+        cnss2_sdio_deps = [
+            ":{}_cnss_utils".format(tv),
+            ":{}_qcn_sdio".format(tv),
+            ":{}_qti_sdio_client".format(tv),
+            ":{}_cnss_prealloc".format(tv),
+            ":wlan-platform-headers",
+        ]
+        cnss2_sdio_deps += select({
+            "//build/qcom_build_extensions:qtisocrepo_true": [
+                "//soc-repo:all_headers",
+                "//vendor/qcom/opensource/securemsm-kernel:{}_smcinvoke_dlkm".format(tv),
+                "//vendor/qcom/opensource/coproc-kernel:weartech-headers",
+                "//vendor/qcom/opensource/coproc-kernel:{}_smc_client_driver".format(tv),
+                "//soc-repo:{}/kernel/trace/qcom_ipc_logging".format(tv),
+            ],
+            "//build/qcom_build_extensions:qtisocrepo_false": [
+                "//msm-kernel:all_headers",
+            ],
+        })
+        ddk_module(
+            name = "{}_cnss2_sdio".format(tv),
+            srcs = native.glob([
+                "cnss2_sdio/main.c",
+                "cnss2_sdio/bus.c",
+                "cnss2_sdio/debug.c",
+                "cnss2_sdio/sdio.c",
+                "cnss2_sdio/genl.c",
+                "cnss2_sdio/*.h",
+                "cnss_utils/*.h",
+            ]),
+            includes = ["cnss_utils", "qcn_sdio", "qti_sdio_client"],
+            kconfig = "cnss2_sdio/Kconfig",
+            defconfig = defconfig,
+            out = "cnss2_sdio.ko",
+            kernel_build = kernel_build,
+            deps = cnss2_sdio_deps,
+        )
+
     module = "cnss_genl"
     _define_platform_config_rule(module, target, variant)
     defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
@@ -303,6 +412,9 @@ def _define_modules_for_target_variant(target, variant):
     module = "cnss_prealloc"
     _define_platform_config_rule(module, target, variant)
     defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
+    cnss_prealloc_copts = []
+    if target in _cnss2_sdio_enabled_target:
+        cnss_prealloc_copts = ["-DCONFIG_WCNSS_SKB_PRE_ALLOC"]
     ddk_module(
         name = "{}_cnss_prealloc".format(tv),
         srcs = native.glob([
@@ -312,6 +424,7 @@ def _define_modules_for_target_variant(target, variant):
         includes = ["cnss_utils"],
         kconfig = "cnss_prealloc/Kconfig",
         defconfig = defconfig,
+        copts = cnss_prealloc_copts,
         out = "cnss_prealloc.ko",
         kernel_build = kernel_build,
         deps = deps + [
@@ -430,5 +543,5 @@ def define_modules():
         define_16k_aliases(module, target, variant)
     for (t, v) in get_all_variants():
         print("v=", v)
-        if t in _cnss2_enabled_target or t in _icnss2_enabled_target:
+        if t in _cnss2_enabled_target or t in _icnss2_enabled_target or t in _cnss2_sdio_enabled_target:
             _define_modules_for_target_variant(t, v)

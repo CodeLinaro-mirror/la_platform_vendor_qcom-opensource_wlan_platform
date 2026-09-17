@@ -19,11 +19,13 @@ ddk_headers(
 ddk_headers(
     name = "wlan-platform-private-headers",
     hdrs = glob([
+        "cnss2_sdio/*.h",
+        "qcn_sdio/*.h",
         "cnss2/*.h",
         "cnss_utils/*.h",
         "icnss2/*.h"
     ]),
-    includes = ["cnss2", "cnss_utils", "icnss2"],
+    includes = ["cnss2_sdio", "qcn_sdio", "cnss2", "cnss_utils", "icnss2"],
 )
 
 ddk_headers(
