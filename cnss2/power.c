@@ -7,8 +7,11 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/of.h>
+#include <linux/version.h>
 #include <linux/gpio/consumer.h>
+#if (KERNEL_VERSION(7, 1, 0) > LINUX_VERSION_CODE)
 #include <linux/of_gpio.h>
+#endif
 #include <linux/pinctrl/consumer.h>
 #if IS_ENABLED(CONFIG_PINCTRL_MSM) && !IS_ENABLED(CONFIG_PINCTRL_MSM_NO_EXT)
 #include <linux/pinctrl/qcom-pinctrl.h>
@@ -104,6 +107,7 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define CNSS_IR_DROP_SLEEP_DEFAULT 10
 #define CNSS_IR_DROP_SLEEP (plat_priv->sleep_voltage_drop_adjustment)
 #define VREG_NOTFOUND 1
+#define AON_REG_SLEEP_VOLTAGE 750
 
 /**
  * enum cnss_aop_vreg_param: Voltage regulator TCS param
@@ -1642,9 +1646,9 @@ out:
 	return ret;
 }
 
-static int cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
+static void cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
 {
-	int ret = 0;
+	int ret;
 
 	if (plat_priv->device_id == FIG_DEVICE_ID ||
 	    plat_priv->device_id == PEACH_DEVICE_ID ||
@@ -1670,15 +1674,11 @@ static int cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
 	cnss_select_pinctrl_state(plat_priv, false);
 	cnss_clk_off(plat_priv, &plat_priv->clk_list);
 	cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
-
-	return ret;
 }
 
 
 void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 {
-	int ret = 0;
-
 	if (!plat_priv->powered_on) {
 		cnss_pr_dbg("Already powered down");
 		return;
@@ -1692,9 +1692,7 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 		cnss_fw_managed_power_gpio(plat_priv, false);
 		cnss_fw_managed_power_regulator(plat_priv, false);
 	} else if (plat_priv->pwr_ctrl_mode == CNSS_POWER_CTRL_HOST) {
-		ret = cnss_power_off_device_host(plat_priv);
-		if (ret)
-			return;
+		cnss_power_off_device_host(plat_priv);
 	}
 
 	plat_priv->powered_on = false;
@@ -2106,7 +2104,7 @@ int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv)
 	cnss_pr_dbg("PDC init table length: %d\n",
 		    plat_priv->pdc_init_table_len);
 
-	cnss_aop_pdc_disable_cx(plat_priv);
+	ret = cnss_aop_pdc_disable_cx(plat_priv);
 	if (ret < 0) {
 		cnss_pr_err("Failed to disable PDC control of CX, err = %d\n",
 			    ret);
@@ -2499,14 +2497,14 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 				u32 dwnval = plat_vreg_param[i].sleep_volt;
 
 				/* For regulator mapped to WLMX rail, set
-				 * sleep_volt equal to wake_volt to maintain
-				 * sufficient retention voltage for chip state
-				 * during DRV sleep.
+				 * sleep_volt equal to wake_volt to 750mV to
+				 * maintain sufficient retention voltage for
+				 * chip state during DRV sleep.
 				 */
 				if (mx_pin_idx >= 0 &&
 				    strcmp(plat_vreg_param[i].vreg,
 					   plat_priv->pmu_vreg_map[mx_pin_idx + 1]) == 0)
-					dwnval = plat_vreg_param[i].wake_volt;
+					dwnval = AON_REG_SLEEP_VOLTAGE;
 
 				ret =
 				cnss_aop_set_vreg_param(plat_priv,
@@ -2563,6 +2561,23 @@ static void cnss_detect_m2_supply(struct cnss_plat_data *plat_priv)
 	} else {
 		plat_priv->m2_supply_detected = false;
 		cnss_pr_dbg("M.2 supply not present\n");
+	}
+}
+
+/**
+ * cnss_detect_msix_support - Detect MSI-X support from dt prop
+ * @plat_priv: Platform private data structure pointer
+ */
+static void cnss_detect_msix_support(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+
+	if (of_find_property(dev->of_node, "msix-match-addr", NULL)) {
+		plat_priv->msix_supported = true;
+		cnss_pr_info("MSI-X supported\n");
+	} else {
+		plat_priv->msix_supported = false;
+		cnss_pr_dbg("MSI-X not supported\n");
 	}
 }
 
@@ -2718,6 +2733,7 @@ void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv)
 	}
 
 	cnss_detect_m2_supply(plat_priv);
+	cnss_detect_msix_support(plat_priv);
 }
 
 int cnss_update_cpr_info(struct cnss_plat_data *plat_priv)

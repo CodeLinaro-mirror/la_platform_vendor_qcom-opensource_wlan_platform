@@ -593,6 +593,8 @@ int wlfw_ind_register_send_sync_msg(struct icnss_priv *priv)
 		req->respond_get_info_enable = 1;
 		req->m3_dump_upload_segments_req_enable_valid = 1;
 		req->m3_dump_upload_segments_req_enable = 1;
+		req->wfc_call_twt_config_enable_valid = 1;
+		req->wfc_call_twt_config_enable = 1;
 	}
 
 	req->async_data_enable_valid = 1;
