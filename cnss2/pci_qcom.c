@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. */
 
 #include "pci_platform.h"
 #include "debug.h"
@@ -518,6 +518,30 @@ void __cnss_pci_allow_l1(struct device *dev)
 bool cnss_pci_is_sync_probe(void)
 {
 	return true;
+}
+
+const char *cnss_pci_mhi_notify_status_extra_to_str(enum mhi_callback status)
+{
+	switch (status) {
+	case MHI_CB_EE_SBL_MODE:
+		return "SBL_MODE";
+	default:
+		return NULL;
+	}
+}
+
+bool cnss_pci_mhi_notify_status_extra(struct cnss_pci_data *pci_priv,
+				      enum mhi_callback reason)
+{
+	switch (reason) {
+	case MHI_CB_EE_SBL_MODE:
+		cnss_timer_delete_sync(&pci_priv->boot_debug_timer);
+		mod_timer(&pci_priv->boot_debug_timer,
+			  jiffies + msecs_to_jiffies(BOOT_DEBUG_TIMEOUT_MS));
+		return true;
+	default:
+		return false;
+	}
 }
 
 int cnss_pci_get_msi_assignment(struct cnss_pci_data *pci_priv)

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. */
 
 #ifndef _CNSS_PCI_PLATFORM_H
 #define _CNSS_PCI_PLATFORM_H
@@ -141,6 +141,38 @@ int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 
 void cnss_pci_init_warm_reset_params(struct cnss_pci_data *pci_priv);
 int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on);
+
+/**
+ * cnss_pci_mhi_notify_status_extra_to_str() - Stringify downstream MHI status
+ * @status: MHI callback reason
+ *
+ * Some MHI callback reasons (e.g. MHI_CB_EE_SBL_MODE) only exist in the
+ * Qualcomm downstream MHI bus driver (paired with CONFIG_PCI_MSM) and are
+ * not part of the upstream enum mhi_callback used with
+ * CONFIG_PCIE_QCOM_ECAM. This hook lets pci.c stringify such reasons
+ * without referencing enum values that may not exist for the RC driver
+ * this target is built against.
+ *
+ * Return: string if reason is a recognized downstream-only status,
+ *	   NULL otherwise
+ */
+const char *
+cnss_pci_mhi_notify_status_extra_to_str(enum mhi_callback status);
+
+/**
+ * cnss_pci_mhi_notify_status_extra() - Handle downstream MHI status
+ * @pci_priv: driver PCI bus context pointer
+ * @reason: MHI callback reason
+ *
+ * Counterpart of cnss_pci_mhi_notify_status_extra_to_str() for the actual
+ * handling side of cnss_mhi_notify_status().
+ *
+ * Return: true if reason was a recognized downstream-only status and has
+ *	   been fully handled, false if the caller should keep treating it
+ *	   as unsupported
+ */
+bool cnss_pci_mhi_notify_status_extra(struct cnss_pci_data *pci_priv,
+				      enum mhi_callback reason);
 #else
 int _cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
 {
@@ -255,6 +287,19 @@ cnss_pci_init_warm_reset_params(struct cnss_pci_data *pci_priv)
 int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on)
 {
 	return 0;
+}
+
+static inline const char *
+cnss_pci_mhi_notify_status_extra_to_str(enum mhi_callback status)
+{
+	return NULL;
+}
+
+static inline bool
+cnss_pci_mhi_notify_status_extra(struct cnss_pci_data *pci_priv,
+				 enum mhi_callback reason)
+{
+	return false;
 }
 #endif /* CONFIG_PCI_MSM */
 

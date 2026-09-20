@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. */
 
 #include "pci_platform.h"
 #include "debug.h"
@@ -46,6 +46,17 @@ int _cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
 }
 
 bool cnss_pci_is_sync_probe(void)
+{
+	return false;
+}
+
+const char *cnss_pci_mhi_notify_status_extra_to_str(enum mhi_callback status)
+{
+	return NULL;
+}
+
+bool cnss_pci_mhi_notify_status_extra(struct cnss_pci_data *pci_priv,
+				      enum mhi_callback reason)
 {
 	return false;
 }

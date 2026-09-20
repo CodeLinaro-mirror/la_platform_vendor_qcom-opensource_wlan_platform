@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _CNSS_PCI_H
@@ -43,6 +43,8 @@
 
 #define LINK_TRAINING_RETRY_DELAY_MS		500
 #define MSI_USERS			4
+
+#define BOOT_DEBUG_TIMEOUT_MS			7000
 
 #define CNSS_MHI_IN_MISSION_MODE(ee) (ee == MHI_EE_AMSS || \
 				      ee == MHI_EE_WFW || \

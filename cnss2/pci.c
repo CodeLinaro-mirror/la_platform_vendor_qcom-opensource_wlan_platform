@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/completion.h>
@@ -110,8 +110,6 @@ static DEFINE_SPINLOCK(time_sync_lock);
 
 #define MHI_SUSPEND_RETRY_MAX_TIMES		3
 #define MHI_SUSPEND_RETRY_DELAY_US		5000
-
-#define BOOT_DEBUG_TIMEOUT_MS			7000
 
 #define HANG_DATA_LENGTH		384
 #define HST_HANG_DATA_OFFSET		((3 * 1024 * 1024) - HANG_DATA_LENGTH)
@@ -8287,6 +8285,8 @@ static int cnss_pci_update_fw_name(struct cnss_pci_data *pci_priv)
 
 static char *cnss_mhi_notify_status_to_str(enum mhi_callback status)
 {
+	const char *extra_str;
+
 	switch (status) {
 	case MHI_CB_IDLE:
 		return "IDLE";
@@ -8298,15 +8298,14 @@ static char *cnss_mhi_notify_status_to_str(enum mhi_callback status)
 		return "FATAL_ERROR";
 	case MHI_CB_EE_MISSION_MODE:
 		return "MISSION_MODE";
-	case MHI_CB_EE_SBL_MODE:
-		return "SBL_MODE";
 #if IS_ENABLED(CONFIG_MHI_BUS_MISC) && \
 (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 	case MHI_CB_FALLBACK_IMG:
 		return "FW_FALLBACK";
 #endif
 	default:
-		return "UNKNOWN";
+		extra_str = cnss_pci_mhi_notify_status_extra_to_str(status);
+		return extra_str ? (char *)extra_str : "UNKNOWN";
 	}
 };
 
@@ -8446,11 +8445,6 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 	case MHI_CB_IDLE:
 	case MHI_CB_EE_MISSION_MODE:
 		return;
-	case MHI_CB_EE_SBL_MODE:
-		cnss_timer_delete_sync(&pci_priv->boot_debug_timer);
-		mod_timer(&pci_priv->boot_debug_timer,
-			  jiffies + msecs_to_jiffies(BOOT_DEBUG_TIMEOUT_MS));
-		return;
 	case MHI_CB_FATAL_ERROR:
 		cnss_ignore_qmi_failure(true);
 		set_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state);
@@ -8481,6 +8475,8 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 #endif
 
 	default:
+		if (cnss_pci_mhi_notify_status_extra(pci_priv, reason))
+			return;
 		cnss_pr_err("Unsupported MHI status cb reason: %d\n", reason);
 		return;
 	}
