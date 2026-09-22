@@ -416,19 +416,120 @@ static int cnss_set_pci_link_status(struct cnss_pci_data *pci_priv,
 	return ret;
 }
 
+#define CNSS_PCI_SUSPEND_RETRY_MAX 20
+static inline
+int cnss_rc_rtpm_mgmt_wrapper(struct pci_dev *pdev, bool link_up)
+{
+	int ret = -EINVAL, retry = 0;
+	struct device *dev, *host_bridge_dev;
+	struct pci_dev *root_port;
+	bool current_ignore_children;
+
+	root_port = pcie_find_root_port(pdev);
+	if (!root_port) {
+		cnss_pr_err("PCIe root port is null\n");
+		return ret;
+	}
+
+	host_bridge_dev = root_port->dev.parent;
+	if (!host_bridge_dev) {
+		cnss_pr_err("host_bridge_dev is null\n");
+		return ret;
+	}
+
+	dev = host_bridge_dev->parent;
+	if (!dev) {
+		cnss_pr_err("PCIe platform device is null\n");
+		return ret;
+	}
+	current_ignore_children = dev->power.ignore_children;
+
+	cnss_pr_info("PCIe PM Enter: usage_count:%d, runtime_status:%d\n",
+		     atomic_read(&dev->power.usage_count),
+		     dev->power.runtime_status);
+
+	if (link_up) {
+		pm_suspend_ignore_children(dev, false);
+		ret = pm_runtime_get_sync(dev);
+		cnss_pr_info("PCIe resume: ret:%d, usage_count:%d, runtime_status:%d\n",
+			     ret, atomic_read(&dev->power.usage_count),
+			     dev->power.runtime_status);
+
+		if (ret) {
+			/* the return value 1 from the pm_runtime_get_sync() means that
+			 * the PCIe link has already been resumed before set resume.
+			 */
+			if (ret == 1) {
+				cnss_pr_info("PCIe link has already been resumed\n");
+			} else {
+				/* restore the usage_count if the runtime resume fail. */
+				pm_runtime_put_noidle(dev);
+				cnss_pr_info("Failed to resume PCIe link\n");
+			}
+		} else {
+			cnss_pr_info("Resume PCIe link successfully\n");
+		}
+	} else {
+		pm_suspend_ignore_children(dev, true);
+		ret = pm_runtime_put_sync(dev);
+		cnss_pr_info("PCIe suspend: ret:%d, usage_count:%d, runtime_status:%d\n",
+			     ret, atomic_read(&dev->power.usage_count),
+			     dev->power.runtime_status);
+
+		if (ret) {
+			/* restore the usage_count if the runtime suspend fail. */
+			pm_runtime_get_noresume(dev);
+			cnss_pr_info("Failed to suspend PCIe link\n");
+		} else {
+			while (retry < CNSS_PCI_SUSPEND_RETRY_MAX &&
+				dev->power.runtime_status != RPM_SUSPENDED) {
+				retry++;
+				msleep(100);
+			}
+			if (retry == CNSS_PCI_SUSPEND_RETRY_MAX) {
+				/* restore the usage_count after max retry runtime suspend. */
+				pm_runtime_get_noresume(dev);
+				cnss_pr_info("Failed to suspend PCI link after max retry\n");
+				ret = -EINVAL;
+			} else {
+				cnss_pr_info("Suspend PCIe link successfully\n");
+			}
+		}
+	}
+
+	/* restore the ignore_children flag */
+	pm_suspend_ignore_children(dev, current_ignore_children);
+
+	cnss_pr_info("PCIe PM Exit: usage_count:%d, runtime_status:%d\n",
+		     atomic_read(&dev->power.usage_count),
+		     dev->power.runtime_status);
+
+	return ret;
+}
+
 int cnss_set_pci_link(struct cnss_pci_data *pci_priv, bool link_up)
 {
 	int ret = 0, retry = 0;
 	struct cnss_plat_data *plat_priv;
 	int sw_ctrl_gpio;
 
+	if (!pci_priv) {
+		cnss_pr_err("pci_priv is NULL\n");
+		return -ENODEV;
+	}
+
 	plat_priv = pci_priv->plat_priv;
 	sw_ctrl_gpio = plat_priv->pinctrl_info.sw_ctrl_gpio;
 
 	cnss_pr_vdbg("%s PCI link\n", link_up ? "Resuming" : "Suspending");
 
-	if (plat_priv && plat_priv->is_fw_managed_pwr)
+	if (plat_priv && plat_priv->is_fw_managed_pwr) {
+		if (pci_priv->pci_link_down_ind) {
+			ret = cnss_rc_rtpm_mgmt_wrapper(pci_priv->pci_dev, link_up);
+			cnss_pr_info("cnss_rc_rtpm_mgmt_wrapper, ret = %d\n", ret);
+		}
 		return ret;
+	}
 
 	if (link_up) {
 retry:

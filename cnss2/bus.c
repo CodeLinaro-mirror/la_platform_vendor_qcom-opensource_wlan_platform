@@ -447,6 +447,19 @@ int cnss_bus_dev_shutdown(struct cnss_plat_data *plat_priv)
 	}
 }
 
+bool cnss_bus_is_reboot_dev_shutdown_required(struct cnss_plat_data *plat_priv)
+{
+	if (!plat_priv)
+		return false;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		return cnss_pci_is_reboot_dev_shutdown_required(plat_priv->bus_priv);
+	default:
+		return false;
+	}
+}
+
 int cnss_bus_dev_crash_shutdown(struct cnss_plat_data *plat_priv)
 {
 	if (!plat_priv)

@@ -121,6 +121,8 @@ static DEFINE_SPINLOCK(time_sync_lock);
 #define CNSS_PBL_LOG_SIZE_OFFSET	4
 #define CNSS_PBL_LOG_SRAM_START_OFFSET	8
 
+#define SECOND_DRIVER_SUB_NAME          "cnss2"
+
 static const struct mhi_channel_config cnss_mhi_channels[] = {
 	{
 		.num = 0,
@@ -2729,9 +2731,95 @@ static int cnss_pci_config_msi_data(struct cnss_pci_data *pci_priv)
 }
 
 #ifdef CONFIG_CNSS_SUPPORT_DUAL_DEV
+static bool cnss_pci_device_id_matched(struct cnss_plat_data *plat_env,
+				  const struct pci_device_id *id_table)
+{
+	if (!plat_env)
+		return false;
+
+	while (id_table && id_table->device) {
+		if (plat_env->device_id == id_table->device)
+			return true;
+		id_table++;
+	}
+
+	return false;
+}
 
 static struct cnss_plat_data *
-cnss_get_plat_priv_by_driver_ops(struct cnss_wlan_driver *driver_ops)
+cnss_get_plat_priv_when_register_driver(struct cnss_wlan_driver *driver_ops)
+{
+	int plat_env_count = cnss_get_max_plat_env_count();
+	int dev_cnt = 0;
+	struct cnss_plat_data *plat_env;
+	struct cnss_plat_data *avail_plat_env = NULL;
+	struct cnss_pci_data *pci_priv;
+	int i = 0;
+
+	if (!driver_ops || !driver_ops->name) {
+		cnss_pr_err("No cnss driver\n");
+		return NULL;
+	}
+
+	/* here suppose in dual wlan case, alway has below sequence:
+	 * 1st : dual cnss_probe done
+	 * 2st : dual cnss_pci_probe done
+	 * 3st : load primary wlan driver, then load secondary wlan driver
+	 */
+
+	for (i = 0; i < plat_env_count; i++) {
+		plat_env = cnss_get_plat_env(i);
+		if (!plat_env || !plat_env->bus_priv)
+			continue;
+
+		dev_cnt++;
+
+		/* continue to next plat_env if found
+		 * driver_ops is already registered in plat_env
+		 */
+		pci_priv = plat_env->bus_priv;
+		if (pci_priv->driver_ops)
+			continue;
+
+		avail_plat_env = plat_env;
+
+		/* For secondary wifi, its pld_bus_ops_name has sub string cnss2
+		 * like pld_pcie_xxx_cnss2 and driver_ops_name also has sub
+		 * string cnss2 like pld_pcie_xxx_cnss2
+		 * also make sure plat_env has same device_id with driver_ops
+		 */
+		if (plat_env->pld_bus_ops_name) {
+			if ((strnstr(plat_env->pld_bus_ops_name, SECOND_DRIVER_SUB_NAME,
+			     strlen(plat_env->pld_bus_ops_name)) != NULL) &&
+			    (strnstr(driver_ops->name, SECOND_DRIVER_SUB_NAME,
+			     strlen(driver_ops->name)) != NULL) &&
+			    cnss_pci_device_id_matched(plat_env, driver_ops->id_table))
+				return plat_env;
+		} else {
+		/* For primary wifi, its pld_bus_ops_name is null
+		* and driver_ops->name has no sub string "cnss2"
+		* also make sure plat_env has same device_id with driver_ops
+		*/
+			if ((strnstr(driver_ops->name, SECOND_DRIVER_SUB_NAME,
+			     strlen(driver_ops->name)) == NULL) &&
+			    cnss_pci_device_id_matched(plat_env, driver_ops->id_table))
+				return plat_env;
+		}
+	}
+	/* Doesn't find the pld_bus_ops_name matched instance,
+	 * so return the bus_priv instance which is not empty
+	 * for single wifi case
+	 */
+	if ((dev_cnt == 1) &&
+	    cnss_pci_device_id_matched(avail_plat_env, driver_ops->id_table)) {
+		return avail_plat_env;
+	}
+
+	return NULL;
+}
+
+static struct cnss_plat_data *
+cnss_get_plat_priv_when_unregister_driver(struct cnss_wlan_driver *driver_ops)
 {
 	int plat_env_count = cnss_get_max_plat_env_count();
 	struct cnss_plat_data *plat_env;
@@ -2745,65 +2833,17 @@ cnss_get_plat_priv_by_driver_ops(struct cnss_wlan_driver *driver_ops)
 
 	for (i = 0; i < plat_env_count; i++) {
 		plat_env = cnss_get_plat_env(i);
-		if (!plat_env)
-			continue;
-
-		if (!(driver_ops->name && plat_env->pld_bus_ops_name &&
-		    (strlen(driver_ops->name) ==
-		     strlen(plat_env->pld_bus_ops_name))))
-			continue;
-
-		/* driver_ops->name = PLD_PCIE_OPS_NAME
-		 * #ifdef MULTI_IF_NAME
-		 * #define PLD_PCIE_OPS_NAME "pld_pcie_" MULTI_IF_NAME
-		 * #else
-		 * #define PLD_PCIE_OPS_NAME "pld_pcie"
-		 * #endif
-		 */
-		if (memcmp(driver_ops->name,
-			   plat_env->pld_bus_ops_name,
-			   strlen(driver_ops->name)) == 0)
-			return plat_env;
-	}
-
-	cnss_pr_vdbg("Invalid cnss driver name from ko %s\n", driver_ops->name);
-	/* in the dual wlan card case, the pld_bus_ops_name from dts
-	 * and driver_ops-> name from ko should match, otherwise
-	 * wlanhost driver don't know which plat_env it can use;
-	 * if doesn't find the match one, then get first available
-	 * instance insteadly.
-	 */
-
-	for (i = 0; i < plat_env_count; i++) {
-		plat_env = cnss_get_plat_env(i);
 
 		if (!plat_env)
 			continue;
 
 		pci_priv = plat_env->bus_priv;
 		if (!pci_priv) {
-			cnss_pr_err("pci_priv is NULL\n");
+			cnss_pr_dbg("pci_priv is NULL for plat_env %d\n", i);
 			continue;
 		}
 
 		if (driver_ops == pci_priv->driver_ops)
-			return plat_env;
-	}
-	/* Doesn't find the existing instance,
-	 * so return the fist empty instance
-	 */
-	for (i = 0; i < plat_env_count; i++) {
-		plat_env = cnss_get_plat_env(i);
-
-		if (!plat_env)
-			continue;
-		pci_priv = plat_env->bus_priv;
-		if (!pci_priv) {
-			cnss_pr_err("pci_priv is NULL\n");
-			continue;
-		}
-
-		if (!pci_priv->driver_ops)
 			return plat_env;
 	}
 
@@ -2813,7 +2853,7 @@ cnss_get_plat_priv_by_driver_ops(struct cnss_wlan_driver *driver_ops)
 static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
-	u32 scratch = PCIE_SCRATCH_2_SOC_PCIE_REG;
+	u32 scratch;
 	struct cnss_plat_data *plat_priv;
 
 	if (!pci_priv) {
@@ -2824,6 +2864,10 @@ static int cnss_pci_store_qrtr_node_id(struct cnss_pci_data *pci_priv)
 	switch (pci_priv->device_id) {
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
+		scratch = PCIE_SCRATCH_2_SOC_PCIE_REG;
+		break;
+	case KIWI_DEVICE_ID:
+		scratch = PCIE_KIWI_SCRATCH_2_SOC_PCIE_REG;
 		break;
 	default:
 		cnss_pr_dbg("device 0x%x not supported qrtr set, nothing to do\n",
@@ -2875,7 +2919,13 @@ out:
 }
 #else
 static struct cnss_plat_data *
-cnss_get_plat_priv_by_driver_ops(struct cnss_wlan_driver *driver_ops)
+cnss_get_plat_priv_when_register_driver(struct cnss_wlan_driver *driver_ops)
+{
+	return cnss_bus_dev_to_plat_priv(NULL);
+}
+
+static struct cnss_plat_data *
+cnss_get_plat_priv_when_unregister_driver(struct cnss_wlan_driver *driver_ops)
 {
 	return cnss_bus_dev_to_plat_priv(NULL);
 }
@@ -4251,6 +4301,24 @@ int cnss_pci_dev_shutdown(struct cnss_pci_data *pci_priv)
 	return ret;
 }
 
+bool cnss_pci_is_reboot_dev_shutdown_required(struct cnss_pci_data *pci_priv)
+{
+	if (!pci_priv)
+		return false;
+
+	switch (pci_priv->device_id) {
+	case QCA6390_DEVICE_ID:
+	case QCN7605_DEVICE_ID:
+	case QCA6490_DEVICE_ID:
+	case KIWI_DEVICE_ID:
+		if (test_bit(CNSS_MHI_POWER_ON, &pci_priv->mhi_state))
+			return true;
+		return false;
+	default:
+		return false;
+	}
+}
+
 int cnss_pci_dev_crash_shutdown(struct cnss_pci_data *pci_priv)
 {
 	int ret = 0;
@@ -4396,7 +4464,7 @@ int cnss_wlan_register_driver(struct cnss_wlan_driver *driver_ops)
 		return -ENODEV;
 	}
 
-	plat_priv = cnss_get_plat_priv_by_driver_ops(driver_ops);
+	plat_priv = cnss_get_plat_priv_when_register_driver(driver_ops);
 
 	if (!plat_priv) {
 		cnss_pr_buf("plat_priv is not ready for register driver\n");
@@ -4511,7 +4579,7 @@ void cnss_wlan_unregister_driver(struct cnss_wlan_driver *driver_ops)
 	int ret = 0;
 	unsigned int timeout;
 
-	plat_priv = cnss_get_plat_priv_by_driver_ops(driver_ops);
+	plat_priv = cnss_get_plat_priv_when_unregister_driver(driver_ops);
 	if (!plat_priv) {
 		cnss_pr_err("plat_priv is NULL\n");
 		return;
@@ -8924,6 +8992,35 @@ static const struct dev_pm_ops cnss_pm_ops = {
 			   cnss_pci_runtime_idle)
 };
 
+static pci_ers_result_t cnss_pci_error_detected(struct pci_dev *pci_dev,
+						pci_channel_state_t state)
+{
+	struct cnss_pci_data *pci_priv;
+
+	if (!pci_dev) {
+		cnss_pr_err("the pci_dev is NULL\n");
+		return PCI_ERS_RESULT_NONE;
+	}
+
+	cnss_pr_dbg("PCI error detected, state = %u\n", state);
+
+	pci_priv = cnss_get_pci_priv(pci_dev);
+	if (!pci_priv) {
+		cnss_pr_err("the cnss_pci_data is NULL\n");
+		return PCI_ERS_RESULT_NONE;
+	}
+
+	cnss_pr_dbg("handle PCI link down\n");
+	cnss_pci_handle_linkdown(pci_priv);
+
+	return PCI_ERS_RESULT_CAN_RECOVER;
+}
+
+
+static const struct pci_error_handlers cnss_pci_err_handler = {
+    .error_detected = cnss_pci_error_detected,
+};
+
 static struct pci_driver cnss_pci_driver = {
 	.name     = "cnss_pci",
 	.id_table = cnss_pci_id_table,
@@ -8932,6 +9029,7 @@ static struct pci_driver cnss_pci_driver = {
 	.driver = {
 		.pm = &cnss_pm_ops,
 	},
+	.err_handler = &cnss_pci_err_handler,
 };
 
 static int cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
