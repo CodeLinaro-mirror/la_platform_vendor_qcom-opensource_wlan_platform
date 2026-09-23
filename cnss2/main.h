@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2026 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CNSS_MAIN_H
@@ -155,6 +155,11 @@ struct cnss_vreg_info {
 
 enum cnss_vreg_type {
 	CNSS_VREG_PRIM,
+};
+
+enum cnss_pci_switch_type {
+	PCIE_DIRECT_ATTACH = 0,
+	PCIE_SWITCH_NTN3,
 };
 
 struct cnss_clk_cfg {
@@ -840,6 +845,7 @@ struct cnss_plat_data {
 	u32 sleep_voltage_drop_adjustment;
 	enum cnss_power_ctrl_mode pwr_ctrl_mode;
 	u32 bdf_dnld_fail_count;
+	u32 pcie_switch_type;
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
@@ -953,6 +959,7 @@ void cnss_aop_interface_deinit(struct cnss_plat_data *plat_priv);
 int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv);
 int cnss_aop_send_msg(struct cnss_plat_data *plat_priv, char *msg);
 void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv);
+void cnss_pci_of_switch_type_init(struct cnss_plat_data *plat_priv);
 int cnss_aop_ol_cpr_cfg_setup(struct cnss_plat_data *plat_priv,
 			      struct wlfw_pmu_cfg_v01 *fw_pmu_cfg);
 int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
@@ -1028,4 +1035,6 @@ static inline int cnss_timer_delete_sync(struct timer_list *timer)
 #endif
 
 void cnss_power_ctrl_mode_init(struct cnss_plat_data *plat_priv);
+int cnss_select_pinctrl_enable(struct cnss_plat_data *plat_priv);
+int cnss_select_pinctrl_state(struct cnss_plat_data *plat_priv, bool state);
 #endif /* _CNSS_MAIN_H */

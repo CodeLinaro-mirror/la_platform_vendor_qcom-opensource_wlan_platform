@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2026 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/completion.h>
@@ -8526,6 +8526,12 @@ static int cnss_mhi_bw_scale(struct mhi_controller *mhi_ctrl,
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	int ret = 0;
 
+	if (plat_priv->pcie_switch_type == PCIE_SWITCH_NTN3) {
+		ret = cnss_pci_dsp_link_retrain(pci_priv,
+						link_info->target_link_speed);
+		return ret;
+	}
+
 	cnss_pr_dbg("Setting link speed:0x%x, width:0x%x\n",
 		    link_info->target_link_speed,
 		    link_info->target_link_width);
@@ -9110,6 +9116,23 @@ static int cnss_try_suspend(struct cnss_plat_data *plat_priv)
 	return 0;
 }
 #endif
+
+void cnss_pci_of_switch_type_init(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+	int ret;
+
+	if (dev && dev->of_node) {
+		ret = of_property_read_u32(dev->of_node,
+					   "qcom,pcie-switch-type",
+					   &plat_priv->pcie_switch_type);
+		if (ret)
+			plat_priv->pcie_switch_type = 0;
+	} else {
+		cnss_pr_err("device or node is not available.");
+	}
+	cnss_pr_dbg("pcie_switch_type is %d", plat_priv->pcie_switch_type);
+}
 
 /* Setting to use this cnss_pm_domain ops will let PM framework override the
  * ops from dev->bus->pm which is pci_dev_pm_ops from pci-driver.c. This ops
