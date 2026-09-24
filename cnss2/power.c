@@ -982,9 +982,11 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 		} else {
 			ret = pinctrl_select_state(pinctrl_info->pinctrl,
 						   pinctrl_info->sw_ctrl);
-			if (ret)
+			if (ret) {
 				cnss_pr_err("Failed to select sw_ctrl state, err = %d\n",
 					    ret);
+				goto out;
+			}
 		}
 	} else {
 		pinctrl_info->sw_ctrl_gpio = -EINVAL;
@@ -1019,9 +1021,11 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 
 			ret = pinctrl_select_state(pinctrl_info->pinctrl,
 						   pinctrl_info->sw_ctrl_wl_cx);
-			if (ret)
+			if (ret) {
 				cnss_pr_err("Failed to select sw_ctrl_wl_cx state, err = %d\n",
 					    ret);
+				goto out;
+			}
 		}
 	} else {
 		pinctrl_info->wlan_sw_ctrl_gpio = -EINVAL;
