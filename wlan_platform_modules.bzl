@@ -104,6 +104,7 @@ def _define_platform_config_rule(module, target, variant):
 
 def _define_modules_for_target_variant(target, variant):
     tv = "{}_{}".format(target, variant)
+    copts = []
 
     if target != "sa510m" and target != "sa510m.1g":
         kernel_build = select({
@@ -204,16 +205,36 @@ def _define_modules_for_target_variant(target, variant):
         ]
 
         cmd = 'touch "$@"\n'
+        if target != "sun":
+            grep_path = "soc-repo"
+        else:
+            grep_path = "msm-kernel"
         for feature_grep in feature_grep_map:
             cmd += """
-                if grep -qF "{pattern}" $(location //msm-kernel:{file}); then
+                if grep -qF "{pattern}" $(location //{grep_path}:{file}); then
                     echo "#define {flag} (1)" >> "$@"
                 fi
         """.format(
             pattern = feature_grep["pattern"],
+            grep_path = grep_path,
             file = feature_grep["file"],
             flag = feature_grep["flag"],
         )
+
+        grepSrcFiles = []
+        for e in feature_grep_map:
+            grepSrcFiles.append("//{}:{}".format(grep_path, e["file"]))
+
+        depsetSrc = depset(grepSrcFiles)
+        native.genrule(
+            name = "{}_grep_defines".format(tv),
+            outs = ["grep_defines_{}.h".format(tv)],
+            srcs = depsetSrc.to_list(),
+            cmd = cmd,
+        )
+
+        copts.append("-include")
+        copts.append("$(location :{}_grep_defines)".format(tv))
 
         ddk_module(
             name = "{}_cnss2".format(tv),
@@ -227,7 +248,7 @@ def _define_modules_for_target_variant(target, variant):
                 "cnss2/genl.c",
                 "cnss2/*.h",
                 "cnss_utils/*.h",
-            ]),
+            ]) + [":{}_grep_defines".format(tv)],
             includes = ["cnss", "cnss_utils"],
             kconfig = "cnss2/Kconfig",
             defconfig = defconfig,
@@ -249,6 +270,7 @@ def _define_modules_for_target_variant(target, variant):
                     ],
                 },
             },
+            copts = copts,
             out = "cnss2.ko",
             kernel_build = kernel_build,
             deps = deps,
