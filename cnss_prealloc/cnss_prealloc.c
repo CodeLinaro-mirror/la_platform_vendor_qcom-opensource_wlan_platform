@@ -628,6 +628,13 @@ static int cnss_pool_init(void)
 	int i;
 
 	for (i = 0; i < cnss_prealloc_pool_size; i++) {
+		/* Skip pools at or below PAGE_SIZE: the allocation threshold
+		 * is max(8KB, PAGE_SIZE), so these pools are unreachable
+		 * regardless of page size configuration.
+		 */
+		if (cnss_pools[i].size <= PAGE_SIZE)
+			continue;
+
 		/* Create the slab cache */
 		cnss_pools[i].cache =
 			kmem_cache_create_usercopy(cnss_pools[i].name,
@@ -698,6 +705,9 @@ static void cnss_pool_deinit(void)
 		return;
 
 	for (i = 0; i < cnss_prealloc_pool_size; i++) {
+		if (cnss_pools[i].size <= PAGE_SIZE)
+			continue;
+
 		pr_info("cnss_prealloc: destroy mempool %s\n",
 			cnss_pools[i].name);
 		if (cnss_prealloc_sysfs_stats)
