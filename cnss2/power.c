@@ -104,7 +104,7 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define CNSS_IR_DROP_SLEEP_DEFAULT 10
 #define CNSS_IR_DROP_SLEEP (plat_priv->sleep_voltage_drop_adjustment)
 #define VREG_NOTFOUND 1
-#define AON_REG_SLEEP_VOLTAGE 750
+#define AON_REG_SLEEP_VOLTAGE 780
 
 /**
  * enum cnss_aop_vreg_param: Voltage regulator TCS param
@@ -960,12 +960,13 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 		cnss_pr_dbg("Switch control GPIO: %d\n",
 			    pinctrl_info->sw_ctrl_gpio);
 
-		/* Hold reference while in use to ensure GPIO resource
-		 * is not freed by GPIO driver.
+		/* SW_CTRL is shared by WLAN and BT. Keep a managed reference for
+		 * safe GPIO reads without claiming exclusive ownership.
 		 */
 		if (IS_ERR_OR_NULL(devm_gpiod_get_optional(dev,
 							   SW_CTRL_GPIO_CON_ID,
-							   GPIOD_IN))) {
+							   GPIOD_IN |
+							   GPIOD_FLAGS_BIT_NONEXCLUSIVE))) {
 			cnss_pr_dbg("Failed to get sw_ctrl GPIO reference\n");
 			pinctrl_info->sw_ctrl_gpio = -EINVAL;
 		}
@@ -995,12 +996,13 @@ int cnss_get_pinctrl(struct cnss_plat_data *plat_priv)
 		cnss_pr_dbg("WLAN Switch control GPIO: %d\n",
 			    pinctrl_info->wlan_sw_ctrl_gpio);
 
-		/* Hold reference while in use to ensure GPIO resource
-		 * is not freed by GPIO driver.
+		/* WLAN_SW_CTRL is shared by WLAN consumers. Keep a managed
+		 * reference for safe GPIO reads without claiming exclusive ownership.
 		 */
 		if (IS_ERR_OR_NULL(devm_gpiod_get_optional(dev,
 							   WLAN_SW_CTRL_GPIO_CON_ID,
-							   GPIOD_IN))) {
+							   GPIOD_IN |
+							   GPIOD_FLAGS_BIT_NONEXCLUSIVE))) {
 			cnss_pr_dbg("Failed to get wlan_sw_ctrl GPIO reference\n");
 			pinctrl_info->wlan_sw_ctrl_gpio = -EINVAL;
 		}
