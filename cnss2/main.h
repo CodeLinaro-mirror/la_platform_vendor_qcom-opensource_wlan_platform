@@ -59,6 +59,7 @@
 #define WLAN_WD_TIMEOUT_MS		60000
 #define WLAN_COLD_BOOT_CAL_TIMEOUT	60000
 #define WLAN_MISSION_MODE_TIMEOUT	30000
+#define WLAN_FW_LOAD_TIMEOUT_MS		65000
 #define TIME_CLOCK_FREQ_HZ		19200000
 #define CNSS_RAMDUMP_MAGIC		0x574C414E
 #define CNSS_RAMDUMP_VERSION		0
@@ -499,6 +500,7 @@ enum cnss_timeout_type {
 	CNSS_TIMEOUT_RDDM,
 	CNSS_TIMEOUT_RECOVERY,
 	CNSS_TIMEOUT_DAEMON_CONNECTION,
+	CNSS_TIMEOUT_FW_LOAD,
 };
 
 struct cnss_sol_gpio {
@@ -779,6 +781,9 @@ void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv);
 void cnss_pci_of_switch_type_init(struct cnss_plat_data *plat_priv);
 int cnss_aop_ol_cpr_cfg_setup(struct cnss_plat_data *plat_priv,
 			      struct wlfw_pmu_cfg_v01 *fw_pmu_cfg);
+int cnss_request_firmware_update_timer(struct cnss_plat_data *plat_priv,
+				       const struct firmware **fw_entry,
+				       const char *filename);
 int cnss_request_firmware_direct(struct cnss_plat_data *plat_priv,
 				 const struct firmware **fw_entry,
 				 const char *filename);
