@@ -408,7 +408,7 @@ void cnss_get_sleep_clk_supported(struct cnss_plat_data *plat_priv)
 
 void cnss_get_bwscal_info(struct cnss_plat_data *plat_priv)
 {
-	plat_priv->no_bwscale = of_property_read_bool(plat_priv->dev_node,
+	plat_priv->no_bwscale = of_property_read_bool(plat_priv->plat_dev->dev.of_node,
 						      "qcom,no-bwscale");
 }
 
