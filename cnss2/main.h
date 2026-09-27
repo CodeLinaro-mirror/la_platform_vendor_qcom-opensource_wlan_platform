@@ -157,6 +157,11 @@ enum cnss_vreg_type {
 	CNSS_VREG_PRIM,
 };
 
+enum cnss_pci_switch_type {
+	PCIE_DIRECT_ATTACH = 0,
+	PCIE_SWITCH_NTN3,
+};
+
 struct cnss_clk_cfg {
 	const char *name;
 	u32 freq;
@@ -840,6 +845,7 @@ struct cnss_plat_data {
 	u32 sleep_voltage_drop_adjustment;
 	enum cnss_power_ctrl_mode pwr_ctrl_mode;
 	u32 bdf_dnld_fail_count;
+	u32 pcie_switch_type;
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
@@ -953,6 +959,7 @@ void cnss_aop_interface_deinit(struct cnss_plat_data *plat_priv);
 int cnss_aop_pdc_reconfig(struct cnss_plat_data *plat_priv);
 int cnss_aop_send_msg(struct cnss_plat_data *plat_priv, char *msg);
 void cnss_power_misc_params_init(struct cnss_plat_data *plat_priv);
+void cnss_pci_of_switch_type_init(struct cnss_plat_data *plat_priv);
 int cnss_aop_ol_cpr_cfg_setup(struct cnss_plat_data *plat_priv,
 			      struct wlfw_pmu_cfg_v01 *fw_pmu_cfg);
 int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
