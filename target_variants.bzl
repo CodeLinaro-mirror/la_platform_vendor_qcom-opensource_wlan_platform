@@ -17,6 +17,7 @@ targets = [
     "seraph",
     "shikra",
     "sun",
+    "waipio",
     "vienna",
 ]
 
@@ -39,7 +40,9 @@ lv_variants = [
 le_targets = [
     # keep sorted
     "alor-le",
+    "pebble-le",
     "sun-allyes",
+    "vienna-le",
 ]
 
 le_32_targets = [
