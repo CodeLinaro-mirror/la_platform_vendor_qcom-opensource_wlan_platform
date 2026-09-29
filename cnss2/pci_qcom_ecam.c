@@ -816,3 +816,25 @@ int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on)
 	cnss_mhi_set_mhictrl_reset(pci_priv);
 	return 0;
 }
+
+int cnss_pci_dsp_link_control(struct cnss_pci_data *pci_priv,
+					      bool link_enable)
+{
+		return -EOPNOTSUPP;
+}
+
+int cnss_pci_set_dsp_link_status(struct cnss_pci_data *pci_priv,
+						 bool link_enable)
+{
+		return -EOPNOTSUPP;
+}
+
+int cnss_pci_get_dsp_link_status(struct cnss_pci_data *pci_priv)
+{
+		return -EOPNOTSUPP;
+}
+
+int cnss_pci_dsp_link_enable(struct cnss_pci_data *pci_priv)
+{
+		return -EOPNOTSUPP;
+}
