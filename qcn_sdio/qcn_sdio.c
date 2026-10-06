@@ -23,6 +23,7 @@
 #include <linux/ipc_logging.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/pm_runtime.h>
 
 #define SDIO_CCCR_INTERRUPT_EXTENSION  0x16
 #define SDIO_SUPPORT_ASYNC_INTR        (1<<0)
@@ -115,7 +116,8 @@ static struct list_head cinfo_head;
 static atomic_t status;
 static atomic_t xport_status;
 static atomic_t meson_card_state;
-static atomic_t meson_suspended;
+static atomic_t target_suspended;
+static atomic_t rtpm_suspend;
 static spinlock_t async_lock;
 static void *ipc_log_ctxt;
 static void qcn_sdio_fw_assert(struct work_struct *work);
@@ -454,6 +456,36 @@ exit:
 	return ret;
 }
 
+static int qcn_sdio_bus_suspend(struct device *dev)
+{
+	int ret = 0;
+
+	sdio_set_host_pm_flags(sdio_ctxt->func, MMC_PM_KEEP_POWER);
+
+	ret = enable_oob_interupts();
+	if (ret)
+		return ret;
+
+	ret = qcn_send_lpm_indication();
+	if (ret)
+		goto disable_oob;
+
+	ret = wait_for_completion_timeout(&meson_suspend_allowed,
+			msecs_to_jiffies(QCN_SDIO_LP_LHI_LEVENT_TIMEOUT));
+	if (!ret) {
+		pr_err("Didn't get allow response from Meson\n");
+		goto disable_oob;
+	}
+	atomic_set(&target_suspended, 1);
+	reinit_completion(&meson_resume_complete);
+
+	return 0;
+
+disable_oob:
+	disable_oob_interupts();
+	return ret;
+}
+
 static int qcn_sdio_suspend(struct device *dev)
 {
 	int ret = 0;
@@ -476,35 +508,15 @@ static int qcn_sdio_suspend(struct device *dev)
 		return ret;
 	}
 
-	sdio_set_host_pm_flags(sdio_ctxt->func, MMC_PM_KEEP_POWER);
-
-	ret = enable_oob_interupts();
-	if (ret)
-		goto resume;
-
-	ret = qcn_send_lpm_indication();
-	if (ret)
-		goto disable_oob;
-
-	ret = wait_for_completion_timeout(&meson_suspend_allowed,
-			msecs_to_jiffies(QCN_SDIO_LP_LHI_LEVENT_TIMEOUT));
-	if (!ret) {
-		qcn_pr_err("Didn't get allow response from Meson\n");
-		goto disable_oob;
+	ret = qcn_sdio_bus_suspend(dev);
+	if (ret) {
+		pr_err("SDIO bus suspend failed\n");
+		qcn_sdio_pm(LPM_EXIT);
 	}
-	atomic_set(&meson_suspended, 1);
-	reinit_completion(&meson_resume_complete);
-
-	return 0;
-
-disable_oob:
-	disable_oob_interupts();
-resume:
-	qcn_sdio_pm(LPM_EXIT);
-	return -EBUSY;
+	return ret;
 }
 
-static int qcn_sdio_resume(struct device *dev)
+static int qcn_sdio_bus_resume(struct device *dev)
 {
 	int ret, try_cnt = 0, MAX_RETRY_CNT = 3;
 
@@ -512,8 +524,7 @@ static int qcn_sdio_resume(struct device *dev)
 		return 0;
 	}
 
-	atomic_set(&meson_suspended, 0);
-	qcn_pr_info("pid %d", !in_interrupt() ? current->pid : 0);
+	atomic_set(&target_suspended, 0);
 
 	/* If Resume is FW triggered, we would have got OOB INTR by now.
 	 * Disable SDIO LPM mode and then wait for LP LHI event over
@@ -529,10 +540,9 @@ static int qcn_sdio_resume(struct device *dev)
 			msecs_to_jiffies(QCN_SDIO_LP_LHI_LEVENT_TIMEOUT));
 		if (!ret) {
 			qcn_pr_err("Failed to get LHI resumed event\n");
-			return 0;
-		} else {
-			goto resume;
+			return -ETIMEDOUT;
 		}
+		return 0;
 	}
 
 	/* Resume Triggered by APPS:
@@ -551,30 +561,80 @@ static int qcn_sdio_resume(struct device *dev)
 			msecs_to_jiffies(QCN_SDIO_LP_LHI_LEVENT_TIMEOUT));
 		if (!ret) {
 			if (try_cnt < MAX_RETRY_CNT) {
-					qcn_pr_err("Failed to resume Meson, Retrying\n");
+					qcn_pr_err("Failed to resume target, Retrying\n");
 					continue;
 			}
-			qcn_pr_err("Failed to resume Meson after %d attempts\n", MAX_RETRY_CNT);
+			qcn_pr_err("Failed to resume target after %d attempts\n", MAX_RETRY_CNT);
 			schedule_work(&qcn_sdio_fw_assert_work);
 			return -ETIMEDOUT;
 		}
-		qcn_pr_info("Meson resumed after %d try\n", try_cnt);
+		qcn_pr_info("Target resumed after %d try\n", try_cnt);
 		disable_oob_interupts();
-		break;
+		return 0;
 	}
 
-resume:
-	return qcn_sdio_pm(LPM_EXIT);
+	return 0;
 }
 
-static int qcn_sdio_runtime_suspend(struct device *dev)
+static int qcn_sdio_resume(struct device *dev)
 {
-	return qcn_sdio_pm(LPM_RUNTIME_SUSPEND_ENTER);
+	int ret = 0;
+
+	ret = qcn_sdio_bus_resume(dev);
+	if (ret) {
+		pr_err("Failed to resume SDIO bus\n");
+		return ret;
+	}
+
+	return qcn_sdio_pm(LPM_EXIT);
 }
 
 static int qcn_sdio_runtime_resume(struct device *dev)
 {
+	int ret = 0;
+
+	qcn_pr_info("runtime resume enter\n");
+	ret = qcn_sdio_bus_resume(dev);
+	if (ret) {
+		pr_err("Failed to runtime resume SDIO bus\n");
+		return ret;
+	}
+	atomic_set(&rtpm_suspend, 0);
 	return qcn_sdio_pm(LPM_RUNTIME_SUSPEND_EXIT);
+}
+
+static int qcn_sdio_runtime_suspend(struct device *dev)
+{
+	int ret = 0;
+
+	qcn_pr_info("runtime suspend enter\n");
+	if (!atomic_read(&meson_card_state)) {
+		ret = sdio_set_host_pm_flags(sdio_ctxt->func,
+					     MMC_PM_KEEP_POWER);
+		if (ret) {
+			pr_err("Failed to set PM flags: %d\n", ret);
+			return ret;
+		}
+		return 0;
+	}
+
+	reinit_completion(&meson_suspend_allowed);
+
+	ret = qcn_sdio_pm(LPM_RUNTIME_SUSPEND_ENTER);
+	if (ret) {
+		pr_err("Failed to do runtime suspend\n");
+		return ret;
+	}
+
+	ret = qcn_sdio_bus_suspend(dev);
+	if (ret) {
+		pr_err("SDIO bus runtime suspend failed\n");
+		qcn_sdio_pm(LPM_RUNTIME_SUSPEND_EXIT);
+	}
+
+	if (!ret)
+		atomic_set(&rtpm_suspend, 1);
+	return ret;
 }
 
 static int qcn_sdio_runtime_idle(struct device *dev)
@@ -983,8 +1043,17 @@ static void qcn_sdio_gpio_irq_work_handler(struct work_struct *work)
 {
 	static int cnt;
 
-	qcn_pr_info("OOB intr work called %d times pid %d\n", cnt++,
-		!in_interrupt() ? current->pid : 0);
+	qcn_pr_info("OOB intr work called %d times pid %d, rtpm %d\n", cnt++,
+		!in_interrupt() ? current->pid : 0, atomic_read(&rtpm_suspend));
+
+	/* FW triggered resume via OOB while in RTPM suspend */
+	if (atomic_read(&target_suspended) && atomic_read(&rtpm_suspend)) {
+		qcn_pr_info("FW triggered resume in RTPM\n");
+		atomic_set(&sdio_ctxt->oob_wake_irq, 1);
+		pm_runtime_resume(&sdio_ctxt->func->dev);
+		return;
+	}
+
 	qcn_sdio_irq_handler(sdio_ctxt->func);
 	qcn_pr_info("OOB intr done, re-enabling OOB intr pid %d\n",
 		!in_interrupt() ? current->pid : 0);
@@ -996,14 +1065,20 @@ static irqreturn_t _qcn_sdio_irq_handler(int irq, void *dev_id)
 	static int count;
 
 	qcn_pr_info("Received OOB intr %d times, SDIO LPM state %d\n", count++,
-						atomic_read(&meson_suspended));
+						atomic_read(&target_suspended));
 	disable_irq_nosync(irq);
 
-	/* FW triggered resume, wakeup the SDIO dev */
-	if (atomic_read(&meson_suspended)) {
+	/* FW triggered resume:
+	 * Case1: full APPS suspended:  wakeup the SDIO dev, dpm_resume()
+	 * Case2: RTPM suspend: need to runtime resume sdio dev bus it
+	 * can't be called in IRQ context, so called from worker context.
+	 */
+
+	if (atomic_read(&target_suspended) && !atomic_read(&rtpm_suspend)) {
+		qcn_pr_info("FW triggered resume in APPS suspend\n");
 		atomic_set(&sdio_ctxt->oob_wake_irq, 1);
 		pm_wakeup_event(&sdio_ctxt->func->dev, 0);
-		atomic_set(&meson_suspended, 0);
+		atomic_set(&target_suspended, 0);
 		return IRQ_HANDLED;
 	}
 
@@ -1255,6 +1330,21 @@ static void qcn_sdio_wake_gpio_deinit(void)
 	sdio_gpio_info = NULL;
 }
 
+static void qcn_sdio_pm_runtime_init(struct sdio_func *func)
+{
+	pm_runtime_get_sync(&func->dev);
+	pm_runtime_forbid(&func->dev);
+	pm_runtime_set_active(&func->dev);
+	pm_runtime_enable(&func->dev);
+}
+
+static void qcn_sdio_pm_runtime_deinit(struct sdio_func *func)
+{
+	pm_runtime_disable(&func->dev);
+	pm_runtime_allow(&func->dev);
+	pm_runtime_put_sync(&func->dev);
+}
+
 static
 int qcn_sdio_probe(struct sdio_func *func, const struct sdio_device_id *id)
 {
@@ -1342,6 +1432,7 @@ int qcn_sdio_probe(struct sdio_func *func, const struct sdio_device_id *id)
 	}
 
 	current_host = func->card->host;
+	qcn_sdio_pm_runtime_init(func);
 	init_completion(&meson_suspend_allowed);
 	init_completion(&meson_resume_complete);
 
@@ -1423,6 +1514,7 @@ static void qcn_sdio_remove(struct sdio_func *func)
 	}
 	mutex_unlock(&lock);
 
+	qcn_sdio_pm_runtime_deinit(func);
 	qcn_sdio_debugfs_destroy();
 	kfree(sdio_ctxt);
 	sdio_ctxt = NULL;
@@ -1437,8 +1529,6 @@ static const struct sdio_device_id qcn_sdio_devices[] = {
 };
 
 MODULE_DEVICE_TABLE(sdio, qcn_sdio_devices);
-
-
 
 static const struct dev_pm_ops qcn_sdio_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(qcn_sdio_suspend, qcn_sdio_resume)
