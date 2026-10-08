@@ -15,6 +15,7 @@
 #include <linux/vmalloc.h>
 #include <linux/suspend.h>
 #include <linux/sched.h>
+#include <linux/version.h>
 #include <linux/nmi.h>
 #include <linux/stacktrace.h>
 #include "main.h"
@@ -124,6 +125,17 @@ static DEFINE_SPINLOCK(time_sync_lock);
 
 #define SECOND_DRIVER_SUB_NAME          "cnss2"
 
+/*
+ * struct mhi_channel_config.auto_queue was removed upstream in kernel
+ * v7.0.0. Wrap each struct-literal site with this macro instead of a
+ * repeated inline #if guard.
+ */
+#if (KERNEL_VERSION(7, 0, 0) > LINUX_VERSION_CODE)
+#define CNSS_MHI_AUTO_QUEUE(val) .auto_queue = (val),
+#else
+#define CNSS_MHI_AUTO_QUEUE(val)
+#endif
+
 static const struct mhi_channel_config cnss_mhi_channels[] = {
 	{
 		.num = 0,
@@ -137,7 +149,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 1,
@@ -151,7 +163,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 4,
@@ -165,7 +177,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 5,
@@ -179,7 +191,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 20,
@@ -193,7 +205,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 21,
@@ -207,7 +219,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = true,
+		CNSS_MHI_AUTO_QUEUE(true)
 	},
 /* All MHI satellite config to be at the end of data struct */
 #if IS_ENABLED(CONFIG_MHI_SATELLITE)
@@ -223,7 +235,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 51,
@@ -237,7 +249,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 70,
@@ -251,7 +263,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 71,
@@ -265,7 +277,7 @@ static const struct mhi_channel_config cnss_mhi_channels[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 #endif
 };
@@ -283,7 +295,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 1,
@@ -297,7 +309,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 20,
@@ -311,7 +323,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 21,
@@ -325,7 +337,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = true,
+		CNSS_MHI_AUTO_QUEUE(true)
 	},
 /* All MHI satellite config to be at the end of data struct */
 #if IS_ENABLED(CONFIG_MHI_SATELLITE)
@@ -341,7 +353,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 51,
@@ -355,7 +367,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 70,
@@ -369,7 +381,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 71,
@@ -383,7 +395,7 @@ static const struct mhi_channel_config cnss_mhi_channels_no_diag[] = {
 		.lpm_notify = false,
 		.offload_channel = true,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 #endif
 };
@@ -401,7 +413,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 1,
@@ -415,7 +427,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 4,
@@ -429,7 +441,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 5,
@@ -443,7 +455,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 16,
@@ -457,7 +469,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = false,
+		CNSS_MHI_AUTO_QUEUE(false)
 	},
 	{
 		.num = 17,
@@ -471,7 +483,7 @@ static const struct mhi_channel_config cnss_mhi_channels_genoa[] = {
 		.lpm_notify = false,
 		.offload_channel = false,
 		.doorbell_mode_switch = false,
-		.auto_queue = true,
+		CNSS_MHI_AUTO_QUEUE(true)
 	},
 };
 
@@ -2542,8 +2554,13 @@ static void cnss_pci_dump_sram(struct cnss_pci_data *pci_priv)
 static int cnss_pci_handle_mhi_poweron_timeout(struct cnss_pci_data *pci_priv)
 {
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+	int ret = 0;
 
 	cnss_fatal_err("MHI power up returns timeout\n");
+
+	ret = cnss_pci_check_link_status(pci_priv);
+	if (ret)
+		return ret;
 
 	if (cnss_mhi_scan_rddm_cookie(pci_priv, DEVICE_RDDM_COOKIE) ||
 	    cnss_get_dev_sol_value(plat_priv) > 0) {
@@ -5008,7 +5025,11 @@ static int cnss_pci_suspend(struct device *dev)
 		/* pcie link will be suspend by pcie PM */
 		goto out;
 
-	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state)) {
+	if (test_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_LOADING, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_IDLE_RESTART, &plat_priv->driver_state) ||
+	    test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state)) {
 		ret = -EAGAIN;
 		goto out;
 	}
@@ -7535,6 +7556,7 @@ retry:
 	cnss_mhi_debug_reg_dump(pci_priv);
 	cnss_pci_bhi_debug_reg_dump(pci_priv);
 	cnss_pci_soc_scratch_reg_dump(pci_priv);
+	cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 
 recovery:
 	cnss_schedule_recovery(&pci_priv->pci_dev->dev,
@@ -7624,6 +7646,7 @@ retry:
 	cnss_mhi_debug_reg_dump(pci_priv);
 	cnss_pci_bhi_debug_reg_dump(pci_priv);
 	cnss_pci_soc_scratch_reg_dump(pci_priv);
+	cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 
 	if (!cnss_pci_assert_host_sol(pci_priv))
 		return 0;
@@ -8294,6 +8317,7 @@ static void cnss_dev_rddm_timeout_hdlr(struct timer_list *t)
 		cnss_mhi_debug_reg_dump(pci_priv);
 		cnss_pci_bhi_debug_reg_dump(pci_priv);
 		cnss_pci_soc_scratch_reg_dump(pci_priv);
+		cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
 				       CNSS_REASON_TIMEOUT);
 		return;
@@ -8319,6 +8343,7 @@ static void cnss_dev_rddm_timeout_hdlr(struct timer_list *t)
 		cnss_mhi_debug_reg_dump(pci_priv);
 		cnss_pci_bhi_debug_reg_dump(pci_priv);
 		cnss_pci_soc_scratch_reg_dump(pci_priv);
+		cnss_pci_soc_reset_cause_reg_dump(pci_priv);
 
 		if (!cnss_pci_assert_host_sol(pci_priv))
 			return;
@@ -8504,6 +8529,10 @@ static int cnss_mhi_bw_scale(struct mhi_controller *mhi_ctrl,
 
 	pci_priv->def_link_speed = link_info->target_link_speed;
 	pci_priv->def_link_width = link_info->target_link_width;
+	/* Keep cur_link_speed in sync too; def_ and cur_ could converge
+	 * into a single field later, but are tracked separately for now.
+	 */
+	pci_priv->cur_link_speed = link_info->target_link_speed;
 
 	return 0;
 }
@@ -9625,6 +9654,35 @@ void cnss_pci_deinit(struct cnss_plat_data *plat_priv)
 	}
 }
 
+#if (KERNEL_VERSION(7, 1, 0) <= LINUX_VERSION_CODE)
+/*
+ * struct image_info's mhi_buf became a flexible array member upstream in
+ * kernel 7.1.0, which is always embedded in the struct allocation and can
+ * never be NULL, so only the entries count is worth validating here.
+ */
+static bool cnss_pci_rddm_image_invalid(struct image_info *rddm_image)
+{
+	if (rddm_image->entries <= 1) {
+		cnss_pr_err("Invalid RDDM image: entries=%d\n",
+			    rddm_image->entries);
+		return true;
+	}
+
+	return false;
+}
+#else
+static bool cnss_pci_rddm_image_invalid(struct image_info *rddm_image)
+{
+	if (rddm_image->entries <= 1 || !rddm_image->mhi_buf) {
+		cnss_pr_err("Invalid RDDM image: entries=%d, mhi_buf=%pK\n",
+			    rddm_image->entries, rddm_image->mhi_buf);
+		return true;
+	}
+
+	return false;
+}
+#endif
+
 u8 **cnss_pci_collect_rddm_seg_info(struct cnss_pci_data *pci_priv,
 				    u32 *rddm_entries,
 				    u32 *rddm_seg_len)
@@ -9652,11 +9710,8 @@ u8 **cnss_pci_collect_rddm_seg_info(struct cnss_pci_data *pci_priv,
 	}
 
 	/* Validate RDDM image entries and buffer */
-	if (rddm_image->entries <= 1 || !rddm_image->mhi_buf) {
-		cnss_pr_err("Invalid RDDM image: entries=%d, mhi_buf=%pK\n",
-			    rddm_image->entries, rddm_image->mhi_buf);
+	if (cnss_pci_rddm_image_invalid(rddm_image))
 		return NULL;
-	}
 
 	/* Allocate array to hold segment pointers */
 	seg_array = vzalloc(sizeof(u8 *) * (rddm_image->entries - 1));

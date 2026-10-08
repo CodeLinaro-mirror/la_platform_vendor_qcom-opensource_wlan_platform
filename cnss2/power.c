@@ -104,6 +104,7 @@ static struct cnss_clk_cfg cnss_clk_list[] = {
 #define CNSS_IR_DROP_SLEEP_DEFAULT 10
 #define CNSS_IR_DROP_SLEEP (plat_priv->sleep_voltage_drop_adjustment)
 #define VREG_NOTFOUND 1
+#define AON_REG_SLEEP_VOLTAGE 780
 
 /**
  * enum cnss_aop_vreg_param: Voltage regulator TCS param
@@ -1642,9 +1643,9 @@ out:
 	return ret;
 }
 
-static int cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
+static void cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
 {
-	int ret = 0;
+	int ret;
 
 	if (plat_priv->device_id == FIG_DEVICE_ID ||
 	    plat_priv->device_id == PEACH_DEVICE_ID ||
@@ -1670,15 +1671,11 @@ static int cnss_power_off_device_host(struct cnss_plat_data *plat_priv)
 	cnss_select_pinctrl_state(plat_priv, false);
 	cnss_clk_off(plat_priv, &plat_priv->clk_list);
 	cnss_vreg_off_type(plat_priv, CNSS_VREG_PRIM);
-
-	return ret;
 }
 
 
 void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 {
-	int ret = 0;
-
 	if (!plat_priv->powered_on) {
 		cnss_pr_dbg("Already powered down");
 		return;
@@ -1692,9 +1689,7 @@ void cnss_power_off_device(struct cnss_plat_data *plat_priv)
 		cnss_fw_managed_power_gpio(plat_priv, false);
 		cnss_fw_managed_power_regulator(plat_priv, false);
 	} else if (plat_priv->pwr_ctrl_mode == CNSS_POWER_CTRL_HOST) {
-		ret = cnss_power_off_device_host(plat_priv);
-		if (ret)
-			return;
+		cnss_power_off_device_host(plat_priv);
 	}
 
 	plat_priv->powered_on = false;
@@ -2499,14 +2494,14 @@ int cnss_ol_cpr_cfg_ext_setup(struct cnss_plat_data *plat_priv,
 				u32 dwnval = plat_vreg_param[i].sleep_volt;
 
 				/* For regulator mapped to WLMX rail, set
-				 * sleep_volt equal to wake_volt to maintain
-				 * sufficient retention voltage for chip state
-				 * during DRV sleep.
+				 * sleep_volt equal to wake_volt to 750mV to
+				 * maintain sufficient retention voltage for
+				 * chip state during DRV sleep.
 				 */
 				if (mx_pin_idx >= 0 &&
 				    strcmp(plat_vreg_param[i].vreg,
 					   plat_priv->pmu_vreg_map[mx_pin_idx + 1]) == 0)
-					dwnval = plat_vreg_param[i].wake_volt;
+					dwnval = AON_REG_SLEEP_VOLTAGE;
 
 				ret =
 				cnss_aop_set_vreg_param(plat_priv,
