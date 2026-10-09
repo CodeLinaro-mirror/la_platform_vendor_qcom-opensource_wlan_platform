@@ -102,7 +102,6 @@ int g_sdio_mode;
 #ifdef CONFIG_CNSS_SUPPORT_DUAL_DEV
 #define CNSS_MAX_DEV_NUM		2
 static struct cnss_plat_data *plat_env[CNSS_MAX_DEV_NUM];
-static atomic_t plat_env_count;
 #else
 static struct cnss_plat_data *plat_env;
 #endif
@@ -134,42 +133,48 @@ bool cnss_check_driver_loading_allowed(void)
 }
 
 #ifdef CONFIG_CNSS_SUPPORT_DUAL_DEV
-static void cnss_init_plat_env_count(void)
-{
-	atomic_set(&plat_env_count, 0);
-}
-
-static void cnss_inc_plat_env_count(void)
-{
-	atomic_inc(&plat_env_count);
-}
-
-static void cnss_dec_plat_env_count(void)
-{
-	atomic_dec(&plat_env_count);
-}
-
-static int cnss_get_plat_env_count(void)
-{
-	return atomic_read(&plat_env_count);
-}
-
 int cnss_get_max_plat_env_count(void)
 {
 	return CNSS_MAX_DEV_NUM;
 }
 
-static void cnss_set_plat_priv(struct platform_device *plat_dev,
-			       struct cnss_plat_data *plat_priv)
-{
-	int env_count = cnss_get_plat_env_count();
+static DEFINE_MUTEX(plat_env_lock);
 
-	cnss_pr_dbg("Set plat_priv at %d", env_count);
-	if (plat_priv) {
-		plat_priv->plat_idx = env_count;
-		plat_env[plat_priv->plat_idx] = plat_priv;
-		cnss_inc_plat_env_count();
+/* Find a free slot, allocate plat_priv for plat_dev and publish it in the
+ * slot, all under plat_env_lock so that concurrent probes (async probe)
+ * cannot claim the same slot.
+ */
+static struct cnss_plat_data *
+cnss_plat_priv_get(struct platform_device *plat_dev)
+{
+	struct cnss_plat_data *plat_priv;
+	int i;
+
+	mutex_lock(&plat_env_lock);
+	for (i = 0; i < CNSS_MAX_DEV_NUM; i++) {
+		if (!plat_env[i])
+			break;
 	}
+
+	if (i == CNSS_MAX_DEV_NUM) {
+		mutex_unlock(&plat_env_lock);
+		cnss_pr_err("ERROR: No space to store plat_priv\n");
+		return ERR_PTR(-ENOMEM);
+	}
+
+	plat_priv = devm_kzalloc(&plat_dev->dev, sizeof(*plat_priv),
+				 GFP_KERNEL);
+	if (!plat_priv) {
+		mutex_unlock(&plat_env_lock);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	cnss_pr_dbg("Set plat_priv at %d", i);
+	plat_priv->plat_idx = i;
+	plat_env[i] = plat_priv;
+	mutex_unlock(&plat_env_lock);
+
+	return plat_priv;
 }
 
 struct cnss_plat_data *cnss_get_plat_priv(struct platform_device
@@ -204,11 +209,19 @@ struct cnss_plat_data *cnss_get_first_plat_priv(void)
 	return NULL;
 }
 
-static void cnss_clear_plat_priv(struct cnss_plat_data *plat_priv)
+static void cnss_plat_priv_put(struct cnss_plat_data *plat_priv)
 {
-	cnss_pr_dbg("Clear plat_priv at %d", plat_priv->plat_idx);
-	plat_env[plat_priv->plat_idx] = NULL;
-	cnss_dec_plat_env_count();
+	int idx = plat_priv->plat_idx;
+
+	cnss_pr_dbg("Put plat_priv at %d", idx);
+
+	/* plat_priv only reaches here after cnss_plat_priv_get() took plat_idx,
+	 * so the slot is ours. Clear the pointer only if it is still ours.
+	 */
+	mutex_lock(&plat_env_lock);
+	if (plat_env[idx] == plat_priv)
+		plat_env[idx] = NULL;
+	mutex_unlock(&plat_env_lock);
 }
 
 static int cnss_set_device_name(struct cnss_plat_data *plat_priv)
@@ -217,18 +230,6 @@ static int cnss_set_device_name(struct cnss_plat_data *plat_priv)
 		 "wlan_%d", plat_priv->plat_idx);
 
 	return 0;
-}
-
-static int cnss_plat_env_available(void)
-{
-	int ret = 0;
-	int env_count = cnss_get_plat_env_count();
-
-	if (env_count >= CNSS_MAX_DEV_NUM) {
-		cnss_pr_err("ERROR: No space to store plat_priv\n");
-		ret = -ENOMEM;
-	}
-	return ret;
 }
 
 struct cnss_plat_data *cnss_get_plat_env(int index)
@@ -292,14 +293,18 @@ cnss_get_pld_bus_ops_name(struct cnss_plat_data *plat_priv)
 }
 
 #else
-static void cnss_init_plat_env_count(void)
+static struct cnss_plat_data *
+cnss_plat_priv_get(struct platform_device *plat_dev)
 {
-}
+	struct cnss_plat_data *plat_priv;
 
-static void cnss_set_plat_priv(struct platform_device *plat_dev,
-			       struct cnss_plat_data *plat_priv)
-{
+	plat_priv = devm_kzalloc(&plat_dev->dev, sizeof(*plat_priv),
+				 GFP_KERNEL);
+	if (!plat_priv)
+		return ERR_PTR(-ENOMEM);
+
 	plat_env = plat_priv;
+	return plat_priv;
 }
 
 struct cnss_plat_data *cnss_get_plat_priv(struct platform_device *plat_dev)
@@ -312,7 +317,7 @@ struct cnss_plat_data *cnss_get_first_plat_priv(void)
 	return plat_env;
 }
 
-static void cnss_clear_plat_priv(struct cnss_plat_data *plat_priv)
+static void cnss_plat_priv_put(struct cnss_plat_data *plat_priv)
 {
 	plat_env = NULL;
 }
@@ -321,11 +326,6 @@ static int cnss_set_device_name(struct cnss_plat_data *plat_priv)
 {
 	snprintf(plat_priv->device_name, sizeof(plat_priv->device_name),
 		 "wlan");
-	return 0;
-}
-
-static int cnss_plat_env_available(void)
-{
 	return 0;
 }
 
@@ -5902,14 +5902,9 @@ static int cnss_probe(struct platform_device *plat_dev)
 		goto out;
 	}
 
-	ret = cnss_plat_env_available();
-	if (ret)
-		goto out;
-
-	plat_priv = devm_kzalloc(&plat_dev->dev, sizeof(*plat_priv),
-				 GFP_KERNEL);
-	if (!plat_priv) {
-		ret = -ENOMEM;
+	plat_priv = cnss_plat_priv_get(plat_dev);
+	if (IS_ERR(plat_priv)) {
+		ret = PTR_ERR(plat_priv);
 		goto out;
 	}
 
@@ -5951,7 +5946,6 @@ static int cnss_probe(struct platform_device *plat_dev)
 
 	plat_priv->bus_type = cnss_get_bus_type(plat_priv);
 	plat_priv->use_nv_mac = cnss_use_nv_mac(plat_priv);
-	cnss_set_plat_priv(plat_dev, plat_priv);
 	cnss_set_device_name(plat_priv);
 	platform_set_drvdata(plat_dev, plat_priv);
 	INIT_LIST_HEAD(&plat_priv->vreg_list);
@@ -6055,7 +6049,7 @@ reset_ctx:
 	cnss_aop_interface_deinit(plat_priv);
 	platform_set_drvdata(plat_dev, NULL);
 reset_plat_dev:
-	cnss_clear_plat_priv(plat_priv);
+	cnss_plat_priv_put(plat_priv);
 out:
 	return ret;
 }
@@ -6103,7 +6097,7 @@ static void cnss_remove(struct platform_device *plat_dev)
 	cnss_aop_interface_deinit(plat_priv);
 	cnss_deinitialize_mem_pool();
 	platform_set_drvdata(plat_dev, NULL);
-	cnss_clear_plat_priv(plat_priv);
+	cnss_plat_priv_put(plat_priv);
 
 out:
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
@@ -6227,7 +6221,6 @@ static int __init cnss_initialize(void)
 	if (ret < 0)
 		cnss_pr_err("CNSS genl init failed %d\n", ret);
 
-	cnss_init_plat_env_count();
 	return ret;
 }
 
