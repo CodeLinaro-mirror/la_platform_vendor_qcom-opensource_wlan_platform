@@ -75,6 +75,7 @@
 
 #define CNSS_DEVICE_NAME_SIZE		16
 #define QRTR_NODE_FW_ID_BASE		7
+#define QRTR_NODE_KIWI_FW_ID_BASE	1
 
 #define POWER_ON_RETRY_DELAY_MS         500
 #define WLFW_MAX_HANG_EVENT_DATA_SIZE   384
@@ -670,6 +671,7 @@ struct cnss_plat_data {
 	struct wlchip_serial_id_v01 serial_id;
 	u32 cpumask_for_rx_intrs;
 	u32 cpumask_for_tx_comp_intrs;
+	bool napi_ipi_redirect_enable;
 	bool ipa_shared_cb_enable;
 	struct task_struct *cnss_event_work_task;
 	u64 pcie_time_sync_offset;

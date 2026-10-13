@@ -45,6 +45,7 @@ int cnss_bus_call_driver_probe(struct cnss_plat_data *plat_priv);
 int cnss_bus_call_driver_remove(struct cnss_plat_data *plat_priv);
 int cnss_bus_dev_powerup(struct cnss_plat_data *plat_priv);
 int cnss_bus_dev_shutdown(struct cnss_plat_data *plat_priv);
+bool cnss_bus_is_reboot_dev_shutdown_required(struct cnss_plat_data *plat_priv);
 int cnss_bus_dev_crash_shutdown(struct cnss_plat_data *plat_priv);
 int cnss_bus_dev_ramdump(struct cnss_plat_data *plat_priv);
 int cnss_bus_register_driver_hdlr(struct cnss_plat_data *plat_priv, void *data);
