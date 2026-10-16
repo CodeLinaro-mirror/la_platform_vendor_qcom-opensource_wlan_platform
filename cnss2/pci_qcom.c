@@ -684,6 +684,7 @@ static int
 cnss_pci_smmu_dev_fault_handler(struct iommu_fault *fault,  void *data)
 {
 	struct cnss_pci_data *pci_priv = data;
+	struct cnss_plat_data *plat_priv;
 
 	cnss_fatal_err("SMMU fault happened with IOVA 0x%llx\n",
 		       fault->event.addr);
@@ -691,6 +692,15 @@ cnss_pci_smmu_dev_fault_handler(struct iommu_fault *fault,  void *data)
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
+	}
+
+	plat_priv = pci_priv->plat_priv;
+	if (plat_priv &&
+	    (test_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state) ||
+	     test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state))) {
+		cnss_pr_err("SMMU fault during unload/idle shutdown, skip forced FW assert\n");
+		/* IOMMU driver requires -ENOSYS to print debug info. */
+		return -ENOSYS;
 	}
 
 	pci_priv->is_smmu_fault = true;
@@ -716,12 +726,22 @@ static int cnss_pci_smmu_fault_handler(struct iommu_domain *domain,
 				       int flags, void *handler_token)
 {
 	struct cnss_pci_data *pci_priv = handler_token;
+	struct cnss_plat_data *plat_priv;
 
 	cnss_fatal_err("SMMU fault happened with IOVA 0x%lx\n", iova);
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
+	}
+
+	plat_priv = pci_priv->plat_priv;
+	if (plat_priv &&
+	    (test_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state) ||
+	     test_bit(CNSS_DRIVER_IDLE_SHUTDOWN, &plat_priv->driver_state))) {
+		cnss_pr_err("SMMU fault during unload/idle shutdown, skip forced FW assert\n");
+		/* IOMMU driver requires -ENOSYS to print debug info. */
+		return -ENOSYS;
 	}
 
 	pci_priv->is_smmu_fault = true;
