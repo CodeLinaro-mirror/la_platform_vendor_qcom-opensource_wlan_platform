@@ -9,7 +9,11 @@
 
 #include <linux/types.h>
 
-#define WCNSS_PRE_ALLOC_GET_THRESHOLD (8*1024)
+/* Threshold for pre-alloc memory -
+ *    1. For 4KB page size system, only allowed allocation > order-1
+ *    2. For 8KB+ page size system, only allowed allocation > order-0
+ */
+#define WCNSS_PRE_ALLOC_GET_THRESHOLD max(8 * 1024UL, PAGE_SIZE)
 #define WCNSS_PRE_SKB_ALLOC_GET_THRESHOLD (16*1024)
 
 extern void wcnss_check_pool_lists(void);

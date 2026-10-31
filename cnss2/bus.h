@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2026 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CNSS_BUS_H
@@ -57,6 +57,8 @@ int cnss_bus_update_status(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_status status);
 int cnss_bus_update_uevent(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_status status, void *data);
+int cnss_bus_config_io_coherency(struct cnss_plat_data *plat_priv,
+				 bool reset);
 int cnss_bus_is_device_down(struct cnss_plat_data *plat_priv);
 int cnss_bus_shutdown_cleanup(struct cnss_plat_data *plat_priv);
 int cnss_bus_check_link_status(struct cnss_plat_data *plat_priv);
@@ -89,5 +91,11 @@ void cnss_bus_notify_mhi_error(struct cnss_plat_data *plat_priv);
 u8 **cnss_bus_collect_rddm_seg_info(struct cnss_plat_data *plat_priv,
 				    u32 *rddm_entries,
 				    u32 *rddm_seg_len);
+int cnss_bus_dsp_link_control(struct cnss_plat_data *plat_priv,
+			      bool link_enable);
+int cnss_bus_set_dsp_link_status(struct cnss_plat_data *plat_priv,
+				 bool link_enable);
+int cnss_bus_get_dsp_link_status(struct cnss_plat_data *plat_priv);
+int cnss_bus_dsp_link_enable(struct cnss_plat_data *plat_priv);
 int cnss_bus_lookup_board_id(struct cnss_plat_data *plat_priv, u32 *board_id);
 #endif /* _CNSS_BUS_H */

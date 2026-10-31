@@ -2293,7 +2293,7 @@ out:
 	} else {
 		/* WLAN mode request failed — trigger RDDM to collect FW dump instead of BUG() */
 		cnss_pr_err("WLAN mode request failed, trigger FW assert for dump collection\n");
-		cnss_force_fw_assert(&plat_priv->plat_dev->dev);
+		cnss_bus_force_fw_assert_hdlr(plat_priv);
 	}
 	kfree(req);
 	kfree(resp);

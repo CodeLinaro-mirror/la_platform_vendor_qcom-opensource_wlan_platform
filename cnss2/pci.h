@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _CNSS_PCI_H
@@ -44,9 +44,19 @@
 #define LINK_TRAINING_RETRY_DELAY_MS		500
 #define MSI_USERS			4
 
+#define BOOT_DEBUG_TIMEOUT_MS			7000
+
 #define CNSS_MHI_IN_MISSION_MODE(ee) (ee == MHI_EE_AMSS || \
 				      ee == MHI_EE_WFW || \
 				      ee == MHI_EE_FP)
+
+#define PCI_DSP_LINK_ENABLE                     1
+#define PCI_DSP_LINK_DISABLE                    0
+#ifdef CONFIG_PCIE_SWITCH_SUPPORT
+#define DSP_LINK_ENABLE_DELAY_TIME_US_MIN       (25000)
+#define DSP_LINK_ENABLE_DELAY_TIME_US_MAX       (25100)
+#define DSP_LINK_ENABLE_RETRY_COUNT_MAX         (3)
+#endif
 
 enum cnss_mhi_state {
 	CNSS_MHI_INIT,
@@ -221,6 +231,9 @@ struct cnss_pci_data {
 	bool is_smmu_fault;
 	unsigned long long smmu_fault_timestamp[SMMU_CB_MAX];
 	atomic_t id_mismatch_cnt;
+#ifdef CONFIG_PCIE_SWITCH_SUPPORT
+	bool pci_dsp_link_status;
+#endif
 };
 
 /**
@@ -396,6 +409,8 @@ int cnss_pci_update_status(struct cnss_pci_data *pci_priv,
 			   enum cnss_driver_status status);
 int cnss_pci_call_driver_uevent(struct cnss_pci_data *pci_priv,
 				enum cnss_driver_status status, void *data);
+int cnss_pci_config_io_coherency(struct cnss_pci_data *pci_priv,
+				 bool reset);
 int cnss_pcie_is_device_down(struct cnss_pci_data *pci_priv);
 int cnss_pci_shutdown_cleanup(struct cnss_pci_data *pci_priv);
 int cnss_pci_suspend_bus(struct cnss_pci_data *pci_priv);

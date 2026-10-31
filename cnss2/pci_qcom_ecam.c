@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. */
 
 #include "pci_platform.h"
 #include "debug.h"
@@ -46,6 +46,17 @@ int _cnss_pci_enumerate(struct cnss_plat_data *plat_priv, u32 rc_num)
 }
 
 bool cnss_pci_is_sync_probe(void)
+{
+	return false;
+}
+
+const char *cnss_pci_mhi_notify_status_extra_to_str(enum mhi_callback status)
+{
+	return NULL;
+}
+
+bool cnss_pci_mhi_notify_status_extra(struct cnss_pci_data *pci_priv,
+				      enum mhi_callback reason)
 {
 	return false;
 }
@@ -804,4 +815,26 @@ int cnss_pci_dev_warm_reset(struct cnss_pci_data *pci_priv, bool power_on)
 	cnss_pci_soc_global_reset(pci_priv);
 	cnss_mhi_set_mhictrl_reset(pci_priv);
 	return 0;
+}
+
+int cnss_pci_dsp_link_control(struct cnss_pci_data *pci_priv,
+					      bool link_enable)
+{
+		return -EOPNOTSUPP;
+}
+
+int cnss_pci_set_dsp_link_status(struct cnss_pci_data *pci_priv,
+						 bool link_enable)
+{
+		return -EOPNOTSUPP;
+}
+
+int cnss_pci_get_dsp_link_status(struct cnss_pci_data *pci_priv)
+{
+		return -EOPNOTSUPP;
+}
+
+int cnss_pci_dsp_link_enable(struct cnss_pci_data *pci_priv)
+{
+		return -EOPNOTSUPP;
 }

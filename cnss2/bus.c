@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2026 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "bus.h"
 #include "debug.h"
 #include "pci.h"
+#include "pci_platform.h"
 
 enum cnss_dev_bus_type cnss_get_dev_bus_type(struct device *dev)
 {
@@ -146,6 +147,11 @@ int cnss_bus_load_tme_patch(struct cnss_plat_data *plat_priv)
 	if (!plat_priv)
 		return -ENODEV;
 
+	if (test_bit(NO_TME_PATCH, &plat_priv->ctrl_params.quirks)) {
+		cnss_pr_dbg("TME patch loading disabled by quirk\n");
+		return -EPERM;
+	}
+
 	switch (plat_priv->bus_type) {
 	case CNSS_BUS_PCI:
 		return cnss_pci_load_tme_patch(plat_priv->bus_priv);
@@ -160,6 +166,11 @@ int cnss_bus_load_sku_license(struct cnss_plat_data *plat_priv)
 {
 	if (!plat_priv)
 		return -ENODEV;
+
+	if (test_bit(NO_SKU_LICENSE, &plat_priv->ctrl_params.quirks)) {
+		cnss_pr_dbg("SKU license loading disabled by quirk\n");
+		return -EPERM;
+	}
 
 	switch (plat_priv->bus_type) {
 	case CNSS_BUS_PCI:
@@ -176,6 +187,11 @@ int cnss_bus_load_tme_opt_file(struct cnss_plat_data *plat_priv,
 {
 	if (!plat_priv)
 		return -ENODEV;
+
+	if (test_bit(NO_TME_OPT_FILES, &plat_priv->ctrl_params.quirks)) {
+		cnss_pr_dbg("TME opt file loading disabled by quirk\n");
+		return -EPERM;
+	}
 
 	switch (plat_priv->bus_type) {
 	case CNSS_BUS_PCI:
@@ -605,6 +621,23 @@ int cnss_bus_update_uevent(struct cnss_plat_data *plat_priv,
 	}
 }
 
+int cnss_bus_config_io_coherency(struct cnss_plat_data *plat_priv,
+				 bool reset)
+{
+	if (!plat_priv)
+		return -ENODEV;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		return cnss_pci_config_io_coherency(plat_priv->bus_priv,
+						    reset);
+	default:
+		cnss_pr_err("Unsupported bus type: %d\n",
+			    plat_priv->bus_type);
+		return -EINVAL;
+	}
+}
+
 int cnss_bus_is_device_down(struct cnss_plat_data *plat_priv)
 {
 	if (!plat_priv)
@@ -770,6 +803,68 @@ bool cnss_bus_is_smmu_s1_enabled(struct cnss_plat_data *plat_priv)
 		cnss_pr_err("Unsupported bus type: %d\n",
 			    plat_priv->bus_type);
 		return false;
+	}
+}
+
+int cnss_bus_dsp_link_control(struct cnss_plat_data *plat_priv,
+			      bool link_enable)
+{
+	if (!plat_priv || plat_priv->pcie_switch_type != PCIE_SWITCH_NTN3)
+		return -ENODEV;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		return cnss_pci_dsp_link_control(plat_priv->bus_priv, link_enable);
+	default:
+		cnss_pr_err("Unsupported bus type: %d\n",
+			    plat_priv->bus_type);
+		return -EINVAL;
+	}
+}
+
+int cnss_bus_set_dsp_link_status(struct cnss_plat_data *plat_priv,
+				 bool link_enable)
+{
+	if (!plat_priv || plat_priv->pcie_switch_type != PCIE_SWITCH_NTN3)
+		return -ENODEV;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		return cnss_pci_set_dsp_link_status(plat_priv->bus_priv, link_enable);
+	default:
+		cnss_pr_err("Unsupported bus type: %d\n",
+			    plat_priv->bus_type);
+		return -EINVAL;
+	}
+}
+
+int cnss_bus_get_dsp_link_status(struct cnss_plat_data *plat_priv)
+{
+	if (!plat_priv || plat_priv->pcie_switch_type != PCIE_SWITCH_NTN3)
+		return -ENODEV;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		return cnss_pci_get_dsp_link_status(plat_priv->bus_priv);
+	default:
+		cnss_pr_err("Unsupported bus type: %d\n",
+			    plat_priv->bus_type);
+		return -EINVAL;
+	}
+}
+
+int cnss_bus_dsp_link_enable(struct cnss_plat_data *plat_priv)
+{
+	if (!plat_priv || plat_priv->pcie_switch_type != PCIE_SWITCH_NTN3)
+		return -ENODEV;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		return cnss_pci_dsp_link_enable(plat_priv->bus_priv);
+	default:
+		cnss_pr_err("Unsupported bus type: %d\n",
+			    plat_priv->bus_type);
+		return -EINVAL;
 	}
 }
 
