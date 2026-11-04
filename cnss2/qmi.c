@@ -716,7 +716,7 @@ static int cnss_get_bdf_file_name(struct cnss_plat_data *plat_priv,
 	switch (bdf_type) {
 	case CNSS_BDF_ELF:
 		if (plat_priv->bdfname_dt[0] != 0) {
-			snprintf(filename_tmp, filename_len,
+			snprintf(filename_tmp, filename_len, "%s",
 				plat_priv->bdfname_dt);
 			cnss_pr_dbg("filename_tmp:%s len:%d\n",
 				    filename_tmp, filename_len);
@@ -746,7 +746,7 @@ static int cnss_get_bdf_file_name(struct cnss_plat_data *plat_priv,
 		break;
 	case CNSS_BDF_BIN:
 		if (plat_priv->bdfname_dt[0] != 0) {
-			snprintf(filename_tmp, filename_len,
+			snprintf(filename_tmp, filename_len, "%s",
 				plat_priv->bdfname_dt);
 			cnss_pr_dbg("filename_tmp:%s len:%d\n",
 				    filename_tmp, filename_len);
@@ -828,8 +828,8 @@ int cnss_wlfw_bdf_dnld_send_sync(struct cnss_plat_data *plat_priv,
 		ret = cnss_request_firmware_direct(plat_priv, &fw_entry,
 						   filename);
 	else
-		ret = firmware_request_nowarn(&fw_entry, filename,
-					      &plat_priv->plat_dev->dev);
+		ret = cnss_request_firmware_update_timer(plat_priv, &fw_entry, filename);
+
 
 	if (ret) {
 		cnss_pr_err("Failed to load %s: %s, ret: %d\n",

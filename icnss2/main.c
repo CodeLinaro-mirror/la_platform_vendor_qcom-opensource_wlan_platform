@@ -1775,10 +1775,8 @@ static void icnss_collect_host_dump_info(struct icnss_priv *priv)
 	if (priv->ops && priv->ops->collect_driver_dump) {
 		ret = priv->ops->collect_driver_dump(dev, ssr_entry,
 						    &num_entries_loaded);
-		if (ret) {
-			kfree(ssr_entry);
+		if (ret)
 			goto out;
-		}
 
 		for (x = 0; x < num_entries_loaded; x++) {
 			icnss_pr_vdbg("Idx:%d, ptr: %p, name: %s, size: %zu\n",
